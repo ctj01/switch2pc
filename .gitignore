@@ -1,0 +1,14 @@
+build/
+*.o
+*.elf
+*.bin
+*.nso
+*.wad
+.cache/
+compile_commands.json
+# fetched, not ours: doomgeneric sources (see scripts/build_doom.sh)
+third_party/
+
+# game data: fetched by the build scripts' instructions, never redistributed here
+examples/*/romfs/
+examples/*/build/

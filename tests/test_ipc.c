@@ -1,0 +1,219 @@
+/*
+ * IPC transport through the dispatcher: sm, lm, domains, TIPC. Uses the same
+ * header-only client the kernel_test module uses. ARM64 only.
+ */
+
+#include <stdlib.h>
+#include <string.h>
+
+#include "common/hos_log.h"
+#include "hos_cpu.h"
+#include "ipc_client.h"
+#include "test.h"
+
+static int g_inited;
+
+static void init_once(void) {
+    if (g_inited) {
+        return;
+    }
+    g_inited = 1;
+    hos_log_set_level(HOS_LOG_WARN);
+    static uint8_t fake_image[0x2000] __attribute__((aligned(0x1000)));
+    hos_cpu_params p = {
+        .num_modules = 1,
+        .modules = {{.image_base = (uint64_t)fake_image,
+                     .image_size = sizeof(fake_image),
+                     .text_size = 0x1000,
+                     .name = "test_ipc"}},
+    };
+    if (HOS_FAILED(hos_cpu_init(&p)) || !hos_cpu_adopt_current_thread()) {
+        fprintf(stderr, "init failed\n");
+        exit(1);
+    }
+}
+
+static hos_svc_regs call(uint32_t id, uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3) {
+    hos_svc_regs r = {{x0, x1, x2, x3, 0, 0, 0, 0}};
+    hos_svc_dispatch(id, &r);
+    return r;
+}
+
+static uint32_t connect_sm(void) {
+    hos_svc_regs r = call(0x1F, 0, (uint64_t) "sm:", 0, 0);
+    return r.x[0] == 0 ? (uint32_t)r.x[1] : 0;
+}
+
+static uint32_t ipc_call(uint32_t session, const ipc_request *req, ipc_response *resp) {
+    uint32_t *tls = hos_cpu_current_tls();
+    ipc_write_request(tls, req);
+    hos_svc_regs r = call(0x21, session, 0, 0, 0);
+    if (r.x[0] != 0) {
+        return (uint32_t)r.x[0];
+    }
+    if (ipc_parse_response(tls, resp, req->domain, req->type >= 16) != 0) {
+        return 0xFFFFFFFFu;
+    }
+    return resp->result;
+}
+
+static uint64_t service_name(const char *s) {
+    uint64_t v = 0;
+    for (int i = 0; i < 8 && s[i]; i++) {
+        v |= (uint64_t)(uint8_t)s[i] << (8 * i);
+    }
+    return v;
+}
+
+TEST(ipc_connect_named_port) {
+    init_once();
+    uint32_t sm = connect_sm();
+    ASSERT_TRUE(sm != 0);
+    hos_svc_regs r = call(0x1F, 0, (uint64_t) "nope", 0, 0);
+    ASSERT_EQ(r.x[0], HOS_KERNEL_NOT_FOUND);
+    r = call(0x16, sm, 0, 0, 0);
+    ASSERT_EQ(r.x[0], HOS_RESULT_SUCCESS);
+    r = call(0x21, sm, 0, 0, 0);
+    ASSERT_EQ(r.x[0], HOS_KERNEL_INVALID_HANDLE);
+}
+
+TEST(ipc_sm_get_service_cmif_and_tipc) {
+    init_once();
+    uint32_t sm = connect_sm();
+    ASSERT_TRUE(sm != 0);
+
+    ipc_response resp;
+    ipc_request req = {.type = IPC_TYPE_REQUEST, .cmd = 0, .send_pid = 1};
+    ASSERT_EQ(ipc_call(sm, &req, &resp), 0);
+
+    uint64_t name = service_name("lm");
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 1, .data = &name, .data_size = 8};
+    ASSERT_EQ(ipc_call(sm, &req, &resp), 0);
+    ASSERT_EQ(resp.num_move, 1);
+    ASSERT_TRUE(resp.move_handles[0] != 0);
+    ASSERT_EQ(call(0x16, resp.move_handles[0], 0, 0, 0).x[0], 0);
+
+    name = service_name("absent");
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 1, .data = &name, .data_size = 8};
+    ASSERT_EQ(ipc_call(sm, &req, &resp), HOS_RESULT_MAKE(21, 8));
+
+    name = service_name("lm");
+    req = (ipc_request){.type = IPC_TYPE_TIPC(1), .data = &name, .data_size = 8};
+    ASSERT_EQ(ipc_call(sm, &req, &resp), 0);
+    ASSERT_EQ(resp.num_move, 1);
+    ASSERT_EQ(call(0x16, resp.move_handles[0], 0, 0, 0).x[0], 0);
+
+    ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
+}
+
+static size_t make_log_packet(uint8_t *out, const char *text) {
+    size_t n = strlen(text);
+    memset(out, 0, 0x18);
+    out[0x10] = 3;
+    out[0x12] = 1;
+    uint32_t payload = (uint32_t)(2 + n);
+    memcpy(out + 0x14, &payload, 4);
+    out[0x18] = 2;
+    out[0x19] = (uint8_t)n;
+    memcpy(out + 0x1A, text, n);
+    return 0x1A + n;
+}
+
+TEST(ipc_lm_session_and_domain) {
+    init_once();
+    uint32_t sm = connect_sm();
+    ipc_response resp;
+    uint64_t name = service_name("lm");
+    ipc_request req = {.type = IPC_TYPE_REQUEST, .cmd = 1, .data = &name, .data_size = 8};
+    ASSERT_EQ(ipc_call(sm, &req, &resp), 0);
+    uint32_t lm = resp.move_handles[0];
+
+    /* plain session */
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 0, .send_pid = 1};
+    ASSERT_EQ(ipc_call(lm, &req, &resp), 0);
+    ASSERT_EQ(resp.num_move, 1);
+    uint32_t logger = resp.move_handles[0];
+
+    /* HIPC descriptors carry 39-bit addresses. Under qemu-user this test binary
+     * and its stack live above that, so the packet goes in the HOS heap. */
+    hos_svc_regs hr = call(0x01, 0, 0x200000, 0, 0);
+    ASSERT_EQ(hr.x[0], 0);
+    uint8_t *packet = (uint8_t *)hr.x[1];
+    size_t len = make_log_packet(packet, "from test_ipc");
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 0, .a_buf = packet, .a_size = len};
+    ASSERT_EQ(ipc_call(logger, &req, &resp), 0);
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 99};
+    ASSERT_EQ(ipc_call(logger, &req, &resp), HOS_KERNEL_NOT_IMPLEMENTED);
+    ASSERT_EQ(call(0x16, logger, 0, 0, 0).x[0], 0);
+
+    /* control: pointer buffer size */
+    req = (ipc_request){.type = IPC_TYPE_CONTROL, .cmd = 3};
+    ASSERT_EQ(ipc_call(lm, &req, &resp), 0);
+    ASSERT_EQ(resp.data[0], 0x8000);
+
+    /* domain */
+    req = (ipc_request){.type = IPC_TYPE_CONTROL, .cmd = 0};
+    ASSERT_EQ(ipc_call(lm, &req, &resp), 0);
+    ASSERT_EQ(resp.data[0], 1);
+    req = (ipc_request){.type = IPC_TYPE_CONTROL, .cmd = 0};
+    ASSERT_EQ(ipc_call(lm, &req, &resp), HOS_KERNEL_INVALID_STATE);
+
+    req = (ipc_request){.type = IPC_TYPE_REQUEST,
+                        .cmd = 0,
+                        .send_pid = 1,
+                        .domain = 1,
+                        .domain_cmd = 1,
+                        .object_id = 1};
+    ASSERT_EQ(ipc_call(lm, &req, &resp), 0);
+    ASSERT_EQ(resp.num_objects, 1);
+    ASSERT_EQ(resp.object_ids[0], 2);
+    ASSERT_EQ(resp.num_move, 0);
+
+    len = make_log_packet(packet, "from test_ipc (domain)");
+    req = (ipc_request){.type = IPC_TYPE_REQUEST,
+                        .cmd = 0,
+                        .a_buf = packet,
+                        .a_size = len,
+                        .domain = 1,
+                        .domain_cmd = 1,
+                        .object_id = 2};
+    ASSERT_EQ(ipc_call(lm, &req, &resp), 0);
+
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .domain = 1, .domain_cmd = 1, .object_id = 7};
+    ASSERT_EQ(ipc_call(lm, &req, &resp), HOS_KERNEL_NOT_FOUND);
+
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .domain = 1, .domain_cmd = 2, .object_id = 2};
+    ASSERT_EQ(ipc_call(lm, &req, &resp), 0);
+
+    /* CopyFromCurrentDomain hands out a session for the root object */
+    uint32_t id = 1;
+    req = (ipc_request){.type = IPC_TYPE_CONTROL, .cmd = 1, .data = &id, .data_size = 4};
+    ASSERT_EQ(ipc_call(lm, &req, &resp), 0);
+    ASSERT_EQ(resp.num_move, 1);
+    ASSERT_EQ(call(0x16, resp.move_handles[0], 0, 0, 0).x[0], 0);
+
+    ASSERT_EQ(call(0x16, lm, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
+}
+
+TEST(ipc_malformed_messages) {
+    init_once();
+    uint32_t sm = connect_sm();
+    uint32_t *tls = hos_cpu_current_tls();
+    memset(tls, 0, 0x100);
+    tls[0] = IPC_TYPE_REQUEST | (9u << 20); /* 9 A descriptors: too many */
+    hos_svc_regs r = call(0x21, sm, 0, 0, 0);
+    ASSERT_EQ(r.x[0], HOS_KERNEL_INVALID_COMBINATION);
+
+    memset(tls, 0, 0x100);
+    tls[0] = IPC_TYPE_REQUEST;
+    tls[1] = 8; /* raw data without SFCI */
+    r = call(0x21, sm, 0, 0, 0);
+    ASSERT_EQ(r.x[0], HOS_KERNEL_INVALID_COMBINATION);
+
+    memset(tls, 0, 0x100);
+    tls[0] = IPC_TYPE_CLOSE;
+    r = call(0x21, sm, 0, 0, 0);
+    ASSERT_EQ(r.x[0], HOS_KERNEL_SESSION_CLOSED);
+    ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
+}

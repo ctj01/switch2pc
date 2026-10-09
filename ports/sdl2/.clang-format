@@ -1,0 +1,2 @@
+# Files here are overlaid into SDL and keep SDL's own formatting.
+DisableFormat: true
