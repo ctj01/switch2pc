@@ -522,6 +522,14 @@ hos_result hos_ipc_send_sync(hos_session *s, uint32_t *tls_buf) {
     return r;
 }
 
+void hos_ipc_blocking_begin(void) {
+    pthread_mutex_unlock(&g_lock);
+}
+
+void hos_ipc_blocking_end(void) {
+    pthread_mutex_lock(&g_lock);
+}
+
 /* ---- svc entry points ------------------------------------------------------- */
 
 hos_result hos_ipc_connect_named_port(const char *name, uint32_t *out_handle) {

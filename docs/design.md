@@ -242,6 +242,18 @@ handler keeps a destroyed window from taking the game down with Xlib's
 default exit. The target's libX11 comes from Ubuntu's arm64 ports; the cross
 toolchain file searches the multiarch directory for it.
 
+### Sockets
+
+`bsd:u` maps guest descriptors to host sockets. libnx passes its FreeBSD
+headers' values straight through, so sockaddr (with its length byte), MSG_*,
+SOL_SOCKET/SO_*, IP_* and POLLWR* are translated; two values were found only
+by running libnx against the service: fcntl's O_NONBLOCK arrives as 0x800,
+and errno is expected in Linux numbering (libnx converts it to newlib's), so
+the host errno passes through untouched. A first version translated errno to
+FreeBSD's and libnx turned EAGAIN into EDEADLK. Calls that wait on the
+network use `hos_ipc_blocking_begin/end` to drop the IPC request lock, or one
+thread's `recv` would freeze every other thread's service calls.
+
 ### Input
 
 hid never pushes events; the game polls a shared memory. Each Npad holds

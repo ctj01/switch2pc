@@ -143,6 +143,16 @@ if(S2PC_ARM64)
             FAIL_REGULAR_EXPRESSION "FAIL |fatal|svcBreak Panic")
     endif()
 
+    # libnx sockets: bsd:u over host sockets (TCP and UDP on loopback, poll, O_NONBLOCK).
+    set(libnx_sockets_nso ${CMAKE_SOURCE_DIR}/examples/libnx_sockets/build/sockets.nso)
+    if(EXISTS ${libnx_sockets_nso})
+        add_test(NAME smoke_libnx_sockets COMMAND hosrun --sdmc ${fixture_dir}/sdmc ${libnx_sockets_nso})
+        set_tests_properties(smoke_libnx_sockets PROPERTIES
+            TIMEOUT 120
+            PASS_REGULAR_EXPRESSION "socketInitializeDefault rc=0.*tcp: accepted 1 from 127.0.0.1.*received 4 \"ping\".*would-block 1.*after peer close recv 0.*udp: received 8 \"datagram\".*libnx sockets: done"
+            FAIL_REGULAR_EXPRESSION "FAIL |fatal|svcBreak Panic")
+    endif()
+
     # DOOM (doomgeneric + shareware IWAD): a complete game through framebuffer, input,
     # romfs and timing. 400 frames headless; frames are not dumped to keep it fast.
     set(doom_nso ${CMAKE_SOURCE_DIR}/examples/doom/build/doom_test.nso)

@@ -41,7 +41,8 @@ numbers.
 | 36 | ports    | SDL2 keyboard/mouse/touch pollers come from the devkitPro driver and read hid directly; they are compiled but unexercised (no keyboard in the hid shared memory yet) | open |
 | 37 | ports    | SDL2 window is always the size the game asked for | done (the X11 window scales and letterboxes any frame size) |
 | 38 | hos_os   | `acc:u0`/`acc:u1` (one local user, IProfile) and `psm` (battery, sessions) for homebrew that asks for a user or the battery | done (account.c, psm.c; checked through libnx's own client in libnx_services) |
-| 39 | hos_net  | `bsd:u` sockets over host sockets (BSD sockaddr/errno/option translation) and `sfdnsres`; unlocks nxlink stdio and networked homebrew | open |
+| 39 | hos_net  | `bsd:u` sockets over host sockets | done (bsd.c: IPv4 TCP/UDP, poll, fcntl, socket options; FreeBSD sockaddr/MSG/SO/IP constants translated, errno in Linux numbering and O_NONBLOCK 0x800 as libnx expects; blocking calls drop the IPC lock; smoke_libnx_sockets) |
+| 41 | hos_net  | `sfdnsres` lookups (GetAddrInfo/GetHostByName serialisation) over the host resolver; Select/Ioctl/Sysctl in bsd:u | open |
 | 40 | hos_gpu  | GPU for homebrew: nvhost-gpu channels, GPFIFO and a Maxwell pushbuffer decoder feeding Vulkan; plan in docs/gpu.md | open |
 | 19 | hos_fs  | Build a romfs image from a directory at load time               | done (romfs_build.c; lazy, file data read on demand) |
 | 20 | hos_input | Controller input into the hid shared memory                   | done (input_state.c: 60 Hz writer; HOS_INPUT_SCRIPT, HOS_INPUT_EVDEV; evdev path compiled but untested without a device) |

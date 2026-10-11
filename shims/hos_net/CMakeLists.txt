@@ -1,7 +1,8 @@
-# libhos_net.so: nifm (offline); bsd:u sockets later.
+# libhos_net.so: nifm (offline), bsd:u sockets over host sockets, sfdnsres.
 add_library(hos_net SHARED
     net_init.c
     nifm.c
+    bsd.c
 )
 set_target_properties(hos_net PROPERTIES
     OUTPUT_NAME hos_net

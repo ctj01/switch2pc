@@ -146,6 +146,15 @@ HOS_EXPORT void hos_ipc_event_clear(void *ev);
  * appletMainLoop returns false and the game exits on its own. Without an
  * installed handler (no applet shim linked) the process exits at once.
  */
+/*
+ * Inside a dispatch function, around a host call that may block for long
+ * (socket recv/accept/connect/poll): drops the IPC request lock so other game
+ * threads keep talking to services meanwhile. Between the two calls the
+ * handler must touch only its own ctx and state guarded by its own lock.
+ */
+HOS_EXPORT void hos_ipc_blocking_begin(void);
+HOS_EXPORT void hos_ipc_blocking_end(void);
+
 HOS_EXPORT void hos_applet_request_exit(void);
 HOS_EXPORT void hos_applet_set_exit_handler(void (*fn)(void));
 

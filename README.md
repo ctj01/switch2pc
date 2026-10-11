@@ -165,7 +165,13 @@ player 1's Npad LIFO in the hid shared memory at 60 Hz, from a timed script
 Also answered: `acc:u0` with one local user (nickname from `HOS_USER_NAME` or
 `$USER`) and `psm` with a full battery on the official charger.
 
-Not implemented yet: `pctl`, `bsd:u` sockets, command submission to
+Sockets work: `bsd:u` is served with host sockets (TCP and UDP over IPv4,
+poll, non-blocking mode, socket options), so homebrew that talks to the
+network through libnx's POSIX API runs unchanged; `examples/libnx_sockets`
+checks it. Name lookups (`sfdnsres`) are not served yet, so use numeric
+addresses.
+
+Not implemented yet: DNS lookups, `pctl`, command submission to
 `nvhost-gpu`, config files. Track progress in
 [docs/ISSUES.md](docs/ISSUES.md).
 
