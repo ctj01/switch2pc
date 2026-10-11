@@ -19,3 +19,4 @@ examples/*/build/
 Modelfile
 tpl.txt
 scripts/.tmp
+scripts/check_nso.py
