@@ -6,4 +6,4 @@ set -e
 apt-get update
 apt-get install -y --no-install-recommends \
     gcc-aarch64-linux-gnu libc6-dev-arm64-cross binutils-aarch64-linux-gnu \
-    qemu-user qemu-user-static cmake ninja-build clang-format gdb-multiarch
+    qemu-user qemu-user-static cmake ninja-build clang-format gdb-multiarch lld
