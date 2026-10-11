@@ -110,7 +110,7 @@ if(S2PC_ARM64)
         set_tests_properties(smoke_libnx_services PROPERTIES
             TIMEOUT 120
             ENVIRONMENT "HOS_AUDIO_DUMP=${fixture_dir}/audio.pcm"
-            PASS_REGULAR_EXPRESSION "audio released 1 buffers rc=0 \\(same buffer: 1\\).*internet: offline.*libnx services: done"
+            PASS_REGULAR_EXPRESSION "audio released 1 buffers rc=0 \\(same buffer: 1\\).*internet: offline.*account: 1 user\\(s\\), listed 1 rc=0.*account: nickname \"[^\"]+\" rc=0.*battery: 100%, charger type 1.*libnx services: done"
             FAIL_REGULAR_EXPRESSION "FAIL |fatal|svcBreak Panic")
     endif()
 

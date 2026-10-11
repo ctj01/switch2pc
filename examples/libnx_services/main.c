@@ -81,6 +81,38 @@ int main(int argc, char **argv) {
         nifmExit();
     }
 
+    rc = accountInitialize(AccountServiceType_Application);
+    say("accountInitialize rc=%#x", rc);
+    if (R_SUCCEEDED(rc)) {
+        s32 users = 0;
+        AccountUid uids[4];
+        s32 listed = 0;
+        accountGetUserCount(&users);
+        rc = accountListAllUsers(uids, 4, &listed);
+        say("account: %d user(s), listed %d rc=%#x", users, listed, rc);
+        AccountProfile profile;
+        if (listed > 0 && R_SUCCEEDED(accountGetProfile(&profile, uids[0]))) {
+            AccountProfileBase base;
+            AccountUserData data;
+            rc = accountProfileGet(&profile, &data, &base);
+            say("account: nickname \"%s\" rc=%#x", base.nickname, rc);
+            accountProfileClose(&profile);
+        }
+        accountExit();
+    }
+
+    rc = psmInitialize();
+    if (R_SUCCEEDED(rc)) {
+        u32 charge = 0;
+        PsmChargerType charger = PsmChargerType_Unconnected;
+        psmGetBatteryChargePercentage(&charge);
+        psmGetChargerType(&charger);
+        say("battery: %u%%, charger type %d", charge, (int)charger);
+        psmExit();
+    } else {
+        say("psmInitialize rc=%#x", rc);
+    }
+
     say("libnx services: done");
     return 0;
 }

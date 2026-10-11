@@ -15,6 +15,8 @@ extern const hos_service_class hos_time_class;
 extern const hos_service_class hos_applet_oe_class;
 extern const hos_service_class hos_applet_ae_class;
 extern const hos_service_class hos_apm_class;
+extern const hos_service_class hos_account_class;
+extern const hos_service_class hos_psm_class;
 
 __attribute__((constructor)) static void hos_os_ctor(void) {
     hos_log_init_from_env();
@@ -28,5 +30,8 @@ __attribute__((constructor)) static void hos_os_ctor(void) {
     hos_ipc_register_service("appletAE", &hos_applet_ae_class, NULL);
     hos_ipc_register_service("apm", &hos_apm_class, NULL);
     hos_ipc_register_service("apm:am", &hos_apm_class, NULL);
+    hos_ipc_register_service("acc:u0", &hos_account_class, NULL);
+    hos_ipc_register_service("acc:u1", &hos_account_class, NULL);
+    hos_ipc_register_service("psm", &hos_psm_class, NULL);
     HOS_LOGD(MOD, "libhos_os loaded");
 }

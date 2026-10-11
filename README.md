@@ -162,7 +162,10 @@ player 1's Npad LIFO in the hid shared memory at 60 Hz, from a timed script
 (`HOS_INPUT_SCRIPT`) or a Linux gamepad (`HOS_INPUT_EVDEV=auto`). The
 `libnx_input` example is the stock homebrew main loop and leaves on Plus.
 
-Not implemented yet: `account`, `pctl`, `bsd:u` sockets, command submission to
+Also answered: `acc:u0` with one local user (nickname from `HOS_USER_NAME` or
+`$USER`) and `psm` with a full battery on the official charger.
+
+Not implemented yet: `pctl`, `bsd:u` sockets, command submission to
 `nvhost-gpu`, config files. Track progress in
 [docs/ISSUES.md](docs/ISSUES.md).
 

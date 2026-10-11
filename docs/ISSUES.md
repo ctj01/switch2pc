@@ -40,6 +40,9 @@ numbers.
 | 35 | hos_os   | Applet exit request: `hos_applet_request_exit()` delivers AppletMessage_ExitRequest; the input script's `<ms> exit` line uses it, so games leave through their own quit path | done |
 | 36 | ports    | SDL2 keyboard/mouse/touch pollers come from the devkitPro driver and read hid directly; they are compiled but unexercised (no keyboard in the hid shared memory yet) | open |
 | 37 | ports    | SDL2 window is always the size the game asked for | done (the X11 window scales and letterboxes any frame size) |
+| 38 | hos_os   | `acc:u0`/`acc:u1` (one local user, IProfile) and `psm` (battery, sessions) for homebrew that asks for a user or the battery | done (account.c, psm.c; checked through libnx's own client in libnx_services) |
+| 39 | hos_net  | `bsd:u` sockets over host sockets (BSD sockaddr/errno/option translation) and `sfdnsres`; unlocks nxlink stdio and networked homebrew | open |
+| 40 | hos_gpu  | GPU for homebrew: nvhost-gpu channels, GPFIFO and a Maxwell pushbuffer decoder feeding Vulkan; plan in docs/gpu.md | open |
 | 19 | hos_fs  | Build a romfs image from a directory at load time               | done (romfs_build.c; lazy, file data read on demand) |
 | 20 | hos_input | Controller input into the hid shared memory                   | done (input_state.c: 60 Hz writer; HOS_INPUT_SCRIPT, HOS_INPUT_EVDEV; evdev path compiled but untested without a device) |
 | 21 | loader  | Call DT_INIT_ARRAY of library modules when no rtld is present   | done (mod0_init_functions + a one-page ARM64 trampoline that runs them before the entry) |
