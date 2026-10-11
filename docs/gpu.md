@@ -1,9 +1,10 @@
 # GPU plan (#40)
 
-Status: plan, nothing implemented. Today `nvdrv` serves `nvmap` and
-`nvhost-ctrl`, `vi` composites CPU-drawn framebuffers, and any command
-submission to the GPU fails. Everything that runs (libnx console, DOOM,
-Quake, SDL2 games) draws with the CPU.
+Status: **M0 done** (2026-10-11). `examples/libnx_deko3d` creates a deko3d
+device, swapchain and queue, submits and presents 60 frames of clears,
+waits for the queue and exits cleanly; `smoke_deko3d_m0` checks it. Nothing
+is drawn yet: the frames stay as they were. Everything that shows pixels
+(libnx console, DOOM, Quake, SDL2 games) still draws with the CPU. Next: M1.
 
 ## Which path, and why
 
@@ -56,12 +57,13 @@ the backend needs a VkBuffer or VkImage.
 Each one ends with an example in `examples/` and a smoke test, like every
 other feature in this repository.
 
-1. **M0, the driver accepts the GPU (weeks).** `nvhost-ctrl-gpu`
-   characteristics and zcull queries, `nvhost-as-gpu` address space and
-   mappings, `nvhost-gpu` channel setup and `SUBMIT_GPFIFO` with fences
-   that signal at once, `nvhost-ctrl` syncpoint waits. Commands are parsed
-   and logged but not executed. Exit: a deko3d program creates a device,
-   queue and swapchain, submits frames and exits cleanly.
+1. **M0, the driver accepts the GPU. Done.** `nvhost-ctrl-gpu`
+   characteristics (GM20B values) and zcull queries, `nvhost-as-gpu`
+   address space and mappings, `nvhost-gpu` channel setup and
+   `SUBMIT_GPFIFO`/`SUBMIT_GPFIFO_EX`, `nvhost-ctrl` syncpoint waits and
+   per-slot events. Commands are parsed and only the synchronisation subset
+   runs. Exit met: a deko3d program creates a device, queue and swapchain,
+   submits frames and exits cleanly (`shims/hos_gpu/nvgpu.c`).
 2. **M1, clears and copies (weeks).** 3D engine clears into render
    targets, the DMA copy engine (linear and block-linear), inline-to-memory
    uploads, semaphore releases. Executed on the CPU first, which needs the
@@ -78,6 +80,25 @@ other feature in this repository.
    swizzled texture upload. Exit: a textured quad; then SDL2 through Mesa.
 6. **M5, the rest (open-ended).** Compute, queries, transform feedback,
    tessellation and geometry stages, as real homebrew needs them.
+
+## What M0 taught
+
+Each point below cost a failed run and is now in `nvgpu.c`:
+
+- deko3d sets 64 KiB big pages with `INITIALIZE_EX` and checks that every
+  mapping is aligned to the page size it asked for.
+- An image's compressible kind is applied with `MAP_BUFFER_EX` + Modify
+  (0x100) and nvmap handle 0: change the kind of a range, keep the memory.
+- Submissions arrive as `SUBMIT_GPFIFO_EX` (nr 0x1B) through Ioctl2, the
+  GPFIFO entries in the second input buffer.
+- Fence thresholds are computed by deko3d from the syncpoint increments in
+  its own pushbuffers, so "signal at once" means a wait raises the
+  syncpoint to its threshold, and `QueryEvent` hands out one event per
+  (fd, id) that `EVENT_WAIT_ASYNC` on that slot signals.
+- `dkQueueWaitIdle` reads a semaphore the GPU writes, so even M0 must run
+  semaphore releases: the GPFIFO class's 0x04-0x07, the 3D/compute report
+  semaphore at 0x6C0-0x6C3 and the DMA engine's at 0x90-0x92 with
+  LAUNCH_DMA. Pushbuffer segments may be a single zero word (a NOP).
 
 ## Risks and how to keep them small
 

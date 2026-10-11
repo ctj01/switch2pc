@@ -153,6 +153,18 @@ if(S2PC_ARM64)
             FAIL_REGULAR_EXPRESSION "FAIL |fatal|svcBreak Panic")
     endif()
 
+    # GPU milestone M0 (docs/gpu.md): a deko3d program creates a device, swapchain and
+    # queue, submits 60 clears, presents them, waits for the queue and exits. Every
+    # GPFIFO entry must resolve and parse; fences complete through semaphore releases.
+    set(libnx_deko3d_nso ${CMAKE_SOURCE_DIR}/examples/libnx_deko3d/build/deko3d.nso)
+    if(EXISTS ${libnx_deko3d_nso})
+        add_test(NAME smoke_deko3d_m0 COMMAND hosrun --sdmc ${fixture_dir}/sdmc ${libnx_deko3d_nso})
+        set_tests_properties(smoke_deko3d_m0 PROPERTIES
+            TIMEOUT 120
+            PASS_REGULAR_EXPRESSION "deko3d: device created.*swapchain created.*submit 1 on channel.*queue created.*frame 40 presented.*deko3d: done"
+            FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|does not parse|not mapped|deko3d: .*: result [1-9]")
+    endif()
+
     # DOOM (doomgeneric + shareware IWAD): a complete game through framebuffer, input,
     # romfs and timing. 400 frames headless; frames are not dumped to keep it fast.
     set(doom_nso ${CMAKE_SOURCE_DIR}/examples/doom/build/doom_test.nso)

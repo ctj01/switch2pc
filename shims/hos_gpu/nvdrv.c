@@ -1,9 +1,9 @@
 /*
  * nvdrv: the NVIDIA driver front end. Only the devices a framebuffer client
- * needs are modelled: /dev/nvmap allocates "GPU memory" that is simply the
- * game's own buffer, and /dev/nvhost-ctrl answers sync point queries with
- * "already signalled". There is no GPU behind this; command submission to
- * /dev/nvhost-gpu is reported as unsupported.
+ * needs are modelled here: /dev/nvmap allocates "GPU memory" that is simply
+ * the game's own buffer, and /dev/nvhost-ctrl answers syncpoint queries from
+ * the table nvgpu.c keeps, whose fences are already signalled. The GPU
+ * devices (nvhost-ctrl-gpu, nvhost-as-gpu, nvhost-gpu) live in nvgpu.c.
  */
 
 #include <pthread.h>
@@ -55,6 +55,56 @@ typedef struct nv_map {
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static nv_fd g_fds[NV_FD_MAX];
+
+/*
+ * Events handed out by QueryEvent, one per (fd, event id), so the event a
+ * client waits on is the one an EVENT_WAIT_ASYNC on that slot signals.
+ * nvhost-ctrl syncpoint events are queried as 0x10000000 | slot and armed
+ * with the slot in EVENT_WAIT_ASYNC's value field.
+ */
+#define NV_EVENT_MAX 64
+typedef struct nv_event {
+    int used;
+    uint32_t fd;
+    uint32_t id;
+    uint32_t handle;
+    void *ev;
+} nv_event;
+static nv_event g_events[NV_EVENT_MAX];
+
+static nv_event *event_for(uint32_t fd, uint32_t id, int create) {
+    for (int i = 0; i < NV_EVENT_MAX; i++) {
+        if (g_events[i].used && g_events[i].fd == fd && g_events[i].id == id) {
+            return &g_events[i];
+        }
+    }
+    if (!create) {
+        return NULL;
+    }
+    for (int i = 0; i < NV_EVENT_MAX; i++) {
+        if (!g_events[i].used) {
+            g_events[i].handle = hos_ipc_event_create(&g_events[i].ev);
+            if (!g_events[i].handle) {
+                return NULL;
+            }
+            g_events[i].used = 1;
+            g_events[i].fd = fd;
+            g_events[i].id = id;
+            return &g_events[i];
+        }
+    }
+    return NULL;
+}
+
+/* Signal the syncpoint event armed on `slot` of the nvhost-ctrl fd, if one was queried. */
+static void signal_ctrl_slot(uint32_t slot) {
+    for (int i = 0; i < NV_EVENT_MAX; i++) {
+        if (g_events[i].used && (g_events[i].id & 0xFFFF) == (slot & 0xFFFF) &&
+            (g_events[i].id & 0x10000000)) {
+            hos_ipc_event_signal(g_events[i].ev);
+        }
+    }
+}
 static nv_map g_maps[NV_MAP_MAX];
 
 static const struct {
@@ -213,26 +263,41 @@ static uint32_t nvmap_ioctl(uint32_t cmd, uint8_t *io, size_t n) {
 static uint32_t host_ctrl_ioctl(uint32_t cmd, uint8_t *io, size_t n) {
     switch (cmd) {
     case 0xC0080014: /* SYNCPT_READ {u32 id; out u32 value} */
-    case 0xC008001A: /* SYNCPT_READ_MAX */
+    case 0xC008001A: /* SYNCPT_READ_MAX: equal, fences signal at once */
         if (n < 8) {
             return NV_BAD_PARAMETER;
         }
-        wr32(io + 4, 0);
+        wr32(io + 4, nv_syncpt_read(rd32(io)));
         return NV_OK;
     case 0x40040015: /* SYNCPT_INCR */
     case 0xC00C0016: /* SYNCPT_WAIT {u32 id; u32 thresh; s32 timeout} */
-    case 0xC0100019: /* SYNCPT_WAITEX */
+    case 0xC0100019: /* SYNCPT_WAITEX {..., out u32 value} */
+        if (n >= 8) {
+            uint32_t v = nv_syncpt_reach(rd32(io), rd32(io + 4));
+            if (n >= 16) {
+                wr32(io + 12, v);
+            }
+        }
+        return NV_OK;
     case 0xC004001C: /* EVENT_SIGNAL */
     case 0xC004001F: /* EVENT_REGISTER */
     case 0xC0040020: /* EVENT_UNREGISTER */
     case 0x40080021: /* EVENT_KILL */
         return NV_OK;
-    case 0xC010001D: /* EVENT_WAIT {u32 id; u32 thresh; s32 timeout; out u32 value} */
-    case 0xC010001E: /* EVENT_WAIT_ASYNC */
+    case 0xC010001D: /* EVENT_WAIT {u32 id; u32 thresh; s32 timeout; inout u32 value} */
         if (n < 16) {
             return NV_BAD_PARAMETER;
         }
-        wr32(io + 12, rd32(io + 4)); /* already at the threshold */
+        wr32(io + 12, nv_syncpt_reach(rd32(io), rd32(io + 4)));
+        return NV_OK;
+    case 0xC010001E: /* EVENT_WAIT_ASYNC {u32 id; u32 thresh; s32 timeout; u32 event slot} */
+        if (n < 16) {
+            return NV_BAD_PARAMETER;
+        }
+        nv_syncpt_reach(rd32(io), rd32(io + 4));
+        pthread_mutex_lock(&g_lock);
+        signal_ctrl_slot(rd32(io + 12));
+        pthread_mutex_unlock(&g_lock);
         return NV_OK;
     default:
         HOS_LOGW(MOD, "nvhost-ctrl ioctl %#x not implemented", cmd);
@@ -240,15 +305,34 @@ static uint32_t host_ctrl_ioctl(uint32_t cmd, uint8_t *io, size_t n) {
     }
 }
 
-static uint32_t nv_ioctl(nv_device dev, uint32_t cmd, uint8_t *io, size_t n) {
+typedef struct ioctl_args {
+    uint32_t fd;
+    uint32_t cmd;
+    uint8_t *io;
+    size_t n;
+    const uint8_t *extra_in; /* Ioctl2: a second input buffer (gpfifo entries) */
+    size_t extra_in_n;
+    uint8_t *extra_out; /* Ioctl3: a second output buffer */
+    size_t extra_out_n;
+} ioctl_args;
+
+static uint32_t nv_ioctl(nv_device dev, const ioctl_args *a) {
     switch (dev) {
     case NV_DEV_NVMAP:
-        return nvmap_ioctl(cmd, io, n);
+        return nvmap_ioctl(a->cmd, a->io, a->n);
     case NV_DEV_HOST_CTRL:
-        return host_ctrl_ioctl(cmd, io, n);
+        return host_ctrl_ioctl(a->cmd, a->io, a->n);
+    case NV_DEV_HOST_CTRL_GPU:
+    case NV_DEV_HOST_AS_GPU:
+    case NV_DEV_HOST_GPU: {
+        int kind = dev == NV_DEV_HOST_CTRL_GPU ? NV_GPU_DEV_CTRL
+                   : dev == NV_DEV_HOST_AS_GPU ? NV_GPU_DEV_AS
+                                               : NV_GPU_DEV_CHANNEL;
+        return nv_gpu_ioctl(kind, a->fd, a->cmd, a->io, a->n, a->extra_in, a->extra_in_n,
+                            a->extra_out, a->extra_out_n);
+    }
     default:
-        /* FIXME(#24): nvhost-gpu, nvhost-as-gpu and nvhost-ctrl-gpu need a GPU. */
-        HOS_LOGW(MOD, "ioctl %#x on device %d: no GPU behind nvdrv", cmd, dev);
+        HOS_LOGW(MOD, "ioctl %#x on device %d: not modelled", a->cmd, dev);
         return NV_NOT_SUPPORTED;
     }
 }
@@ -313,7 +397,7 @@ static hos_result cmd_ioctl(hos_ipc_ctx *ctx) {
     }
     const hos_ipc_buffer *in = gpu_in_buffer(ctx, 0);
     const hos_ipc_buffer *out = gpu_out_buffer(ctx, 0);
-    uint8_t io[0x200];
+    static __thread uint8_t io[0x4000]; /* inline gpfifo entries can be large */
     size_t n = 0;
     memset(io, 0, sizeof(io));
     if (in && in->addr && in->size) {
@@ -323,7 +407,23 @@ static hos_result cmd_ioctl(hos_ipc_ctx *ctx) {
     if (out && out->size > n) {
         n = out->size < sizeof(io) ? (size_t)out->size : sizeof(io);
     }
-    uint32_t err = nv_ioctl(dev, cmd, io, n);
+    ioctl_args a = {.fd = fd, .cmd = cmd, .io = io, .n = n};
+    if (ctx->cmd == 11) { /* Ioctl2(fd, cmd, in, in2, out) */
+        const hos_ipc_buffer *in2 = gpu_in_buffer(ctx, 1);
+        if (in2 && in2->addr) {
+            a.extra_in = (const uint8_t *)in2->addr;
+            a.extra_in_n = (size_t)in2->size;
+        }
+    } else if (ctx->cmd == 12) { /* Ioctl3(fd, cmd, in, out, out2) */
+        const hos_ipc_buffer *out2 = gpu_out_buffer(ctx, 1);
+        if (out2 && out2->addr) {
+            a.extra_out = (uint8_t *)out2->addr;
+            a.extra_out_n = (size_t)out2->size;
+        }
+    }
+    uint32_t err = nv_ioctl(dev, &a);
+    HOS_LOGT(MOD, "ioctl fd %u (device %d) cmd %#x -> %#x, out[0..16]: %08x %08x %08x %08x", fd,
+             dev, cmd, err, rd32(io), rd32(io + 4), rd32(io + 8), rd32(io + 12));
     if (out && out->addr && out->size) {
         size_t w = out->size < sizeof(io) ? (size_t)out->size : sizeof(io);
         memcpy((void *)out->addr, io, w);
@@ -345,6 +445,9 @@ static hos_result nvdrv_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
         if (fd_device(fd) == NV_DEV_NONE) {
             return out_error(ctx, NV_BAD_PARAMETER);
         }
+        if (fd_device(fd) == NV_DEV_HOST_GPU) {
+            nv_gpu_channel_close(fd);
+        }
         pthread_mutex_lock(&g_lock);
         g_fds[fd].dev = NV_DEV_NONE;
         pthread_mutex_unlock(&g_lock);
@@ -354,12 +457,22 @@ static hos_result nvdrv_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
     case 8: /* SetAruid */
         return out_error(ctx, NV_OK);
     case 4: /* QueryEvent(fd, event id) -> error, copy handle */ {
-        void *ev;
-        uint32_t h = hos_ipc_event_create(&ev);
+        uint32_t fd = 0, id = 0;
+        hos_ipc_in_read(ctx, 0, &fd, 4);
+        hos_ipc_in_read(ctx, 4, &id, 4);
+        pthread_mutex_lock(&g_lock);
+        nv_event *e = event_for(fd, id, 1);
+        if (e && (id & 0x10000000)) {
+            /* A syncpoint event: under M0 whatever it waits for is already done, and the
+             * client may arm the wait (EVENT_WAIT_ASYNC) before it queries the event. */
+            hos_ipc_event_signal(e->ev);
+        }
+        uint32_t h = e ? hos_ipc_copy_handle(e->handle) : 0;
+        pthread_mutex_unlock(&g_lock);
         if (!h) {
             return HOS_KERNEL_OUT_OF_RESOURCE;
         }
-        hos_ipc_event_signal(ev);
+        HOS_LOGD(MOD, "QueryEvent fd %u id %#x -> handle %#x", fd, id, h);
         ctx->copy_handles[ctx->num_copy++] = h;
         return out_error(ctx, NV_OK);
     }

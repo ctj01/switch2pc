@@ -171,8 +171,12 @@ network through libnx's POSIX API runs unchanged; `examples/libnx_sockets`
 checks it. Name lookups (`sfdnsres`) are not served yet, so use numeric
 addresses.
 
-Not implemented yet: DNS lookups, `pctl`, command submission to
-`nvhost-gpu`, config files. Track progress in
+The GPU has started (milestone M0 of [docs/gpu.md](docs/gpu.md)): a deko3d
+program creates its device, swapchain and queue, submits and presents
+frames and exits cleanly. The driver decodes every submission and runs its
+synchronisation; drawing comes with M1.
+
+Not implemented yet: GPU drawing, DNS lookups, `pctl`, config files. Track progress in
 [docs/ISSUES.md](docs/ISSUES.md).
 
 ## Quick start

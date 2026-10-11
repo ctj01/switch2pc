@@ -1,6 +1,7 @@
 #ifndef HOS_GPU_INTERNAL_H
 #define HOS_GPU_INTERNAL_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "hos_ipc.h"
@@ -9,6 +10,16 @@
 
 /* nvdrv.c: nvmap allocations are game memory; vi reads frames straight from them. */
 HOS_HIDDEN int nv_map_lookup(uint32_t id, uint64_t *addr, uint64_t *size);
+
+/* nvgpu.c: the GPU devices (docs/gpu.md, milestone M0). */
+enum { NV_GPU_DEV_CTRL = 1, NV_GPU_DEV_AS = 2, NV_GPU_DEV_CHANNEL = 3 };
+HOS_HIDDEN uint32_t nv_gpu_ioctl(int device, uint32_t fd, uint32_t cmd, uint8_t *io, size_t n,
+                                 const uint8_t *extra_in, size_t extra_in_n, uint8_t *extra_out,
+                                 size_t extra_out_n);
+HOS_HIDDEN uint32_t nv_syncpt_read(uint32_t id);
+HOS_HIDDEN uint32_t nv_syncpt_reach(uint32_t id, uint32_t threshold);
+HOS_HIDDEN void *nv_gpu_va_to_host(uint64_t va, uint64_t len);
+HOS_HIDDEN void nv_gpu_channel_close(uint32_t fd);
 
 extern HOS_HIDDEN const hos_service_class hos_nvdrv_class;
 extern HOS_HIDDEN const hos_service_class hos_vi_u_class;

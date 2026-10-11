@@ -3,6 +3,7 @@
 add_library(hos_gpu SHARED
     gpu_init.c
     nvdrv.c
+    nvgpu.c
     parcel.c
     swizzle.c
     vi.c

@@ -26,7 +26,7 @@ numbers.
 | 18 | tests   | Run a libnx hello world                                        | done (examples/libnx_hello, smoke_libnx_hello; devkitA64 installed on Windows, scripts/build_libnx_hello.sh) |
 | 22 | mod0    | Apply DT_RELR for modules that do not self-relocate | done (mod0_module.apply_relr; hosrun sets it for library modules when no rtld is loaded) |
 | 23 | patch   | Counter reads trap on every `mrs cntvct_el0`; an inline scaled read needs a per-site stub (no free registers, LR is live) | deferred (same measurement as #5: ~10k reads/s in the busiest game, ~2% of a core) |
-| 24 | hos_gpu | nvhost-gpu / nvhost-as-gpu / nvhost-ctrl-gpu: command submission needs a GPU (Maxwell command processor or NVN hooking) | open |
+| 24 | hos_gpu | nvhost-gpu / nvhost-as-gpu / nvhost-ctrl-gpu | done for M0 (see #40); drawing is M1+ |
 | 25 | hos_gpu | A window: present queued frames in real time | done (display_x11.c, HOS_WINDOW=1: scaled X11 window via WSLg, keyboard as player 1 through hos_pad_external_set, close = applet exit request) |
 | 26 | hos_gpu | Vsync pacing: QueueBuffer returns immediately; hold the buffer until the next vsync so games run at 60 Hz | open |
 | 27 | hos_audio | Real-time audio output | done (audio_sink.c: PulseAudio or ALSA via dlopen, HOS_AUDIO=auto/pulse/alsa; a sink thread per stream releases buffers at the device clock; timer pacing when off; verified by recording the WSLg sink monitor) |
@@ -43,7 +43,7 @@ numbers.
 | 38 | hos_os   | `acc:u0`/`acc:u1` (one local user, IProfile) and `psm` (battery, sessions) for homebrew that asks for a user or the battery | done (account.c, psm.c; checked through libnx's own client in libnx_services) |
 | 39 | hos_net  | `bsd:u` sockets over host sockets | done (bsd.c: IPv4 TCP/UDP, poll, fcntl, socket options; FreeBSD sockaddr/MSG/SO/IP constants translated, errno in Linux numbering and O_NONBLOCK 0x800 as libnx expects; blocking calls drop the IPC lock; smoke_libnx_sockets) |
 | 41 | hos_net  | `sfdnsres` lookups (GetAddrInfo/GetHostByName serialisation) over the host resolver; Select/Ioctl/Sysctl in bsd:u | open |
-| 40 | hos_gpu  | GPU for homebrew (deko3d, Mesa): nvhost-gpu channels, GPFIFO and a Maxwell pushbuffer decoder feeding Vulkan; milestones M0-M5 in docs/gpu.md | open (plan written) |
+| 40 | hos_gpu  | GPU for homebrew (deko3d, Mesa): nvhost-gpu channels, GPFIFO and a Maxwell pushbuffer decoder feeding Vulkan; milestones M0-M5 in docs/gpu.md | open (M0 done: nvgpu.c, deko3d device/queue/swapchain/submit/present/teardown, smoke_deko3d_m0; next M1 clears and copies) |
 | 19 | hos_fs  | Build a romfs image from a directory at load time               | done (romfs_build.c; lazy, file data read on demand) |
 | 20 | hos_input | Controller input into the hid shared memory                   | done (input_state.c: 60 Hz writer; HOS_INPUT_SCRIPT, HOS_INPUT_EVDEV; evdev path compiled but untested without a device) |
 | 21 | loader  | Call DT_INIT_ARRAY of library modules when no rtld is present   | done (mod0_init_functions + a one-page ARM64 trampoline that runs them before the entry) |

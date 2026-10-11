@@ -537,6 +537,10 @@ void svc_wait_synchronization(hos_svc_regs *r) {
         w.types[i] = type;
     }
     w.num_objs = count;
+    if (hos_log_get_level() >= HOS_LOG_TRACE) {
+        HOS_LOGT(MOD, "WaitSynchronization on %u handle(s): %#x%s, timeout %#llx", count,
+                 count ? handles[0] : 0, count > 1 ? " ..." : "", (unsigned long long)timeout);
+    }
 
     pthread_mutex_lock(&g_lock);
     if (hos_current_thread && hos_current_thread->cancel_pending) {
