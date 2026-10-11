@@ -6,10 +6,10 @@
  * memory (which is the game's own memory here), channels with a GPFIFO, and
  * submissions that return syncpoint fences. Submissions are decoded and
  * checked (every GPFIFO entry must resolve to mapped memory, every method
- * header must parse); of their methods only the synchronisation subset runs
- * (subchannel binding, semaphore releases, syncpoint increments), so fences
- * and queues complete while nothing is drawn yet. The engines of M1 plug in
- * at method_write.
+ * header must parse) and run: host methods (semaphores, syncpoint
+ * increments) here, engine methods in gpu_engines.c (clears, copies, inline
+ * uploads, report semaphores; M1). Fences complete as the work is done at
+ * submit time.
  *
  * Ioctl numbers follow Linux's _IOC layout: dir (2 bits) | size (14) | type
  * (8) | nr (8). Unknown ones on these devices are logged with their size and
@@ -20,10 +20,12 @@
 #include <inttypes.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include "common/hos_log.h"
+#include "gpu_engines.h"
 #include "gpu_internal.h"
 
 #define MOD "nvgpu"
@@ -398,7 +400,7 @@ static uint32_t ctrl_gpu_ioctl(uint32_t cmd, uint8_t *io, size_t n, uint8_t *ext
 
 /* ---- channels ------------------------------------------------------------------------- */
 
-/* Method state the sync subset needs (M0); M1 grows this into the engines. */
+/* Host-method state; the engines (3D, DMA, ...) keep theirs in gpu_engines. */
 typedef struct sem_regs {
     uint64_t addr;
     uint32_t payload;
@@ -409,15 +411,14 @@ typedef struct gpu_channel {
     uint32_t fd;
     uint32_t syncpt;
     uint64_t submits;
-    uint32_t subch_class[8]; /* bound with method 0 (SET_OBJECT) */
-    sem_regs host_sem;       /* GPFIFO class 0xB06F, methods 0x04-0x07 */
+    sem_regs host_sem; /* GPFIFO class 0xB06F, methods 0x04-0x07 */
     uint32_t host_syncpt_payload;
-    sem_regs report_sem; /* 3D 0xB197 / compute 0xB1C0, methods 0x6C0-0x6C3 */
-    sem_regs dma_sem;    /* DMA copy 0xB0B5, methods 0x90-0x92, fired by LAUNCH_DMA */
-    uint64_t releases, syncpt_incrs, acquires_skipped;
+    uint64_t host_releases, syncpt_incrs;
+    gpu_engines *engines;
 } gpu_channel;
 
 static gpu_channel g_channels[MAX_CHANNELS];
+static int g_trace_methods = -1; /* HOS_GPU_TRACE=1: log every method write at trace level */
 
 static gpu_channel *channel_for(uint32_t fd) {
     pthread_mutex_lock(&g_lock);
@@ -432,8 +433,15 @@ static gpu_channel *channel_for(uint32_t fd) {
         }
     }
     if (free_slot && g_next_syncpt < MAX_SYNCPTS) {
-        *free_slot = (gpu_channel){.used = 1, .fd = fd, .syncpt = g_next_syncpt++};
+        gpu_engines *eng = gpu_engines_new();
+        if (!eng) {
+            pthread_mutex_unlock(&g_lock);
+            return NULL;
+        }
+        *free_slot = (gpu_channel){.used = 1, .fd = fd, .syncpt = g_next_syncpt++, .engines = eng};
         HOS_LOGD(MOD, "channel fd %u uses syncpoint %u", fd, free_slot->syncpt);
+    } else {
+        free_slot = NULL;
     }
     pthread_mutex_unlock(&g_lock);
     return free_slot;
@@ -443,32 +451,12 @@ void nv_gpu_channel_close(uint32_t fd) {
     pthread_mutex_lock(&g_lock);
     for (int i = 0; i < MAX_CHANNELS; i++) {
         if (g_channels[i].used && g_channels[i].fd == fd) {
+            gpu_engines_free(g_channels[i].engines);
+            g_channels[i].engines = NULL;
             g_channels[i].used = 0;
         }
     }
     pthread_mutex_unlock(&g_lock);
-}
-
-static uint64_t gpu_now_ns(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
-}
-
-/* A semaphore release: one word, or four (payload, 0, 64-bit timestamp). */
-static void sem_release(gpu_channel *ch, const sem_regs *r, int four_words) {
-    uint32_t *p = nv_gpu_va_to_host(r->addr, four_words ? 16 : 4);
-    if (!p) {
-        HOS_LOGW(MOD, "semaphore release to unmapped gpu va %#" PRIx64, r->addr);
-        return;
-    }
-    p[0] = r->payload;
-    if (four_words) {
-        uint64_t ts = gpu_now_ns();
-        p[1] = 0;
-        memcpy(p + 2, &ts, 8);
-    }
-    ch->releases++;
 }
 
 static void syncpt_incr(gpu_channel *ch, uint32_t id) {
@@ -480,97 +468,45 @@ static void syncpt_incr(gpu_channel *ch, uint32_t id) {
     ch->syncpt_incrs++;
 }
 
-/*
- * One method write. M0 executes only what makes fences and queues complete:
- * subchannel binding, the channel's semaphores and syncpoint increments, and
- * the report semaphores of the 3D/compute and DMA engines. Everything else
- * is drawing work, which is M1 and later.
- */
+/* One method write: host methods (< 0x40) here, everything else to the engines. */
 static void method_write(gpu_channel *ch, uint32_t subch, uint32_t method, uint32_t v) {
+    if (g_trace_methods) {
+        HOS_LOGT(MOD, "  subch %u method %#05x = %#010x", subch, method, v);
+    }
     if (method == 0) { /* SET_OBJECT */
-        ch->subch_class[subch & 7] = v & 0xFFFF;
+        gpu_engines_bind(ch->engines, subch, v & 0xFFFF);
         return;
     }
-    if (method < 0x40) { /* host methods, whatever the subchannel */
-        switch (method) {
-        case 0x04:
-            ch->host_sem.addr = (ch->host_sem.addr & 0xFFFFFFFFull) | ((uint64_t)(v & 0xFF) << 32);
-            break;
-        case 0x05:
-            ch->host_sem.addr = (ch->host_sem.addr & ~0xFFFFFFFFull) | (v & ~3u);
-            break;
-        case 0x06:
-            ch->host_sem.payload = v;
-            break;
-        case 0x07: /* SEMAPHORED: [2:0] operation (1 acquire, 2 release, 4 acquire >=), [24] 4-byte
-                    */
-            if ((v & 7) == 2) {
-                sem_release(ch, &ch->host_sem, !((v >> 24) & 1));
-            } else {
-                ch->acquires_skipped++;
-            }
-            break;
-        case 0x1C:
-            ch->host_syncpt_payload = v;
-            break;
-        case 0x1D: /* SYNCPOINTB: [0] increment, [19:8] syncpoint index */
-            if (v & 1) {
-                syncpt_incr(ch, (v >> 8) & 0xFFF);
-            }
-            break;
-        default:
-            break;
-        }
+    if (method >= 0x40) {
+        gpu_engines_method(ch->engines, subch, method, v);
         return;
     }
-    uint32_t cls = ch->subch_class[subch & 7];
-    if (cls == 0xB197 || cls == 0xB1C0) {
-        switch (method) {
-        case 0x6C0:
-            ch->report_sem.addr =
-                (ch->report_sem.addr & 0xFFFFFFFFull) | ((uint64_t)(v & 0xFF) << 32);
-            break;
-        case 0x6C1:
-            ch->report_sem.addr = (ch->report_sem.addr & ~0xFFFFFFFFull) | v;
-            break;
-        case 0x6C2:
-            ch->report_sem.payload = v;
-            break;
-        case 0x6C3: /* [1:0] operation (0 release, 1 acquire, 2 report only), [28] one word */
-            if ((v & 3) == 0 || (v & 3) == 2) {
-                sem_regs r = ch->report_sem;
-                if ((v & 3) == 2) {
-                    r.payload = 0; /* counters: nothing was drawn */
-                }
-                sem_release(ch, &r, !((v >> 28) & 1));
-            } else {
-                ch->acquires_skipped++;
-            }
-            break;
-        default:
-            break;
+    switch (method) {
+    case 0x04:
+        ch->host_sem.addr = (ch->host_sem.addr & 0xFFFFFFFFull) | ((uint64_t)(v & 0xFF) << 32);
+        break;
+    case 0x05:
+        ch->host_sem.addr = (ch->host_sem.addr & ~0xFFFFFFFFull) | (v & ~3u);
+        break;
+    case 0x06:
+        ch->host_sem.payload = v;
+        break;
+    case 0x07: /* SEMAPHORED: [2:0] operation (1 acquire, 2 release, 4 acquire >=), [24] 4-byte */
+        if ((v & 7) == 2 &&
+            gpu_semaphore_release(ch->host_sem.addr, ch->host_sem.payload, !((v >> 24) & 1)) == 0) {
+            ch->host_releases++;
         }
-    } else if (cls == 0xB0B5) {
-        switch (method) {
-        case 0x90:
-            ch->dma_sem.addr = (ch->dma_sem.addr & 0xFFFFFFFFull) | ((uint64_t)(v & 0xFF) << 32);
-            break;
-        case 0x91:
-            ch->dma_sem.addr = (ch->dma_sem.addr & ~0xFFFFFFFFull) | v;
-            break;
-        case 0x92:
-            ch->dma_sem.payload = v;
-            break;
-        case 0xC0: /* LAUNCH_DMA: [4:3] semaphore type (1 one word, 2 four words) */ {
-            uint32_t t = (v >> 3) & 3;
-            if (t == 1 || t == 2) {
-                sem_release(ch, &ch->dma_sem, t == 2);
-            }
-            break;
+        break;
+    case 0x1C:
+        ch->host_syncpt_payload = v;
+        break;
+    case 0x1D: /* SYNCPOINTB: [0] increment, [19:8] syncpoint index */
+        if (v & 1) {
+            syncpt_incr(ch, (v >> 8) & 0xFFF);
         }
-        default:
-            break;
-        }
+        break;
+    default:
+        break;
     }
 }
 
@@ -641,15 +577,26 @@ static void gpu_submit(gpu_channel *ch, const uint64_t *entries, uint32_t num) {
         headers += h > 0 ? h : 0;
         words += len;
     }
+    gpu_engines_flush(ch->engines);
     ch->submits++;
     if (ch->submits <= 3 || ch->submits % 100 == 0) {
+        const gpu_engine_stats *st = gpu_engines_stats(ch->engines);
         HOS_LOGI(MOD,
                  "submit %" PRIu64 " on channel fd %u: %u entries, %" PRIu64
-                 " words, %ld method headers; so far %" PRIu64 " semaphore releases, %" PRIu64
-                 " syncpoint increments%s",
-                 ch->submits, ch->fd, num, words, headers, ch->releases, ch->syncpt_incrs,
-                 bad ? ", with errors" : "");
+                 " words, %ld method headers; so far %" PRIu64 " macros, %" PRIu64
+                 " clears, %" PRIu64 " copies, %" PRIu64 " inline uploads, %" PRIu64
+                 " semaphore releases%s",
+                 ch->submits, ch->fd, num, words, headers, st->macros, st->clears, st->copies,
+                 st->inline_uploads, st->releases + ch->host_releases, bad ? ", with errors" : "");
     }
+}
+
+static int trace_methods_enabled(void) {
+    if (g_trace_methods < 0) {
+        const char *t = getenv("HOS_GPU_TRACE");
+        g_trace_methods = t && *t && strcmp(t, "0") != 0;
+    }
+    return g_trace_methods;
 }
 
 static uint32_t channel_submit(gpu_channel *ch, uint8_t *io, size_t n, const uint8_t *extra_in,
@@ -659,6 +606,7 @@ static uint32_t channel_submit(gpu_channel *ch, uint8_t *io, size_t n, const uin
         return NV_BAD_PARAMETER;
     }
     uint32_t num = rd32(io + 8), flags = rd32(io + 12);
+    trace_methods_enabled();
     const uint8_t *src = NULL;
     if (extra_in && extra_n >= (size_t)num * 8) {
         src = extra_in;

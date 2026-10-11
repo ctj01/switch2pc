@@ -1,10 +1,12 @@
 # GPU plan (#40)
 
-Status: **M0 done** (2026-10-11). `examples/libnx_deko3d` creates a deko3d
-device, swapchain and queue, submits and presents 60 frames of clears,
-waits for the queue and exits cleanly; `smoke_deko3d_m0` checks it. Nothing
-is drawn yet: the frames stay as they were. Everything that shows pixels
-(libnx console, DOOM, Quake, SDL2 games) still draws with the CPU. Next: M1.
+Status: **M1 done** (2026-10-11). `examples/libnx_deko3d` clears and
+presents 60 frames whose colours come out of the GPU path (through a 3D
+engine macro), then checks an inline upload, a DMA buffer copy and an image
+round trip byte for byte; the image copied into a framebuffer is verified
+pixel by pixel through `vi`'s independent deswizzle. `smoke_deko3d` and the
+MME unit tests (`test_mme`) check it. Everything still runs on the CPU and
+nothing is rasterised yet. Next: M2 (Vulkan) or M3 (shaders), see below.
 
 ## Which path, and why
 
@@ -64,11 +66,12 @@ other feature in this repository.
    per-slot events. Commands are parsed and only the synchronisation subset
    runs. Exit met: a deko3d program creates a device, queue and swapchain,
    submits frames and exits cleanly (`shims/hos_gpu/nvgpu.c`).
-2. **M1, clears and copies (weeks).** 3D engine clears into render
-   targets, the DMA copy engine (linear and block-linear), inline-to-memory
-   uploads, semaphore releases. Executed on the CPU first, which needs the
-   block-linear swizzle encoder next to today's decoder. Exit: deko3d's
-   clear-screen example shows its colour through `vi`.
+2. **M1, clears and copies. Done.** The 3D engine's macro processor (MME),
+   colour clears into pitch and block-linear render targets (RGBA8, sRGB,
+   BGRA8, RGB565, RGBA32F), the DMA copy engine (pitch and block-linear
+   both ways, remapped constant fills), inline-to-memory uploads, report
+   semaphores. All on the CPU, in `gpu_engines.c` and `gpu_mme.c`. Exit met:
+   the clear colour shows through `vi`.
 3. **M2, a Vulkan backend for what M1 does (weeks).** Same results, on the
    host GPU. This is where window and GPU meet; the X11 window gets a
    Vulkan swapchain.
@@ -99,6 +102,23 @@ Each point below cost a failed run and is now in `nvgpu.c`:
   semaphore releases: the GPFIFO class's 0x04-0x07, the 3D/compute report
   semaphore at 0x6C0-0x6C3 and the DMA engine's at 0x90-0x92 with
   LAUNCH_DMA. Pushbuffer segments may be a single zero word (a NOP).
+
+## What M1 taught
+
+- deko3d never writes CLEAR_SURFACE itself: it uploads macros at start-up
+  (52 calls in its first submission) and clears through macro 6. The macro
+  processor (MME) is therefore part of M1, not a later refinement; its
+  instruction set (envytools' "Fermi macro processor") is small, and every
+  instruction form has a hand-assembled unit test in `tests/test_mme.c`.
+- Calls arrive as a first parameter on 0xE00 + 2n and the rest on
+  0xE01 + 2n; the call runs when any other method arrives or the
+  submission ends.
+- Keeping every method write in a per-class register file, as the hardware
+  does, made each new trigger (clear, I2M launch, DMA launch) a few lines,
+  and lets macros read engine state the way they expect.
+- Image copies go through the DMA engine with block-linear surfaces in both
+  directions; a round trip alone only proves the two directions agree, so
+  the test also checks the copied image against `vi`'s decoder.
 
 ## Risks and how to keep them small
 

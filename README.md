@@ -171,12 +171,14 @@ network through libnx's POSIX API runs unchanged; `examples/libnx_sockets`
 checks it. Name lookups (`sfdnsres`) are not served yet, so use numeric
 addresses.
 
-The GPU has started (milestone M0 of [docs/gpu.md](docs/gpu.md)): a deko3d
-program creates its device, swapchain and queue, submits and presents
-frames and exits cleanly. The driver decodes every submission and runs its
-synchronisation; drawing comes with M1.
+The GPU has started ([docs/gpu.md](docs/gpu.md), milestones M0 and M1): a
+deko3d program creates its device, swapchain and queue, and its clears,
+buffer copies, image uploads and inline data now run, on the CPU, through
+the GPU's own command stream, including the macros the 3D engine executes.
+Rasterising triangles and running shaders are the next milestones.
 
-Not implemented yet: GPU drawing, DNS lookups, `pctl`, config files. Track progress in
+Not implemented yet: GPU rasterisation and shaders, DNS lookups, `pctl`,
+config files. Track progress in
 [docs/ISSUES.md](docs/ISSUES.md).
 
 ## Quick start

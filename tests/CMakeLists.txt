@@ -12,6 +12,9 @@ s2pc_add_test(test_lz4 s2pc_core)
 s2pc_add_test(test_nso s2pc_core)
 s2pc_add_test(test_patch s2pc_core)
 s2pc_add_test(test_sha256 s2pc_common)
+s2pc_add_test(test_mme s2pc_common)
+target_sources(test_mme PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_mme.c)
+target_include_directories(test_mme PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
 
 # Runtime: ARM64 only (qemu-user through CMAKE_CROSSCOMPILING_EMULATOR when cross-building).
 if(S2PC_ARM64)
@@ -153,15 +156,15 @@ if(S2PC_ARM64)
             FAIL_REGULAR_EXPRESSION "FAIL |fatal|svcBreak Panic")
     endif()
 
-    # GPU milestone M0 (docs/gpu.md): a deko3d program creates a device, swapchain and
-    # queue, submits 60 clears, presents them, waits for the queue and exits. Every
-    # GPFIFO entry must resolve and parse; fences complete through semaphore releases.
+    # GPU milestones M0 and M1 (docs/gpu.md): a deko3d program creates a device,
+    # swapchain and queue, clears and presents 60 frames (through a 3D macro), then
+    # checks an inline upload, a DMA buffer copy and an image round trip byte for byte.
     set(libnx_deko3d_nso ${CMAKE_SOURCE_DIR}/examples/libnx_deko3d/build/deko3d.nso)
     if(EXISTS ${libnx_deko3d_nso})
-        add_test(NAME smoke_deko3d_m0 COMMAND hosrun --sdmc ${fixture_dir}/sdmc ${libnx_deko3d_nso})
-        set_tests_properties(smoke_deko3d_m0 PROPERTIES
+        add_test(NAME smoke_deko3d COMMAND hosrun --sdmc ${fixture_dir}/sdmc ${libnx_deko3d_nso})
+        set_tests_properties(smoke_deko3d PROPERTIES
             TIMEOUT 120
-            PASS_REGULAR_EXPRESSION "deko3d: device created.*swapchain created.*submit 1 on channel.*queue created.*frame 40 presented.*deko3d: done"
+            PASS_REGULAR_EXPRESSION "deko3d: device created.*swapchain created.*queue created.*clears.*frame 40 presented.*push data ok.*copy buffer ok.*image round trip ok.*deko3d: done"
             FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|does not parse|not mapped|deko3d: .*: result [1-9]")
     endif()
 

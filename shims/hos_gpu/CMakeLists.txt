@@ -4,6 +4,8 @@ add_library(hos_gpu SHARED
     gpu_init.c
     nvdrv.c
     nvgpu.c
+    gpu_engines.c
+    gpu_mme.c
     parcel.c
     swizzle.c
     vi.c
@@ -23,4 +25,4 @@ if(X11_FOUND)
 else()
     message(STATUS "hos_gpu: no libX11 for the target; HOS_WINDOW is unavailable")
 endif()
-target_link_libraries(hos_gpu PRIVATE hos_cpu s2pc_common pthread)
+target_link_libraries(hos_gpu PRIVATE hos_cpu s2pc_common pthread m)

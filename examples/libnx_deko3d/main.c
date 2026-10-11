@@ -20,6 +20,7 @@
 #define FB_WIDTH  1280
 #define FB_HEIGHT 720
 #define CMDMEM    (16 * 1024)
+#define SCRATCH   (64 * 1024)
 
 #ifndef DEKO_FRAMES
 #define DEKO_FRAMES 60
@@ -114,6 +115,52 @@ int main(int argc, char **argv) {
     }
 
     dkQueueWaitIdle(queue);
+
+    /* M1: inline uploads and DMA copies, each checked byte for byte on the CPU. */
+    dkMemBlockMakerDefaults(&mm, device, SCRATCH);
+    mm.flags = DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached;
+    DkMemBlock scratch = dkMemBlockCreate(&mm);
+    uint8_t *cpu = dkMemBlockGetCpuAddr(scratch);
+    DkGpuAddr gpu = dkMemBlockGetGpuAddr(scratch);
+    memset(cpu, 0, SCRATCH);
+
+    static const char inline_msg[16] = "inline to mem!";
+    dkCmdBufPushData(cmdbuf, gpu + 0x0000, inline_msg, sizeof(inline_msg));
+    for (int i = 0; i < 256; i++) {
+        cpu[0x1000 + i] = (uint8_t)(i * 7 + 3);
+    }
+    dkCmdBufCopyBuffer(cmdbuf, gpu + 0x1000, gpu + 0x2000, 256);
+    dkQueueSubmitCommands(queue, dkCmdBufFinishList(cmdbuf));
+    dkQueueWaitIdle(queue);
+    dkCmdBufClear(cmdbuf);
+    say("deko3d: push data %s", memcmp(cpu, inline_msg, sizeof(inline_msg)) == 0 ? "ok" : "FAIL");
+    say("deko3d: copy buffer %s", memcmp(cpu + 0x1000, cpu + 0x2000, 256) == 0 ? "ok" : "FAIL");
+
+    /* A 64x64 pattern into a framebuffer (linear -> block-linear) and back out. */
+    uint32_t *pattern = (uint32_t *)(cpu + 0x4000);
+    for (int y = 0; y < 64; y++) {
+        for (int x = 0; x < 64; x++) {
+            pattern[y * 64 + x] = 0xFF000000u | ((uint32_t)(y * 4) << 8) | (uint32_t)(x * 4);
+        }
+    }
+    int slot = dkQueueAcquireImage(queue, swapchain);
+    DkImageView view;
+    dkImageViewDefaults(&view, &fbs[slot]);
+    dkCmdBufBindRenderTarget(cmdbuf, &view, NULL);
+    dkCmdBufClearColorFloat(cmdbuf, 0, DkColorMask_RGBA, 0.0f, 0.0f, 0.0f, 1.0f);
+    DkCopyBuf buf = {gpu + 0x4000, 0, 0};
+    DkImageRect rect = {100, 100, 0, 64, 64, 1};
+    dkCmdBufCopyBufferToImage(cmdbuf, &buf, &view, &rect, 0);
+    DkCopyBuf back = {gpu + 0x8000, 0, 0};
+    dkCmdBufCopyImageToBuffer(cmdbuf, &view, &rect, &back, 0);
+    dkQueueSubmitCommands(queue, dkCmdBufFinishList(cmdbuf));
+    dkQueuePresentImage(queue, swapchain, slot);
+    dkQueueWaitIdle(queue);
+    dkCmdBufClear(cmdbuf);
+    say("deko3d: image round trip %s",
+        memcmp(cpu + 0x4000, cpu + 0x8000, 64 * 64 * 4) == 0 ? "ok" : "FAIL");
+    dkMemBlockDestroy(scratch);
+
     dkQueueDestroy(queue);
     dkCmdBufDestroy(cmdbuf);
     dkMemBlockDestroy(cmd_mem);
