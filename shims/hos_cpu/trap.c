@@ -1,7 +1,9 @@
 #include <inttypes.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
 
@@ -10,6 +12,39 @@
 #include "patch/patch.h"
 
 #define MOD "trap"
+
+/*
+ * HOS_TRAP_STATS=1: count every trap by kind and print the totals and rates
+ * at exit. This is what decides whether trampolines (#5, #23) are worth it.
+ */
+static int g_stats;
+static uint64_t g_stats_start_ns;
+static _Atomic uint64_t g_svc_count[HOS_SVC_MAX + 1];
+static _Atomic uint64_t g_tick_count;
+
+static uint64_t mono_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+static void print_stats(void) {
+    double secs = (double)(mono_ns() - g_stats_start_ns) / 1e9;
+    uint64_t ticks = atomic_load(&g_tick_count), svcs = 0;
+    for (int i = 0; i <= HOS_SVC_MAX; i++) {
+        svcs += atomic_load(&g_svc_count[i]);
+    }
+    HOS_LOGI(MOD,
+             "trap stats over %.1f s: %" PRIu64 " counter reads (%.0f/s), %" PRIu64
+             " svcs (%.0f/s)",
+             secs, ticks, (double)ticks / secs, svcs, (double)svcs / secs);
+    for (int i = 0; i <= HOS_SVC_MAX; i++) {
+        uint64_t n = atomic_load(&g_svc_count[i]);
+        if (n * 100 >= svcs && n) { /* the ones that make up at least 1 percent */
+            HOS_LOGI(MOD, "  svc %#04x: %" PRIu64 " (%.0f/s)", i, n, (double)n / secs);
+        }
+    }
+}
 
 static const char *sig_name(int sig) {
     switch (sig) {
@@ -91,6 +126,9 @@ void hos_trap_c(int sig, siginfo_t *si, void *ucv, int in_game) {
         uint32_t imm = (insn >> 5) & 0xFFFF;
         /* Counter reads rewritten by the patcher: the register number rides in the immediate. */
         if (imm >= A64_BRK_TICK_BASE && imm < A64_BRK_TICK_BASE + 31) {
+            if (g_stats) {
+                atomic_fetch_add_explicit(&g_tick_count, 1, memory_order_relaxed);
+            }
             uc->uc_mcontext.regs[imm - A64_BRK_TICK_BASE] = hos_tick_now();
             uc->uc_mcontext.pc = pc + 4;
             return;
@@ -101,6 +139,9 @@ void hos_trap_c(int sig, siginfo_t *si, void *ucv, int in_game) {
             return;
         }
         if (imm >= 1 && imm <= HOS_SVC_MAX) {
+            if (g_stats) {
+                atomic_fetch_add_explicit(&g_svc_count[imm], 1, memory_order_relaxed);
+            }
             hos_svc_regs r;
             for (int i = 0; i < 8; i++) {
                 r.x[i] = uc->uc_mcontext.regs[i];
@@ -117,6 +158,12 @@ void hos_trap_c(int sig, siginfo_t *si, void *ucv, int in_game) {
 }
 
 void hos_trap_install(void) {
+    const char *st = getenv("HOS_TRAP_STATS");
+    if (st && *st && strcmp(st, "0") != 0 && !g_stats) {
+        g_stats = 1;
+        g_stats_start_ns = mono_ns();
+        atexit(print_stats);
+    }
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = hos_trap_entry;

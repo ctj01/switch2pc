@@ -141,6 +141,24 @@ address space. Anything a game passes lives inside the regions we reserve, so
 this is only a constraint on host-side tests, which must use the HOS heap for
 buffers they hand to a service.
 
+### What traps cost
+
+`HOS_TRAP_STATS=1` counts every trap by kind and prints totals and rates at
+exit. Measured under qemu-user on a desktop CPU:
+
+| Game   | counter reads/s | svcs/s |
+|--------|-----------------|--------|
+| Tyrian | 10 557          | 541    |
+| DOOM   | 531             | 414    |
+| Quake  | 2 477           | 1 426  |
+
+Quake first showed 371k counter reads and 93k WaitSynchronization a second:
+`Host_FilterTime` drops frames until 1/72 s has passed and the loop around
+it spun, five traps per turn. That puts the cost of one trap at about 2 us
+or less, so even Tyrian spends roughly 2% of a core in traps. Trampolines
+(#5, #23) would save that and cost a rewrite of game code at every site, so
+they wait for a title that traps an order of magnitude more.
+
 ### Several modules
 
 A retail exefs holds `rtld`, `main`, `subsdk0..9` and `sdk`. The kernel maps

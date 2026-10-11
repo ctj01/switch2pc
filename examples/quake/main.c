@@ -178,6 +178,10 @@ int main(int argc, char **argv) {
         double now = (double)armTicksToNs(armGetSystemTick()) / 1e9;
         QG_Tick(now - old);
         old = now;
+        /* Host_FilterTime drops frames until 1/72 s has passed, so without a pause
+         * this loop spins: about 93k svc and 370k counter traps a second. 1 ms
+         * keeps the 72 fps cap and gives the core back. */
+        svcSleepThread(1000000);
     }
     say("quake: exit requested");
     return 0;
