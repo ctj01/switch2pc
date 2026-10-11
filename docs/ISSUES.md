@@ -29,7 +29,7 @@ numbers.
 | 24 | hos_gpu | nvhost-gpu / nvhost-as-gpu / nvhost-ctrl-gpu: command submission needs a GPU (Maxwell command processor or NVN hooking) | open |
 | 25 | hos_gpu | A window: present queued frames in real time | done (display_x11.c, HOS_WINDOW=1: scaled X11 window via WSLg, keyboard as player 1 through hos_pad_external_set, close = applet exit request) |
 | 26 | hos_gpu | Vsync pacing: QueueBuffer returns immediately; hold the buffer until the next vsync so games run at 60 Hz | open |
-| 27 | hos_audio | Real-time output (ALSA) for audout; pacing is done (a pacer thread releases each buffer when its samples would have played, so SDL's audio thread blocks like on hardware) | open (output) |
+| 27 | hos_audio | Real-time audio output | done (audio_sink.c: PulseAudio or ALSA via dlopen, HOS_AUDIO=auto/pulse/alsa; a sink thread per stream releases buffers at the device clock; timer pacing when off; verified by recording the WSLg sink monitor) |
 | 28 | examples | DOOM (doomgeneric) runs end to end; fetch of third_party/doomgeneric and the IWAD is manual, document it in scripts/build_doom.sh | done |
 | 29 | hos_gpu  | HOS_FRAMES_EVERY=N to dump every Nth frame; a 640x400 PPM per frame is heavy on slow filesystems | done |
 | 30 | tools    | Live play on Windows: HOS_FRAMES_LIVE (BMP, atomic rename) + HOS_INPUT_FILE + tools/viewer.ps1 + scripts/run_game.sh. Stopgap for #25 | done |

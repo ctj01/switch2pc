@@ -1,11 +1,13 @@
 /*
- * audout:u: audio output. A paced null sink: an appended buffer is "played"
- * for as long as its samples last at the stream's rate, then released and the
- * buffer event signalled, so a game that waits for its buffers to drain runs
- * at the speed of its audio, like on hardware. Nothing reaches a sound card
- * yet (that is the rest of FIXME(#27)); with HOS_AUDIO_DUMP=<file> the PCM
- * data is appended to that file (raw, host byte order, the format the game
- * chose).
+ * audout:u: audio output. With HOS_AUDIO set (see audio_sink.h) each stream
+ * gets a host output and a sink thread that writes the game's buffers to it
+ * in order; a buffer is released once the device has taken it, so the game's
+ * audio thread runs at the device clock. Without an output the sink is null
+ * and a timer pacer plays the device's part: a buffer is "played" for as long
+ * as its samples last at the stream's rate, then released. Either way the
+ * buffer event is signalled on release, like on hardware. With
+ * HOS_AUDIO_DUMP=<file> the PCM data is also appended to that file (raw, host
+ * byte order, the format the game chose).
  *
  * Releasing on the spot instead was how this started, and it broke SDL games:
  * SDL's audio thread never blocked, hammered the IPC lock and starved the
@@ -19,6 +21,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "audio_sink.h"
 #include "common/hos_log.h"
 #include "hos_ipc.h"
 
@@ -30,10 +33,15 @@
 enum { PCM_INT16 = 2 };
 enum { STATE_STARTED = 0, STATE_STOPPED = 1 };
 
+#define RELEASE_BY_SINK UINT64_MAX /* release_at_ns of a buffer the sink thread owns */
+
 typedef struct pending_buffer {
     uint64_t tag;
-    uint64_t release_at_ns; /* CLOCK_MONOTONIC */
+    uint64_t release_at_ns; /* CLOCK_MONOTONIC, or RELEASE_BY_SINK */
     uint64_t samples;
+    const uint8_t *pcm; /* game memory; the game leaves it alone until release */
+    uint64_t bytes;
+    int in_flight; /* the sink thread is writing it */
 } pending_buffer;
 
 typedef struct audio_out {
@@ -50,6 +58,10 @@ typedef struct audio_out {
     uint32_t volume_bits; /* f32 */
     void *event;
     uint32_t event_handle;
+    audio_sink *sink; /* NULL: timer pacing only */
+    pthread_t sink_thread;
+    pthread_cond_t sink_cond;
+    int sink_stop;
 } audio_out;
 
 /* AudioOutBuffer as the game passes it (0x28 bytes). */
@@ -187,6 +199,17 @@ static void consume(audio_out *o, const audio_out_buffer *b, uint64_t tag) {
         }
         samples = b->data_size / (2u * (o->channels ? o->channels : 2));
     }
+    if (o->sink && samples && o->num_pending < AUDOUT_MAX_PENDING) {
+        o->pending[o->num_pending++] = (pending_buffer){
+            .tag = tag,
+            .release_at_ns = RELEASE_BY_SINK,
+            .samples = samples,
+            .pcm = (const uint8_t *)(b->buffer + b->data_offset),
+            .bytes = b->data_size,
+        };
+        pthread_cond_signal(&o->sink_cond);
+        return;
+    }
     uint64_t now = now_ns();
     uint64_t start = o->play_cursor_ns > now ? o->play_cursor_ns : now;
     uint64_t duration = o->sample_rate ? samples * 1000000000ull / o->sample_rate : 0;
@@ -212,6 +235,72 @@ static void consume(audio_out *o, const audio_out_buffer *b, uint64_t tag) {
     if (o->event) {
         hos_ipc_event_signal(o->event);
     }
+}
+
+/* Writes queued buffers to the host output in order, releasing each once written. */
+static void *sink_main(void *arg) {
+    audio_out *o = arg;
+    pthread_mutex_lock(&g_lock);
+    while (!o->sink_stop) {
+        uint32_t i = 0;
+        while (i < o->num_pending &&
+               (o->pending[i].in_flight || o->pending[i].release_at_ns != RELEASE_BY_SINK)) {
+            i++;
+        }
+        if (i == o->num_pending) {
+            pthread_cond_wait(&o->sink_cond, &g_lock);
+            continue;
+        }
+        pending_buffer job = o->pending[i];
+        o->pending[i].in_flight = 1;
+        pthread_mutex_unlock(&g_lock);
+        int rc = audio_sink_write(o->sink, job.pcm, (size_t)job.bytes);
+        pthread_mutex_lock(&g_lock);
+        if (rc != 0) {
+            HOS_LOGW(MOD, "host output failed; falling back to timer pacing");
+        }
+        /* Flush may have released it meanwhile; positions may have shifted. */
+        for (uint32_t k = 0; k < o->num_pending; k++) {
+            if (o->pending[k].in_flight && o->pending[k].tag == job.tag) {
+                memmove(&o->pending[k], &o->pending[k + 1],
+                        (size_t)(o->num_pending - k - 1) * sizeof(o->pending[0]));
+                o->num_pending--;
+                if (o->num_released < AUDOUT_MAX_RELEASED) {
+                    o->released[o->num_released++] = job.tag;
+                }
+                o->played_samples += job.samples;
+                if (o->event) {
+                    hos_ipc_event_signal(o->event);
+                }
+                break;
+            }
+        }
+        if (rc != 0) {
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_lock);
+    return NULL;
+}
+
+/* g_lock held. Stop the sink thread and close the output; buffers it still owned are released. */
+static void sink_shutdown(audio_out *o) {
+    if (!o->sink) {
+        return;
+    }
+    o->sink_stop = 1;
+    pthread_cond_signal(&o->sink_cond);
+    pthread_mutex_unlock(&g_lock);
+    pthread_join(o->sink_thread, NULL);
+    pthread_mutex_lock(&g_lock);
+    audio_sink_close(o->sink);
+    o->sink = NULL;
+    pthread_cond_destroy(&o->sink_cond);
+    for (uint32_t i = 0; i < o->num_pending; i++) {
+        o->pending[i].release_at_ns = 0; /* the timer pacer releases them now */
+        o->pending[i].in_flight = 0;
+    }
+    pthread_cond_signal(&g_cond);
 }
 
 static hos_result audio_out_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
@@ -327,6 +416,7 @@ static hos_result audio_out_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
 static void audio_out_destroy(hos_object *obj) {
     audio_out *o = obj->ctx;
     pthread_mutex_lock(&g_lock);
+    sink_shutdown(o);
     o->used = 0;
     o->num_pending = 0;
     pthread_mutex_unlock(&g_lock);
@@ -383,6 +473,16 @@ static hos_result audout_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
         o->channels = channels;
         o->state = STATE_STOPPED;
         o->volume_bits = 0x3F800000; /* 1.0f */
+        o->sink = audio_sink_open(rate, channels);
+        if (o->sink) {
+            pthread_cond_init(&o->sink_cond, NULL);
+            o->sink_stop = 0;
+            if (pthread_create(&o->sink_thread, NULL, sink_main, o) != 0) {
+                audio_sink_close(o->sink);
+                o->sink = NULL;
+                pthread_cond_destroy(&o->sink_cond);
+            }
+        }
         const hos_ipc_buffer *name_out = out_buffer(ctx);
         if (name_out && name_out->addr && name_out->size >= 0x100) {
             memset((void *)name_out->addr, 0, 0x100);

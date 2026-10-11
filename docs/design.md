@@ -227,15 +227,19 @@ tests use.
 
 ### Audio
 
-`audout` is a sink without a sound card, but not a free-running one. Each
-appended buffer is queued with a release time (`cursor = max(cursor, now) +
-samples / rate`) and a pacer thread releases it and signals the buffer event
-when that time comes. The first version released at once, which looked
-harmless with a game that mixes on its main thread and was fatal with SDL:
-its audio thread never blocked, held the single IPC lock most of the time
-(#16) and the main thread fell to a frame per second. The lesson generalises:
-every service that a game waits on must take about as long as the hardware
-would, or threads that assume they will block spin instead.
+A game that waits for its audio buffers must wait about as long as the
+hardware would, or threads that assume they will block spin instead. With
+`HOS_AUDIO` set, each audout stream gets a host output (PulseAudio, then
+ALSA, both through `dlopen`) and a sink thread that writes the queued
+buffers in order and releases each one when the device has accepted it; the
+blocking write is what paces the game. Without an output a timer pacer
+plays that part: a buffer is released when its samples would have finished
+(`cursor = max(cursor, now) + samples / rate`). The first version released
+buffers at once, which looked harmless with a game that mixes on its main
+thread and was fatal with SDL: its audio thread never blocked, held the
+single IPC lock most of the time (#16) and the main thread fell to a frame
+per second. Output was verified by recording the WSLg sink's monitor while
+`sdl_test` played its tone: one second at 440 Hz came back.
 
 ### SDL2
 
@@ -262,8 +266,8 @@ non-self-relocating modules (#22).
 
 Phase 2 (services): `hid`, `vi` with a null compositor, paced `audout`,
 `nvdrv` returning errors cleanly. Exit criterion: a 2D homebrew runs headless.
-Done: DOOM, Quake and an unmodified SDL2 game (OpenTyrian) run; ALSA output
-(#27) and a real window (#25) are what is left before it feels like playing.
+Done: DOOM, Quake and an unmodified SDL2 game (OpenTyrian) run in a real
+window (#25) with real sound (#27).
 
 Phase 3 (GPU): either hook NVN entry points by fingerprinting the statically
 linked driver, or accept that a Maxwell command processor is needed. This is

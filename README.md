@@ -149,14 +149,21 @@ falls back to the older path: hosrun writes a BMP (`HOS_FRAMES_LIVE`) that
 `tools/viewer.ps1` shows, and reads the pad from a file (`HOS_INPUT_FILE`).
 Either way it is playable, about 30 fps under qemu-user on a desktop CPU.
 
+Sound plays for real with `HOS_AUDIO=auto` (which `run_game.sh` sets):
+`audout` writes each game buffer to PulseAudio, which WSLg forwards to
+Windows, or to ALSA on a plain Linux box, and releases it once the device
+has taken it, so the game's audio thread runs on the device clock. Both
+libraries are loaded at run time, so they are not build dependencies; without
+`HOS_AUDIO` the buffers are paced by a timer and nothing is played, which is
+what the tests use.
+
 Input reaches the game the way it does on hardware: a writer thread refreshes
 player 1's Npad LIFO in the hid shared memory at 60 Hz, from a timed script
 (`HOS_INPUT_SCRIPT`) or a Linux gamepad (`HOS_INPUT_EVDEV=auto`). The
 `libnx_input` example is the stock homebrew main loop and leaves on Plus.
 
 Not implemented yet: `account`, `pctl`, `bsd:u` sockets, command submission to
-`nvhost-gpu`, audio to a sound card (buffers are paced, not played), config
-files. Track progress in
+`nvhost-gpu`, config files. Track progress in
 [docs/ISSUES.md](docs/ISSUES.md).
 
 ## Quick start

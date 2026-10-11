@@ -44,7 +44,7 @@ mkdir -p "$root/build/tmp/sdmc"
 
 if [ "$mode" = window ]; then
     wsl.exe -e bash -c "cd '$root_wsl' && \
-        HOS_WINDOW=1 HOS_WINDOW_SCALE='$scale' HOS_LOG_LEVEL=info \
+        HOS_WINDOW=1 HOS_WINDOW_SCALE='$scale' HOS_AUDIO=auto HOS_LOG_LEVEL=info \
         qemu-aarch64 -L /usr/aarch64-linux-gnu build/aarch64/src/hosrun \
             --romfs '$romfs' --sdmc build/tmp/sdmc '$nso'" || true
     exit 0
@@ -60,7 +60,7 @@ viewer=$!
 wsl.exe -e bash -c "cd '$root_wsl' && \
     HOS_FRAMES_LIVE='$root_wsl/build/tmp/live.bmp' \
     HOS_INPUT_FILE='$root_wsl/build/tmp/pad.txt' \
-    HOS_LOG_LEVEL=info \
+    HOS_AUDIO=auto HOS_LOG_LEVEL=info \
     qemu-aarch64 -L /usr/aarch64-linux-gnu build/aarch64/src/hosrun \
         --romfs '$romfs' --sdmc build/tmp/sdmc '$nso'" || true
 
