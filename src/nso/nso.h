@@ -83,7 +83,7 @@ hos_result nso_parse_header(const uint8_t *buf, size_t len, nso_header *out);
 
 /**
  * Decompress a whole NSO into a fresh anonymous mapping (read+write).
- * Hash verification is not performed yet; see FIXME(#1).
+ * When the header flags request it, each segment's SHA-256 hash is verified.
  *
  * @param buf   File bytes
  * @param len   File length

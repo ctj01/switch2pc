@@ -12,3 +12,10 @@ third_party/
 # game data: fetched by the build scripts' instructions, never redistributed here
 examples/*/romfs/
 examples/*/build/
+
+# local AI tooling (Continue + Ollama), not part of the project
+.continue/
+.continueignore
+Modelfile
+tpl.txt
+scripts/.tmp

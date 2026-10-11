@@ -6,6 +6,7 @@
 #include <sys/mman.h>
 
 #include "common/hos_log.h"
+#include "common/sha256.h"
 #include "nso/lz4.h"
 
 #define MOD "nso"
@@ -123,8 +124,29 @@ static hos_result nso_load_impl(const uint8_t *buf, size_t len, void *hint, int 
         return r;
     }
     if (h->flags & (NSO_FLAG_TEXT_HASH | NSO_FLAG_RODATA_HASH | NSO_FLAG_DATA_HASH)) {
-        /* FIXME(#1): verify SHA-256 segment hashes. */
-        HOS_LOGD(MOD, "segment hash verification requested but not implemented");
+        const struct {
+            const char *name;
+            const nso_segment_header *seg;
+            uint32_t flag;
+            const uint8_t *stored;
+        } hashes[3] = {
+            {"text", &h->text, NSO_FLAG_TEXT_HASH, h->text_hash},
+            {"rodata", &h->rodata, NSO_FLAG_RODATA_HASH, h->rodata_hash},
+            {"data", &h->data, NSO_FLAG_DATA_HASH, h->data_hash},
+        };
+        for (int i = 0; i < 3; i++) {
+            if (!(h->flags & hashes[i].flag) || hashes[i].seg->size == 0) {
+                continue;
+            }
+            uint8_t computed[SHA256_DIGEST_SIZE];
+            sha256(out->image + hashes[i].seg->memory_offset, hashes[i].seg->size, computed);
+            if (memcmp(computed, hashes[i].stored, SHA256_DIGEST_SIZE) != 0) {
+                HOS_LOGE(MOD, "%s segment SHA-256 mismatch", hashes[i].name);
+                nso_free(out);
+                return S2PC_ERR_CORRUPT;
+            }
+            HOS_LOGD(MOD, "%s segment SHA-256 verified", hashes[i].name);
+        }
     }
     HOS_LOGD(MOD, "loaded image at %p: text %#zx rodata %#x data %#x bss %#x total %#zx",
              (void *)out->image, out->text_end, h->rodata.size, h->data.size, h->bss_size,

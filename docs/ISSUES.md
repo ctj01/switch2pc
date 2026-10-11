@@ -6,10 +6,10 @@ numbers.
 
 | #  | Area    | Title                                                         | Status |
 |----|---------|---------------------------------------------------------------|--------|
-| 1  | nso     | Verify SHA-256 segment hashes when the header flags ask for it | open   |
+| 1  | nso     | Verify SHA-256 segment hashes when the header flags ask for it | done (sha256.c; nso.c verifies text/rodata/data) |
 | 2  | mod0    | Resolve symbols across modules (main, sdk, subsdk*)            | done (mod0_link; DT_HASH/GNU_HASH symbol counts) |
 | 3  | hos_cpu | Events, WaitSynchronization, ArbitrateLock/Unlock, ProcessWideKey, WaitForAddress | done (sync.c; pthread cond per waiter, FIFO wake) |
-| 4  | hos_cpu | GetInfo ProgramId: carry the title id from the package into the loader | open |
+| 4  | hos_cpu | GetInfo ProgramId: carry the title id from the package into the loader | done (--program-id <hex>) |
 | 5  | hos_cpu | Replace brk/SIGTRAP with direct trampolines for hot svc sites. Design notes: `b stub_n` per site, stub saves x8-x18, x29, x30 and v0-v31 (the kernel preserves them, C code does not), swaps tpidr_el0, calls the dispatcher, restores, branches back. Stub pages must sit within 128 MiB of the site and must not look like a module to nnrtld's memory walk; deferred until a real game can be profiled | open |
 | 6  | config  | TOML `game.toml`, defaults and per-title profiles              | open   |
 | 7  | hos_fs  | `fsp-srv`: sdmc and save data on host directories, romfs from an image file | done (fsp.c) |

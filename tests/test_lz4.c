@@ -3,8 +3,9 @@
 #include "nso/lz4.h"
 #include "test.h"
 
-/* token 0x44: 4 literals, match length 4+4; literals "ABCD"; offset 4. */
-static const uint8_t k_vector[] = {0x44, 'A', 'B', 'C', 'D', 0x04, 0x00};
+/* token 0x44: 4 literals, match length 4+4; literals "ABCD"; offset 4; then the
+ * closing literals-only sequence (token 0x00, no literals). */
+static const uint8_t k_vector[] = {0x44, 'A', 'B', 'C', 'D', 0x04, 0x00, 0x00};
 
 TEST(lz4_decode_hand_vector) {
     uint8_t out[32];
@@ -33,6 +34,19 @@ TEST(lz4_decode_rejects_truncated) {
     uint8_t out[32];
     ASSERT_EQ(lz4_block_decode(k_vector, 3, out, sizeof(out)), -1);
     ASSERT_EQ(lz4_block_decode(k_vector, 6, out, sizeof(out)), -1);
+}
+
+/* The format ends every block with a literals-only sequence. A block cut right
+ * after a match is truncated and must be rejected, not decoded short. */
+TEST(lz4_decode_rejects_block_ending_in_match) {
+    uint8_t out[32];
+    ASSERT_EQ(lz4_block_decode(k_vector, sizeof(k_vector) - 1, out, sizeof(out)), -1);
+    static const uint8_t ok[] = {0x44, 'A', 'B', 'C', 'D', 0x04, 0x00, 0x10, 'E'};
+    ASSERT_EQ(lz4_block_decode(ok, sizeof(ok), out, sizeof(out)), 13);
+    ASSERT_MEM_EQ(out, "ABCDABCDABCDE", 13);
+    ASSERT_EQ(lz4_block_decode(ok, 0, out, sizeof(out)), -1);
+    static const uint8_t empty[] = {0x00};
+    ASSERT_EQ(lz4_block_decode(empty, sizeof(empty), out, sizeof(out)), 0);
 }
 
 TEST(lz4_decode_rejects_small_output) {

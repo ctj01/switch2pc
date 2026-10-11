@@ -12,7 +12,15 @@ int64_t lz4_block_decode(const uint8_t *src, size_t src_len, uint8_t *dst, size_
     size_t ip = 0;
     size_t op = 0;
 
-    while (ip < src_len) {
+    /* Even an empty block is one token; a block must end with a literals-only
+     * sequence, so running out of input right after a match means truncation. */
+    if (src_len == 0) {
+        return -1;
+    }
+    for (;;) {
+        if (ip >= src_len) {
+            return -1; /* ended after a match: truncated block */
+        }
         uint8_t token = src[ip++];
 
         size_t lit = token >> 4;

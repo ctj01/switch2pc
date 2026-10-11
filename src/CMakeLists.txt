@@ -2,6 +2,7 @@
 add_library(s2pc_common STATIC
     common/hos_log.c
     common/hos_file.c
+    common/sha256.c
 )
 target_include_directories(s2pc_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -32,3 +33,4 @@ if(S2PC_ARM64)
         BUILD_RPATH "${rpath}"
         INSTALL_RPATH "\$ORIGIN")
 endif()
+

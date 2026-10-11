@@ -327,7 +327,7 @@ void svc_get_info(hos_svc_regs *r) {
         v = 0;
         break;
     case INFO_PROGRAM_ID:
-        v = 0; /* FIXME(#4): carry the title id from the package into the loader. */
+        v = hos_params.program_id;
         break;
     case INFO_INITIAL_PROCESS_ID_RANGE:
         v = (sub == 0) ? 1 : 0x50;

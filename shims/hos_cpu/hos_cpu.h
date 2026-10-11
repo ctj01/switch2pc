@@ -93,6 +93,7 @@ typedef struct hos_cpu_module {
 typedef struct hos_cpu_params {
     uint32_t num_modules;
     hos_cpu_module modules[HOS_MAX_MODULES];
+    uint64_t program_id; /* title id, e.g. 0000000000010000 */
 } hos_cpu_params;
 
 /**

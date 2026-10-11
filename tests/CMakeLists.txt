@@ -11,6 +11,7 @@ endfunction()
 s2pc_add_test(test_lz4 s2pc_core)
 s2pc_add_test(test_nso s2pc_core)
 s2pc_add_test(test_patch s2pc_core)
+s2pc_add_test(test_sha256 s2pc_common)
 
 # Runtime: ARM64 only (qemu-user through CMAKE_CROSSCOMPILING_EMULATOR when cross-building).
 if(S2PC_ARM64)

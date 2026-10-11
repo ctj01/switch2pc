@@ -87,6 +87,7 @@ static void init_once(void) {
         .num_modules = 1,
         .modules =
             {{.image_base = text, .image_size = 0x4000, .text_size = 0x4000, .name = "test_svc"}},
+        .program_id = 0x0100000000010000ull,
     };
     if (HOS_FAILED(hos_cpu_init(&p)) || !hos_cpu_adopt_current_thread()) {
         fprintf(stderr, "init failed\n");
@@ -155,6 +156,10 @@ TEST(svc_get_info_values) {
 
     r = call(0x29, 0, 11, 0, 4);
     ASSERT_EQ(r.x[0], HOS_KERNEL_INVALID_COMBINATION);
+
+    r = call(0x29, 0, 18, 0xFFFF8001, 0); /* ProgramId, from hos_cpu_params (hosrun --program-id) */
+    ASSERT_EQ(r.x[0], HOS_RESULT_SUCCESS);
+    ASSERT_EQ(r.x[1], 0x0100000000010000ull);
 
     r = call(0x29, 0, 9999, 0, 0);
     ASSERT_EQ(r.x[0], HOS_KERNEL_INVALID_ENUM_VALUE);

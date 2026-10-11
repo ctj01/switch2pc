@@ -51,6 +51,7 @@ static void usage(FILE *out) {
           "  --romfs <file>    romfs image for OpenDataStorageByCurrentProcess\n"
           "  --sdmc <dir>      directory served as the SD card\n"
           "  --save <dir>      directory served as save data\n"
+          "  --program-id <hex>  title id (e.g. 0000000000010000)\n"
           "\n"
           "environment:\n"
           "  HOS_LOG_LEVEL     error|warn|info|debug|trace (default info)\n"
@@ -138,6 +139,7 @@ int main(int argc, char **argv) {
     int count = 0;
     const char *value = NULL;
     uint64_t stack_size = DEFAULT_STACK;
+    uint64_t program_id = 0;
     int apply_patches = 1;
 
     for (int i = 1; i < argc; i++) {
@@ -164,6 +166,11 @@ int main(int argc, char **argv) {
                 return 2;
             }
             setenv("HOS_SAVE", value, 1);
+        } else if (strcmp(a, "--program-id") == 0) {
+            if (!take_value(argc, argv, &i, &value)) {
+                return 2;
+            }
+            program_id = strtoull(value, NULL, 16);
         } else if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
             usage(stdout);
             return 0;
@@ -283,6 +290,8 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+
+    params.program_id = program_id;
 
     r = hos_cpu_init(&params);
     if (HOS_FAILED(r)) {
