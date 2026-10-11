@@ -27,6 +27,7 @@ SECTIONS {
         *(.rodata .rodata.*)
     } :rodata
     .rela.dyn : { *(.rela.*) } :rodata
+    .relr.dyn : { *(.relr.dyn) } :rodata
     .hash     : { *(.hash) } :rodata
     .gnu.hash : { *(.gnu.hash) } :rodata
     .dynsym   : { *(.dynsym) } :rodata
@@ -39,6 +40,7 @@ SECTIONS {
     .dynamic : { *(.dynamic) } :data :dyn
     .got : { *(.got) *(.got.plt) } :data
     .data.rel.ro : { *(.data.rel.ro .data.rel.ro.*) } :data
+    .init_array : { KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*))) KEEP(*(.init_array)) } :data
     .bss : {
         . = ALIGN(16);
         __bss_start = .;

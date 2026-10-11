@@ -51,9 +51,15 @@ if(S2PC_ARM64)
     # Two modules: main imports from sdk, resolved at load time. The directory form
     # exercises the exefs walk (main + sdk found by name).
     set(mm_dir ${CMAKE_BINARY_DIR}/examples/multi_module)
+    # With ld.lld the sdk module carries DT_RELR, which hosrun must apply itself.
+    if(S2PC_SDK_RELR)
+        set(mm_relr_re "[1-9][0-9]* relr applied.*")
+    else()
+        set(mm_relr_re "")
+    endif()
     add_test(NAME smoke_multi_module COMMAND hosrun ${mm_dir}/main.nso ${mm_dir}/sdk.nso)
     set_tests_properties(smoke_multi_module PROPERTIES
-        PASS_REGULAR_EXPRESSION "sdk_add\\(2,3\\) = 0x5.*sdk_tick advances.*message: sdk module says hi.*multi_module done"
+        PASS_REGULAR_EXPRESSION "sdk(\\.nso)?: 1 initialiser.*${mm_relr_re}sdk_add\\(2,3\\) = 0x5.*sdk_tick advances.*message: sdk module says hi.*sdk init ran.*multi_module done"
         FAIL_REGULAR_EXPRESSION "FAIL|fatal|unresolved symbols")
 
     file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/tests/fixtures/exefs)

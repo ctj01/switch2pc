@@ -8,6 +8,19 @@
 
 __attribute__((visibility("default"))) const char *sdk_message = "sdk module says hi";
 
+/* Set by a constructor: nothing calls it but the loader (rtld on hardware). */
+static int g_init_value;
+static const char *g_greeting;
+
+__attribute__((constructor)) static void sdk_init(void) {
+    g_init_value = 42;
+    g_greeting = "ready"; /* a pointer in .data: a relative relocation, packed as RELR */
+}
+
+__attribute__((visibility("default"))) int sdk_ready(void) {
+    return g_init_value == 42 && g_greeting && g_greeting[0] == 'r';
+}
+
 __attribute__((visibility("default"))) int sdk_add(int a, int b) {
     return a + b;
 }

@@ -52,6 +52,7 @@ function(s2pc_add_c_module target dir nso_name)
     add_custom_command(
         OUTPUT ${dir}/${nso_name}.elf
         COMMAND ${CMAKE_C_COMPILER} ${S2PC_MODULE_CFLAGS} ${S2PC_MODULE_LDFLAGS}
+                ${S2PC_MODULE_EXTRA_LDFLAGS}
                 -Wl,-T,${S2PC_MODULE_LD} -o ${dir}/${nso_name}.elf ${ARGN}
         DEPENDS ${ARGN} ${S2PC_MODULE_LD} ${headers}
         COMMENT "Linking ${nso_name}.elf")
@@ -74,5 +75,21 @@ s2pc_add_c_module(kernel_test_nso ${CMAKE_CURRENT_BINARY_DIR}/kernel_test kernel
 set(mm ${CMAKE_CURRENT_SOURCE_DIR}/multi_module)
 s2pc_add_c_module(multi_module_main_nso ${CMAKE_CURRENT_BINARY_DIR}/multi_module main
     ${kt}/crt0.S ${mm}/main.c)
+# sdk has a constructor and, when ld.lld is available (GNU ld 2.42 ignores
+# -z pack-relative-relocs on aarch64), packs its relative relocations as
+# DT_RELR: with no rtld, hosrun must apply the RELR (#22) and run the
+# initialiser (#21).
+find_program(S2PC_LLD ld.lld)
+if(S2PC_LLD)
+    # The cross gcc does not look for ld.lld itself; hand it a directory whose "ld" is lld.
+    set(lld_dir ${CMAKE_CURRENT_BINARY_DIR}/lld-bin)
+    file(MAKE_DIRECTORY ${lld_dir})
+    file(CREATE_LINK ${S2PC_LLD} ${lld_dir}/ld SYMBOLIC)
+    set(S2PC_MODULE_EXTRA_LDFLAGS -B${lld_dir} -Wl,-z,pack-relative-relocs)
+    set(S2PC_SDK_RELR ON CACHE INTERNAL "sdk example uses DT_RELR")
+else()
+    set(S2PC_SDK_RELR OFF CACHE INTERNAL "sdk example uses DT_RELR")
+endif()
 s2pc_add_c_module(multi_module_sdk_nso ${CMAKE_CURRENT_BINARY_DIR}/multi_module sdk
     ${mm}/crt0_lib.S ${mm}/sdk.c)
+set(S2PC_MODULE_EXTRA_LDFLAGS)

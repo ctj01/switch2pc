@@ -69,7 +69,9 @@ typedef struct dyn_view {
     uint64_t symtab_off, strtab_off, strtab_size;
     uint64_t hash_off, gnu_hash_off;
     uint64_t relr_off, relr_size; /* DT_RELR: packed relative relocations */
-    uint32_t sym_count;           /* 0 when unknown */
+    uint64_t init_off;            /* DT_INIT, 0 when absent */
+    uint64_t init_array_off, init_array_size;
+    uint32_t sym_count; /* 0 when unknown */
 } dyn_view;
 
 static hos_result read_dynamic(const uint8_t *image, size_t size, uint64_t dyn_off, dyn_view *d) {
@@ -116,6 +118,15 @@ static hos_result read_dynamic(const uint8_t *image, size_t size, uint64_t dyn_o
             break;
         case DT_GNU_HASH:
             d->gnu_hash_off = e.d_un.d_ptr;
+            break;
+        case DT_INIT:
+            d->init_off = e.d_un.d_ptr;
+            break;
+        case DT_INIT_ARRAY:
+            d->init_array_off = e.d_un.d_ptr;
+            break;
+        case DT_INIT_ARRAYSZ:
+            d->init_array_size = e.d_un.d_val;
             break;
         case DT_RELR:
             d->relr_off = e.d_un.d_ptr;
@@ -324,24 +335,55 @@ static hos_result walk_rel(link_ctx *c, uint64_t off, uint64_t size) {
 /*
  * DT_RELR: an even entry is the address of a relative relocation; an odd entry
  * is a bitmap of the 63 words following the last address. The addend lives in
- * the target word, so applying RELR twice corrupts it. Every toolchain that
- * emits RELR for HOS (libnx) also applies it in its own startup code, exactly
- * as it would on hardware, so the loader only counts these. FIXME(#22): apply
- * them for modules that are known not to self-relocate.
+ * the target word, so applying RELR twice corrupts it. libnx applies RELR in
+ * its own startup code and rtld does it for retail modules, so by default the
+ * loader only counts these; a module flagged apply_relr (a library loaded
+ * without rtld) gets them applied here.
  */
+/* One RELR target: the word holds the link-time address; make it absolute. */
+static int relr_add(mod0_module *m, uint64_t where) {
+    if (where > m->size || m->size - where < 8 || (where & 7) != 0) {
+        HOS_LOGE(MOD, "%s: RELR target %#llx outside image", m->name ? m->name : "module",
+                 (unsigned long long)where);
+        return -1;
+    }
+    uint64_t v;
+    memcpy(&v, m->image + where, 8);
+    v += m->base;
+    memcpy(m->image + where, &v, 8);
+    return 0;
+}
+
 static hos_result walk_relr(link_ctx *c, uint64_t off, uint64_t size) {
     mod0_module *m = &c->mods[c->self];
     if (off + size > m->size) {
         HOS_LOGE(MOD, "RELR table outside image");
         return S2PC_ERR_CORRUPT;
     }
+    uint64_t next = 0; /* image offset the next bitmap entry starts at */
     for (uint64_t p = off; p + 8 <= off + size; p += 8) {
         uint64_t entry;
         memcpy(&entry, m->image + p, 8);
+        if (!m->apply_relr) {
+            c->st.deferred += (entry & 1) ? (size_t)__builtin_popcountll(entry >> 1) : 1;
+            continue;
+        }
         if ((entry & 1) == 0) {
-            c->st.deferred++;
+            if (relr_add(m, entry) != 0) {
+                return S2PC_ERR_CORRUPT;
+            }
+            c->st.relr_applied++;
+            next = entry + 8;
         } else {
-            c->st.deferred += (size_t)__builtin_popcountll(entry >> 1);
+            for (unsigned bit = 1; bit < 64; bit++) {
+                if ((entry >> bit) & 1) {
+                    if (relr_add(m, next + (uint64_t)(bit - 1) * 8) != 0) {
+                        return S2PC_ERR_CORRUPT;
+                    }
+                    c->st.relr_applied++;
+                }
+            }
+            next += 63 * 8;
         }
     }
     return HOS_RESULT_SUCCESS;
@@ -394,8 +436,10 @@ hos_result mod0_link(mod0_module *mods, size_t count, mod0_reloc_stats *stats) {
             return r;
         }
     }
-    HOS_LOGD(MOD, "linked %zu modules: %zu relocations, %zu unresolved, %zu unsupported", count,
-             c.st.applied, c.st.unresolved, c.st.unsupported);
+    HOS_LOGD(MOD,
+             "linked %zu modules: %zu relocations, %zu relr applied, %zu unresolved, "
+             "%zu unsupported",
+             count, c.st.applied, c.st.relr_applied, c.st.unresolved, c.st.unsupported);
     if (stats) {
         *stats = c.st;
     }
@@ -412,4 +456,48 @@ hos_result mod0_relocate(uint8_t *image, size_t size, uint64_t base, const mod0_
     }
     mod0_module one = {.name = NULL, .image = image, .size = size, .base = base, .info = *m};
     return mod0_link(&one, 1, stats);
+}
+
+hos_result mod0_init_functions(const mod0_module *m, uint64_t *out, size_t max, size_t *count) {
+    *count = 0;
+    if (!m->info.present) {
+        return HOS_RESULT_SUCCESS;
+    }
+    dyn_view d;
+    hos_result r = read_dynamic(m->image, m->size, m->info.dynamic_off, &d);
+    if (HOS_FAILED(r)) {
+        return r;
+    }
+    size_t n = 0;
+    if (d.init_off) {
+        if (d.init_off >= m->size) {
+            HOS_LOGE(MOD, "DT_INIT outside image");
+            return S2PC_ERR_CORRUPT;
+        }
+        out[n++] = m->base + d.init_off;
+    }
+    if (d.init_array_size) {
+        if (d.init_array_off > m->size || d.init_array_size > m->size - d.init_array_off) {
+            HOS_LOGE(MOD, "DT_INIT_ARRAY outside image");
+            return S2PC_ERR_CORRUPT;
+        }
+        for (uint64_t p = 0; p + 8 <= d.init_array_size; p += 8) {
+            uint64_t fn;
+            memcpy(&fn, m->image + d.init_array_off + p, 8);
+            if (fn == 0 || fn == UINT64_MAX) {
+                continue;
+            }
+            if (fn < m->base || fn >= m->base + m->size) {
+                HOS_LOGE(MOD, "init_array entry %#llx outside the module (not relocated?)",
+                         (unsigned long long)fn);
+                return S2PC_ERR_CORRUPT;
+            }
+            if (n == max) {
+                return S2PC_ERR_UNSUPPORTED;
+            }
+            out[n++] = fn;
+        }
+    }
+    *count = n;
+    return HOS_RESULT_SUCCESS;
 }

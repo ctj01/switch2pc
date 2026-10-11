@@ -9,6 +9,7 @@
 extern int sdk_add(int a, int b);
 extern uint64_t sdk_tick(void);
 extern const char *sdk_message;
+extern int sdk_ready(void);
 
 void hos_main(uint32_t main_handle) {
     (void)main_handle;
@@ -27,6 +28,8 @@ void hos_main(uint32_t main_handle) {
     p = hos_str(line, "message: ");
     hos_str(p, sdk_message);
     hos_puts(line);
+
+    hos_puts(sdk_ready() ? "sdk init ran" : "FAIL sdk initialiser did not run");
 
     hos_puts(sum == 5 ? "multi_module done" : "FAIL multi_module");
     svc_exit_process();

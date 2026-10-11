@@ -31,6 +31,7 @@ typedef struct mod0_reloc_stats {
     size_t unresolved;  /* symbol relocations whose symbol is undefined; slot left 0 */
     size_t unsupported; /* relocation types we do not handle; slot untouched */
     size_t deferred;    /* DT_RELR entries left to the module's own startup code (not idempotent) */
+    size_t relr_applied; /* DT_RELR entries applied for modules with apply_relr set */
 } mod0_reloc_stats;
 
 /* A mapped module for mod0_link. */
@@ -40,7 +41,14 @@ typedef struct mod0_module {
     size_t size;
     uint64_t base; /* execution address of image[0] */
     mod0_info info;
+    /* Apply DT_RELR here. Leave it 0 for a module that relocates itself (libnx
+     * crt0) or when rtld is loaded: RELR is not idempotent, so applying it
+     * twice corrupts every target word. */
+    int apply_relr;
 } mod0_module;
+
+/* Most initialisers mod0_init_functions reports for one module. */
+#define MOD0_MAX_INIT 256
 
 /**
  * Locate and validate the MOD0 header of a loaded image.
@@ -88,5 +96,18 @@ hos_result mod0_link(mod0_module *mods, size_t count, mod0_reloc_stats *stats);
  * @return 1 if found and defined, 0 otherwise
  */
 int mod0_lookup(const mod0_module *m, const char *name, uint64_t *value);
+
+/**
+ * The initialisers of a relocated module in the order rtld runs them: DT_INIT
+ * first, then each DT_INIT_ARRAY entry. Entries that are 0 or -1 are skipped;
+ * an entry outside the module's image makes the call fail.
+ *
+ * @param m      Module with info.present != 0, already linked
+ * @param out    Receives absolute addresses
+ * @param max    Capacity of out
+ * @param count  Receives the number written
+ * @return HOS_RESULT_SUCCESS, S2PC_ERR_CORRUPT or S2PC_ERR_UNSUPPORTED (more than max)
+ */
+hos_result mod0_init_functions(const mod0_module *m, uint64_t *out, size_t max, size_t *count);
 
 #endif /* S2PC_NSO_MOD0_H */

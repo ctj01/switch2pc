@@ -24,7 +24,7 @@ numbers.
 | 16 | hos_cpu | Per-service locking instead of the single IPC request lock      | open   |
 | 17 | hos_os  | Publish steady/system clock contexts in the time shared memory  | done (time.c; steady base 0, matches the 19.2 MHz counter) |
 | 18 | tests   | Run a libnx hello world                                        | done (examples/libnx_hello, smoke_libnx_hello; devkitA64 installed on Windows, scripts/build_libnx_hello.sh) |
-| 22 | mod0    | Apply DT_RELR for modules that do not self-relocate (libnx and nnrtld do, so the loader only counts them) | open |
+| 22 | mod0    | Apply DT_RELR for modules that do not self-relocate | done (mod0_module.apply_relr; hosrun sets it for library modules when no rtld is loaded) |
 | 23 | patch   | Counter reads trap on every `mrs cntvct_el0`; replace with an inline scaled read or a vDSO-like page once profiling shows it matters | open |
 | 24 | hos_gpu | nvhost-gpu / nvhost-as-gpu / nvhost-ctrl-gpu: command submission needs a GPU (Maxwell command processor or NVN hooking) | open |
 | 25 | hos_gpu | A window: present queued frames in real time | done (display_x11.c, HOS_WINDOW=1: scaled X11 window via WSLg, keyboard as player 1 through hos_pad_external_set, close = applet exit request) |
@@ -42,4 +42,4 @@ numbers.
 | 37 | ports    | SDL2 window is always the size the game asked for | done (the X11 window scales and letterboxes any frame size) |
 | 19 | hos_fs  | Build a romfs image from a directory at load time               | done (romfs_build.c; lazy, file data read on demand) |
 | 20 | hos_input | Controller input into the hid shared memory                   | done (input_state.c: 60 Hz writer; HOS_INPUT_SCRIPT, HOS_INPUT_EVDEV; evdev path compiled but untested without a device) |
-| 21 | loader  | Call DT_INIT_ARRAY of library modules when no rtld is present   | open   |
+| 21 | loader  | Call DT_INIT_ARRAY of library modules when no rtld is present   | done (mod0_init_functions + a one-page ARM64 trampoline that runs them before the entry) |

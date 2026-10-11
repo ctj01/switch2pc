@@ -78,6 +78,72 @@ static int protect(uint8_t *base, size_t off, size_t size, int prot, const char 
     return 0;
 }
 
+/*
+ * Library initialisers without rtld (#21). On hardware rtld runs DT_INIT and
+ * DT_INIT_ARRAY of every module before the entry point; libnx's crt0 does its
+ * own module's, so only the other modules need it. The loader writes a page
+ * of ARM64 code that calls each initialiser in turn and then branches to the
+ * real entry, and makes that page the entry: initialisers run on the main
+ * thread with its stack and TLS, exactly as under rtld.
+ *
+ *     mov  x19, x0 ; mov x20, x1        keep the entry arguments
+ *     ldr  x16, =init_k ; blr x16       for each initialiser
+ *     mov  x0, x19 ; mov x1, x20
+ *     ldr  x16, =entry ; br x16
+ *     .quad init_0 ... init_n-1, entry
+ */
+#define A64_MOV_X19_X0 0xaa0003f3u
+#define A64_MOV_X20_X1 0xaa0103f4u
+#define A64_MOV_X0_X19 0xaa1303e0u
+#define A64_MOV_X1_X20 0xaa1403e1u
+#define A64_BLR_X16    0xd63f0200u
+#define A64_BR_X16     0xd61f0200u
+#define INIT_PAGE      0x1000u
+
+static uint32_t a64_ldr_x16_literal(size_t insn_index, size_t literal_byte_off) {
+    int64_t delta = (int64_t)literal_byte_off - (int64_t)(insn_index * 4);
+    return 0x58000000u | ((uint32_t)((delta / 4) & 0x7FFFF) << 5) | 16u;
+}
+
+/* Returns the page address, or 0 on failure. */
+static uint64_t build_init_trampoline(uint64_t at, const uint64_t *fns, size_t n, uint64_t entry) {
+    size_t code_words = 2 + 2 * n + 2 + 2;
+    size_t lit_off = (code_words * 4 + 7) & ~(size_t)7;
+    if (lit_off + (n + 1) * 8 > INIT_PAGE) {
+        HOS_LOGE(MOD, "too many initialisers (%zu) for one page", n);
+        return 0;
+    }
+    void *page = mmap((void *)at, INIT_PAGE, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    if (page == MAP_FAILED || (uint64_t)page != at) {
+        HOS_LOGE(MOD, "cannot map the init trampoline at %#" PRIx64 ": %s", at, strerror(errno));
+        return 0;
+    }
+    uint32_t *w = page;
+    uint64_t *lit = (uint64_t *)((uint8_t *)page + lit_off);
+    size_t i = 0;
+    w[i++] = A64_MOV_X19_X0;
+    w[i++] = A64_MOV_X20_X1;
+    for (size_t k = 0; k < n; k++) {
+        lit[k] = fns[k];
+        w[i] = a64_ldr_x16_literal(i, lit_off + k * 8);
+        i++;
+        w[i++] = A64_BLR_X16;
+    }
+    w[i++] = A64_MOV_X0_X19;
+    w[i++] = A64_MOV_X1_X20;
+    lit[n] = entry;
+    w[i] = a64_ldr_x16_literal(i, lit_off + n * 8);
+    i++;
+    w[i++] = A64_BR_X16;
+    __builtin___clear_cache((char *)page, (char *)page + INIT_PAGE);
+    if (mprotect(page, INIT_PAGE, PROT_READ | PROT_EXEC) != 0) {
+        HOS_LOGE(MOD, "mprotect init trampoline: %s", strerror(errno));
+        return 0;
+    }
+    return at;
+}
+
 static int take_value(int argc, char **argv, int *i, const char **out) {
     if (*i + 1 >= argc) {
         fprintf(stderr, "%s needs a value\n", argv[*i]);
@@ -270,6 +336,17 @@ int main(int argc, char **argv) {
         cursor += m->nso.image_size;
     }
 
+    /* Without rtld nobody else relocates or initialises library modules (#21, #22).
+     * Module 0 is the entry: libnx's crt0 applies its own RELR and init_array. */
+    int has_rtld = 0;
+    for (int i = 0; i < count; i++) {
+        has_rtld |= strncmp(mods[i].name, "rtld", 4) == 0 &&
+                    (mods[i].name[4] == 0 || mods[i].name[4] == '.');
+    }
+    for (int i = 0; i < count; i++) {
+        link[i].apply_relr = !has_rtld && i > 0;
+    }
+
     mod0_reloc_stats rs;
     hos_result r = mod0_link(link, (size_t)count, &rs);
     if (HOS_FAILED(r)) {
@@ -291,6 +368,38 @@ int main(int argc, char **argv) {
         }
     }
 
+    uint64_t entry = (uint64_t)mods[0].nso.image + mods[0].nso.hdr.text.memory_offset;
+    if (!has_rtld && count > 1) {
+        /* Dependencies first: sdk, then subsdk9..0, i.e. the library list backwards. */
+        static uint64_t fns[MOD0_MAX_INIT];
+        size_t num_init = 0;
+        for (int i = count - 1; i > 0; i--) {
+            size_t n = 0;
+            r = mod0_init_functions(&link[i], fns + num_init, MOD0_MAX_INIT - num_init, &n);
+            if (HOS_FAILED(r)) {
+                return die(r, "mod0_init_functions");
+            }
+            if (n) {
+                HOS_LOGI(MOD, "%s: %zu initialiser%s", link[i].name, n, n == 1 ? "" : "s");
+            }
+            num_init += n;
+        }
+        if (num_init) {
+            uint64_t page = build_init_trampoline(cursor, fns, num_init, entry);
+            if (!page || params.num_modules >= HOS_MAX_MODULES) {
+                HOS_LOGE(MOD, "cannot run library initialisers");
+                return 1;
+            }
+            hos_cpu_module *cm = &params.modules[params.num_modules++];
+            memset(cm, 0, sizeof(*cm));
+            cm->image_base = page;
+            cm->image_size = INIT_PAGE;
+            cm->text_size = INIT_PAGE;
+            cm->name = "init";
+            entry = page;
+        }
+    }
+
     params.program_id = program_id;
 
     r = hos_cpu_init(&params);
@@ -300,10 +409,10 @@ int main(int argc, char **argv) {
 
     HOS_LOGI(MOD,
              "%d module%s, %zu patches (%zu svc, %zu counter), %zu relocations (%zu unresolved, "
-             "%zu relr left to the module)",
+             "%zu relr applied, %zu relr left to the module)",
              count, count == 1 ? "" : "s", ps_total.total, ps_total.by_kind[PATCH_SVC_TO_BRK],
-             ps_total.by_kind[PATCH_COUNTER_TO_BRK], rs.applied, rs.unresolved, rs.deferred);
+             ps_total.by_kind[PATCH_COUNTER_TO_BRK], rs.applied, rs.unresolved, rs.relr_applied,
+             rs.deferred);
 
-    uint64_t entry = (uint64_t)mods[0].nso.image + mods[0].nso.hdr.text.memory_offset;
     hos_cpu_run_main(entry, stack_size);
 }

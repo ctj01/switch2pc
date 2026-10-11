@@ -179,8 +179,19 @@ agrees. A trap per read is slow (#23); correctness first.
 
 libnx and nnrtld relocate their own images at start-up. For RELA that is
 idempotent and our earlier pass is harmless. RELR entries add the base to the
-word in place, so applying them twice corrupts the image: the loader counts
-them and leaves them to the module (#22).
+word in place, so applying them twice corrupts the image. The rule is
+therefore about who else will do it: with rtld in the set, rtld relocates
+and initialises every module, and the loader only counts RELR; without rtld,
+module 0 (libnx's crt0) still relocates and initialises itself, but nobody
+would touch the libraries, so the loader applies their RELR (#22) and runs
+their DT_INIT and DT_INIT_ARRAY (#21). It does the latter without a second
+execution path: it writes one page of ARM64 code that saves the entry
+arguments, calls each initialiser (dependencies first: sdk, then subsdk9..0),
+restores the arguments and branches to the real entry, and makes that page
+the entry point. Initialisers thus run on the main thread with its stack and
+HOS TLS, as under rtld. `examples/multi_module` covers both: its sdk is linked
+with lld's `-z pack-relative-relocs` (GNU ld 2.42 ignores it on aarch64) and
+has a constructor that `main` checks.
 
 ### Display
 
