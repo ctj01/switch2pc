@@ -310,9 +310,11 @@ Phase 2 (services): `hid`, `vi` with a null compositor, paced `audout`,
 Done: DOOM, Quake and an unmodified SDL2 game (OpenTyrian) run in a real
 window (#25) with real sound (#27).
 
-Phase 3 (GPU): either hook NVN entry points by fingerprinting the statically
-linked driver, or accept that a Maxwell command processor is needed. This is
-the decision point for the whole project and it is deliberately last.
+Phase 3 (GPU): decided for a Maxwell command processor. The homebrew this
+project runs reaches the GPU through deko3d or Mesa, which both submit
+Maxwell pushbuffers through `nvhost-gpu`; NVN exists only inside retail
+games, so hooking it is out of scope. Milestones M0 (the driver accepts the
+GPU) to M5 are in [gpu.md](gpu.md).
 
 ## 5. Non-goals
 
