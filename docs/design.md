@@ -198,6 +198,21 @@ unused pair, so buffer lookups must skip null entries; and `DequeueBuffer` must
 always return a flattened `NvMultiFence` (with zero fences), because the client
 does not initialise its copy when the reply says there is none.
 
+### Window
+
+`HOS_WINDOW=1` makes `vi` present each decoded frame in an X11 window
+(`display_x11.c`), which WSLg shows on the Windows desktop. Two threads share
+one connection under `XInitThreads`: the game thread that queues a buffer
+scales it (nearest neighbour, letterboxed) into an `XImage` and puts it, and
+an event thread owns the keyboard, resizes and close requests, so input keeps
+flowing during loading screens. The keyboard reaches `hid` through a small
+"external pad" in `libhos_cpu` (`hos_pad_external_set`), which keeps
+`libhos_gpu` and `libhos_input` independent. Closing the window delivers the
+applet exit request rather than killing the process, and a custom X error
+handler keeps a destroyed window from taking the game down with Xlib's
+default exit. The target's libX11 comes from Ubuntu's arm64 ports; the cross
+toolchain file searches the multiarch directory for it.
+
 ### Input
 
 hid never pushes events; the game polls a shared memory. Each Npad holds

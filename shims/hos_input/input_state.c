@@ -393,6 +393,13 @@ static void *writer_thread(void *arg) {
         if (g_input_file) {
             file_apply(&state);
         }
+        {
+            uint64_t b;
+            int32_t lx, ly, rx, ry;
+            if (hos_pad_external_get(&b, &lx, &ly, &rx, &ry)) {
+                state = (hos_input_state){.buttons = b, .lx = lx, .ly = ly, .rx = rx, .ry = ry};
+            }
+        }
 #ifdef __linux__
         if (g_evdev_fd >= 0) {
             evdev_poll(&state);

@@ -149,6 +149,18 @@ HOS_EXPORT void hos_ipc_event_clear(void *ev);
 HOS_EXPORT void hos_applet_request_exit(void);
 HOS_EXPORT void hos_applet_set_exit_handler(void (*fn)(void));
 
+/*
+ * An external pad: a front end that owns the keyboard (the X11 window) sets
+ * player 1's state here, and the hid writer thread takes it over the scripted
+ * or file sources while it is active. Buttons use the Switch bit numbering,
+ * sticks are -32767..32767.
+ */
+HOS_EXPORT void hos_pad_external_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx,
+                                     int32_t ry);
+/* Returns 0 until hos_pad_external_set has been called once, then 1 and the state. */
+HOS_EXPORT int hos_pad_external_get(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx,
+                                    int32_t *ry);
+
 /**
  * Copy a service-owned handle for the game: adds a copy-handle entry to the
  * reply that refers to the same object. Returns 0 on failure.

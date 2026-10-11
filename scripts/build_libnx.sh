@@ -16,6 +16,9 @@ fi
 mkdir -p "$out"
 
 dkp=${DEVKITPRO:-/c/devkitPro}
+# The Windows installer sets DEVKITPRO=/opt/devkitpro, which only exists inside
+# devkitPro's own MSYS2; from Git Bash fall back to the default install path.
+[ -d "$dkp" ] || dkp=/c/devkitPro
 case "$(uname -s)" in
 MINGW* | MSYS*) dkp_w=$(cygpath -m "$dkp") ;;
 *) dkp_w=$dkp ;;

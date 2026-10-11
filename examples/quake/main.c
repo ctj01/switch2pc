@@ -59,8 +59,8 @@ static const struct {
     {HidNpadButton_AnyDown, K_DOWNARROW},
     {HidNpadButton_AnyLeft, K_LEFTARROW},
     {HidNpadButton_AnyRight, K_RIGHTARROW},
-    {HidNpadButton_L, ','},                        /* strafe left */
-    {HidNpadButton_R, '.'},                        /* strafe right */
+    {HidNpadButton_L, ','}, /* strafe left */
+    {HidNpadButton_R, '.'}, /* strafe right */
 };
 
 static void queue_key(int key, int down) {
@@ -174,10 +174,11 @@ int main(int argc, char **argv) {
     say("quake: starting");
     QG_Create(4, quake_argv);
     double old = (double)armTicksToNs(armGetSystemTick()) / 1e9 - 0.1;
-    for (;;) {
+    while (appletMainLoop()) { /* false on the applet exit request (window closed, HOME) */
         double now = (double)armTicksToNs(armGetSystemTick()) / 1e9;
         QG_Tick(now - old);
         old = now;
     }
+    say("quake: exit requested");
     return 0;
 }

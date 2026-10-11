@@ -138,10 +138,16 @@ scripts/run_game.sh quake 3  # second argument is the window scale
 scripts/run_game.sh tyrian 2
 ```
 
-hosrun writes each frame to a BMP (`HOS_FRAMES_LIVE`) and reads the pad from a
-text file the window keeps updated (`HOS_INPUT_FILE`); `tools/viewer.ps1` is
-that window. It is a stopgap until a real window exists (#25), but it is
-playable: about 30 fps under qemu-user on a desktop CPU.
+The window is hosrun's own (`HOS_WINDOW=1`): an X11 window, shown on Windows
+through WSLg, that opens on the first frame at `HOS_WINDOW_SCALE` times the
+frame size, scales and letterboxes on resize, owns the keyboard (WASD also
+drive the left stick) and, when closed, sends the applet exit request so the
+game quits through its own loop. It needs the target's libX11, which on an
+x86-64 host comes from Ubuntu's arm64 ports (`sudo scripts/setup_wsl_arm64_libs.sh`,
+then reconfigure `build/aarch64`). Without it, `run_game.sh <game> 2 --viewer`
+falls back to the older path: hosrun writes a BMP (`HOS_FRAMES_LIVE`) that
+`tools/viewer.ps1` shows, and reads the pad from a file (`HOS_INPUT_FILE`).
+Either way it is playable, about 30 fps under qemu-user on a desktop CPU.
 
 Input reaches the game the way it does on hardware: a writer thread refreshes
 player 1's Npad LIFO in the hid shared memory at 60 Hz, from a timed script
@@ -150,7 +156,7 @@ player 1's Npad LIFO in the hid shared memory at 60 Hz, from a timed script
 
 Not implemented yet: `account`, `pctl`, `bsd:u` sockets, command submission to
 `nvhost-gpu`, audio to a sound card (buffers are paced, not played), config
-files, a window. Track progress in
+files. Track progress in
 [docs/ISSUES.md](docs/ISSUES.md).
 
 ## Quick start

@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "common/hos_log.h"
+#include "display_x11.h"
 #include "gpu_internal.h"
 #include "parcel.h"
 #include "swizzle.h"
@@ -234,6 +235,9 @@ static void dump_frame(vi_layer *layer, const uint8_t *gb) {
             lit++;
         }
     }
+
+    /* The window (HOS_WINDOW=1) opens on the first frame; see display_x11.h. */
+    display_x11_present(g_rgb, width, height);
 
     const char *dir = getenv("HOS_FRAMES");
     const char *every_s = getenv("HOS_FRAMES_EVERY");
@@ -732,3 +736,7 @@ static hos_result display_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
 const hos_service_class hos_vi_u_class = {.name = "vi:u", .dispatch = display_dispatch};
 const hos_service_class hos_vi_m_class = {.name = "vi:m", .dispatch = display_dispatch};
 const hos_service_class hos_vi_s_class = {.name = "vi:s", .dispatch = display_dispatch};
+
+__attribute__((destructor)) static void vi_cleanup(void) {
+    display_x11_quit();
+}

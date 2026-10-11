@@ -158,8 +158,10 @@ int main(int argc, char **argv) {
                                 "-skill", "3",     "-nosound",         NULL};
     say("doom: starting E1M1");
     doomgeneric_Create(8, doom_argv);
-    for (;;) {
+    while (appletMainLoop()) { /* false on the applet exit request (window closed, HOME) */
         doomgeneric_Tick();
     }
+    say("doom: exit requested after %u frames", g_frames);
+    framebufferClose(&g_fb);
     return 0;
 }

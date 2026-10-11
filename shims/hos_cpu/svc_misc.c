@@ -1,4 +1,5 @@
 #include <inttypes.h>
+#include <pthread.h>
 #include <sched.h>
 #include <stdlib.h>
 #include <string.h>
@@ -377,4 +378,36 @@ void hos_applet_request_exit(void) {
     } else {
         exit(0);
     }
+}
+
+/* ---- external pad (see hos_ipc.h) --------------------------------------------- */
+
+static pthread_mutex_t g_pad_lock = PTHREAD_MUTEX_INITIALIZER;
+static int g_pad_active;
+static uint64_t g_pad_buttons;
+static int32_t g_pad_sticks[4];
+
+void hos_pad_external_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
+    pthread_mutex_lock(&g_pad_lock);
+    g_pad_active = 1;
+    g_pad_buttons = buttons;
+    g_pad_sticks[0] = lx;
+    g_pad_sticks[1] = ly;
+    g_pad_sticks[2] = rx;
+    g_pad_sticks[3] = ry;
+    pthread_mutex_unlock(&g_pad_lock);
+}
+
+int hos_pad_external_get(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry) {
+    pthread_mutex_lock(&g_pad_lock);
+    int active = g_pad_active;
+    if (active) {
+        *buttons = g_pad_buttons;
+        *lx = g_pad_sticks[0];
+        *ly = g_pad_sticks[1];
+        *rx = g_pad_sticks[2];
+        *ry = g_pad_sticks[3];
+    }
+    pthread_mutex_unlock(&g_pad_lock);
+    return active;
 }
