@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -242,29 +243,90 @@ static float linear_to_srgb(float v) {
     return v <= 0.0031308f ? v * 12.92f : 1.055f * powf(v, 1.0f / 2.4f) - 0.055f;
 }
 
+static float srgb_to_linear(float v) {
+    return v <= 0.04045f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
+}
+
+/*
+ * sRGB through tables, with the same results as the formulas: decoding is a
+ * function of the byte, and encoding finds the byte among thresholds built
+ * from linear_to_srgb, so it returns unorm8(linear_to_srgb(v)) for every v.
+ * powf per channel per pixel was a third of an sRGB scene's time.
+ */
+static float g_srgb_dec[256];
+static float g_srgb_thr[256]; /* [k]: smallest v in (0, 1) that encodes to k or more */
+static pthread_once_t g_srgb_once = PTHREAD_ONCE_INIT;
+
+static float float_of(uint32_t b) {
+    float v;
+    memcpy(&v, &b, 4);
+    return v;
+}
+
+static void srgb_init(void) {
+    for (int k = 0; k < 256; k++) {
+        g_srgb_dec[k] = srgb_to_linear((float)k / 255.0f);
+    }
+    g_srgb_thr[0] = 0.0f;
+    for (int k = 1; k < 256; k++) {
+        /* positive floats order like their bit patterns: bisect on the bits of (0, 1] */
+        uint32_t lo = 1, hi = 0x3F800000;
+        while (lo < hi) {
+            uint32_t mid = lo + (hi - lo) / 2;
+            if (unorm8(linear_to_srgb(float_of(mid))) >= k) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        g_srgb_thr[k] = float_of(lo);
+    }
+}
+
+static uint8_t srgb8(float v) {
+    if (!(v > 0.0f)) {
+        return 0;
+    }
+    if (v >= 1.0f) {
+        return 255;
+    }
+    uint32_t lo = 0, hi = 255; /* largest k with thr[k] <= v */
+    while (lo < hi) {
+        uint32_t mid = (lo + hi + 1) / 2;
+        if (g_srgb_thr[mid] <= v) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return (uint8_t)lo;
+}
+
 /* Encode the clear colour for a render-target format; returns bytes per pixel, 0 if unknown. */
 uint32_t gpu_encode_color(uint32_t format, const float rgba[4], uint8_t out[16]) {
     float c[4] = {rgba[0], rgba[1], rgba[2], rgba[3]};
     switch (format) {
     case 0xD6: /* A8B8G8R8_SRGB */
+        pthread_once(&g_srgb_once, srgb_init);
+        out[0] = srgb8(c[0]);
+        out[1] = srgb8(c[1]);
+        out[2] = srgb8(c[2]);
+        out[3] = unorm8(c[3]);
+        return 4;
     case 0xD0: /* A8R8G8B8_SRGB */
-        for (int i = 0; i < 3; i++) {
-            c[i] = linear_to_srgb(c[i]);
-        }
-        break;
-    default:
-        break;
-    }
-    switch (format) {
+        pthread_once(&g_srgb_once, srgb_init);
+        out[0] = srgb8(c[2]);
+        out[1] = srgb8(c[1]);
+        out[2] = srgb8(c[0]);
+        out[3] = unorm8(c[3]);
+        return 4;
     case 0xD5: /* A8B8G8R8_UNORM: bytes R G B A */
-    case 0xD6:
         out[0] = unorm8(c[0]);
         out[1] = unorm8(c[1]);
         out[2] = unorm8(c[2]);
         out[3] = unorm8(c[3]);
         return 4;
     case 0xCF: /* A8R8G8B8_UNORM: bytes B G R A */
-    case 0xD0:
         out[0] = unorm8(c[2]);
         out[1] = unorm8(c[1]);
         out[2] = unorm8(c[0]);
@@ -290,20 +352,28 @@ uint32_t gpu_encode_color(uint32_t format, const float rgba[4], uint8_t out[16])
     }
 }
 
-static float srgb_to_linear(float v) {
-    return v <= 0.04045f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
-}
-
 uint32_t gpu_decode_color(uint32_t format, const uint8_t *in, float rgba[4]) {
     switch (format) {
-    case 0xD5:
     case 0xD6:
+        pthread_once(&g_srgb_once, srgb_init);
+        rgba[0] = g_srgb_dec[in[0]];
+        rgba[1] = g_srgb_dec[in[1]];
+        rgba[2] = g_srgb_dec[in[2]];
+        rgba[3] = in[3] / 255.0f;
+        return 4;
+    case 0xD0:
+        pthread_once(&g_srgb_once, srgb_init);
+        rgba[0] = g_srgb_dec[in[2]];
+        rgba[1] = g_srgb_dec[in[1]];
+        rgba[2] = g_srgb_dec[in[0]];
+        rgba[3] = in[3] / 255.0f;
+        return 4;
+    case 0xD5:
         for (int c = 0; c < 4; c++) {
             rgba[c] = in[c] / 255.0f;
         }
         break;
     case 0xCF:
-    case 0xD0:
         rgba[0] = in[2] / 255.0f;
         rgba[1] = in[1] / 255.0f;
         rgba[2] = in[0] / 255.0f;
@@ -330,11 +400,6 @@ uint32_t gpu_decode_color(uint32_t format, const uint8_t *in, float rgba[4]) {
         return 8;
     default:
         return 0;
-    }
-    if (format == 0xD6 || format == 0xD0) {
-        for (int c = 0; c < 3; c++) {
-            rgba[c] = srgb_to_linear(rgba[c]);
-        }
     }
     return 4;
 }

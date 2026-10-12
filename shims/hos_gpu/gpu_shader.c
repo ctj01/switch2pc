@@ -321,11 +321,14 @@ shader_dcache *shader_dcache_new(void) {
     return calloc(1, sizeof(shader_dcache));
 }
 
-static INLINE uint8_t decode_op(shader_dcache *c, u64 i) {
+/* Indexed by pc: a program's instructions never collide with each other, and the
+ * word tag catches another program at the same pc (a hash of the word collided
+ * often enough within one shader to miss on 14% of lookups). */
+static INLINE uint8_t decode_op(shader_dcache *c, uint32_t pc, u64 i) {
     if (!c) {
         return classify(i);
     }
-    uint32_t h = (uint32_t)((i * 0x9E3779B97F4A7C15ull) >> 54) & (SHADER_DCACHE - 1);
+    uint32_t h = pc & (SHADER_DCACHE - 1);
     if (c->e[h].op && c->e[h].insn == i) {
         return (uint8_t)(c->e[h].op - 1);
     }
@@ -348,7 +351,7 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
             return -1;
         }
         u64 i = code[pc];
-        uint8_t opc = decode_op(e->dcache, i);
+        uint8_t opc = decode_op(e->dcache, pc, i);
         uint32_t next = pc + 1;
         int guard = pred(e, bits(i, 16, 3)) ^ bits(i, 19, 1);
         uint32_t d = bits(i, 0, 8);
