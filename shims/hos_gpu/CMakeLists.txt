@@ -6,6 +6,8 @@ add_library(hos_gpu SHARED
     nvgpu.c
     gpu_engines.c
     gpu_mme.c
+    gpu_shader.c
+    gpu_draw.c
     parcel.c
     swizzle.c
     vi.c

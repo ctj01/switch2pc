@@ -1,0 +1,49 @@
+#ifndef HOS_GPU_SHADER_H
+#define HOS_GPU_SHADER_H
+
+#include <stdint.h>
+
+/*
+ * Maxwell (GM20B, SM 5.3) shader interpreter for the CPU rasteriser (M3).
+ * It runs the instructions deko3d's compiler emits for vertex and fragment
+ * shaders; encodings follow envytools' gm107 disassembler tables. An
+ * instruction it does not know stops the shader with an error naming it.
+ *
+ * Attribute space (bytes): 0x70 position (x y z w), 0x80 + 16 * i generic
+ * attribute i, 0x2f8 instance id, 0x2fc vertex id. Fragment shaders read
+ * their inputs through IPA, which calls back into the rasteriser, and leave
+ * colour outputs in r0, r1, ...
+ */
+
+#define SHADER_ATTR_WORDS 256 /* attribute space 0x000-0x3ff */
+#define SHADER_CBUFS      18
+
+typedef struct shader_env shader_env;
+
+/* IPA: mode 0 pass (screen-linear), 1 perspective (attr/w, the shader multiplies by w),
+ * 2 constant (provoking vertex). `addr` is the attribute byte address. */
+typedef float (*shader_ipa_fn)(void *user, uint32_t addr, uint32_t mode);
+
+struct shader_env {
+    uint32_t in[SHADER_ATTR_WORDS];
+    uint32_t out[SHADER_ATTR_WORDS];
+    const uint8_t *cb[SHADER_CBUFS];
+    uint32_t cb_size[SHADER_CBUFS];
+    shader_ipa_fn ipa;
+    void *user;
+    uint32_t r[256]; /* r255 reads as zero */
+    uint8_t p[8];    /* p7 is always true */
+    int killed;      /* fragment discarded */
+};
+
+/**
+ * Run a shader from its first instruction (just after the 0x50-byte header).
+ *
+ * @param code        Instruction words (control words included, every fourth)
+ * @param code_words  How many 64-bit words are readable at code
+ * @param bad_insn    On error, the instruction that stopped it
+ * @return 0 on EXIT, -1 on an unknown instruction or a runaway shader
+ */
+int shader_run(const uint64_t *code, uint32_t code_words, shader_env *env, uint64_t *bad_insn);
+
+#endif /* HOS_GPU_SHADER_H */

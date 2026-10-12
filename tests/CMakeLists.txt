@@ -15,6 +15,9 @@ s2pc_add_test(test_sha256 s2pc_common)
 s2pc_add_test(test_mme s2pc_common)
 target_sources(test_mme PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_mme.c)
 target_include_directories(test_mme PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
+s2pc_add_test(test_shader s2pc_common m)
+target_sources(test_shader PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader.c)
+target_include_directories(test_shader PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
 
 # Runtime: ARM64 only (qemu-user through CMAKE_CROSSCOMPILING_EMULATOR when cross-building).
 if(S2PC_ARM64)
@@ -166,6 +169,31 @@ if(S2PC_ARM64)
             TIMEOUT 120
             PASS_REGULAR_EXPRESSION "deko3d: device created.*swapchain created.*queue created.*clears.*frame 40 presented.*push data ok.*copy buffer ok.*image round trip ok.*deko3d: done"
             FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|does not parse|not mapped|deko3d: .*: result [1-9]")
+    endif()
+
+    # GPU milestone M3a: deko_basic's triangle (shaders compiled by uam, vertex shader
+    # indexing a constant buffer by gl_VertexID, perspective-correct colour), rendered
+    # on the CPU and compared pixel by pixel with an independent reference.
+    set(tri_dir ${CMAKE_SOURCE_DIR}/examples/libnx_deko3d_triangle)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(EXISTS ${tri_dir}/build/deko3d_triangle.nso AND EXISTS ${tri_dir}/romfs/shaders)
+        file(MAKE_DIRECTORY ${fixture_dir}/triangle)
+        add_test(NAME smoke_deko3d_triangle
+                 COMMAND hosrun --romfs ${tri_dir}/romfs --sdmc ${fixture_dir}/sdmc
+                         ${tri_dir}/build/deko3d_triangle.nso)
+        set_tests_properties(smoke_deko3d_triangle PROPERTIES
+            TIMEOUT 300
+            ENVIRONMENT "HOS_FRAMES=${fixture_dir}/triangle"
+            PASS_REGULAR_EXPRESSION "triangle scene ready.*1 draws, 1 triangles, 460800 pixels.*deko3d triangle: done"
+            FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|shader stopped|does not parse|not mapped")
+        if(Python3_FOUND)
+            add_test(NAME check_deko3d_triangle
+                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/check_triangle.py
+                             ${fixture_dir}/triangle/frame_0002.ppm)
+            set_tests_properties(check_deko3d_triangle PROPERTIES
+                DEPENDS smoke_deko3d_triangle
+                PASS_REGULAR_EXPRESSION "0 differ by more than 1")
+        endif()
     endif()
 
     # DOOM (doomgeneric + shareware IWAD): a complete game through framebuffer, input,

@@ -26,6 +26,21 @@ MINGW* | MSYS*) dkp_w=$(cygpath -m "$dkp") ;;
 esac
 export DEVKITPRO="$dkp_w"
 
+# GLSL shaders next to main.c (name_vsh.glsl, name_fsh.glsl, ...) are compiled with
+# uam into romfs/shaders/name.dksh, and their raw Maxwell code into build/ for
+# disassembly (docs/gpu.md).
+for g in "$src"/*.glsl; do
+    [ -f "$g" ] || continue
+    base=$(basename "${g%.glsl}")
+    case "$base" in
+    *_vsh) stage=vert ;; *_fsh) stage=frag ;; *_gsh) stage=geom ;;
+    *_csh) stage=comp ;; *_tcsh) stage=tess_ctrl ;; *_tesh) stage=tess_eval ;;
+    *) echo "unknown shader stage for $g" >&2; exit 1 ;;
+    esac
+    mkdir -p "$src/romfs/shaders"
+    "$dkp/tools/bin/uam" -s "$stage" -o "$src/romfs/shaders/$base.dksh" -r "$out/$base.bin" "$g"
+done
+
 cc="$dkp/devkitA64/bin/aarch64-none-elf-gcc"
 arch="-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE"
 

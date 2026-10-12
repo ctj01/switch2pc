@@ -1,12 +1,13 @@
 # GPU plan (#40)
 
-Status: **M1 done** (2026-10-11). `examples/libnx_deko3d` clears and
-presents 60 frames whose colours come out of the GPU path (through a 3D
-engine macro), then checks an inline upload, a DMA buffer copy and an image
-round trip byte for byte; the image copied into a framebuffer is verified
-pixel by pixel through `vi`'s independent deswizzle. `smoke_deko3d` and the
-MME unit tests (`test_mme`) check it. Everything still runs on the CPU and
-nothing is rasterised yet. Next: M2 (Vulkan) or M3 (shaders), see below.
+Status: **M3a done** (2026-10-12): the first triangle. `examples/libnx_deko3d_triangle`
+is devkitPro's deko_basic scene with its shaders compiled by uam; the vertex
+shader indexes a constant buffer by `gl_VertexID`, the fragment shader
+interpolates colour with perspective correction, and the result matches an
+independent reference pixel for pixel (`check_deko3d_triangle`: 916 168
+pixels, 0 differences). M0 and M1 are done as well. Everything runs on the
+CPU. Next: M3b (vertex buffers, more arithmetic, the cube) and M3c
+(depth, blending, more of deko3d's examples).
 
 ## Which path, and why
 
@@ -76,9 +77,12 @@ other feature in this repository.
    host GPU. This is where window and GPU meet; the X11 window gets a
    Vulkan swapchain.
 4. **M3, shaders (months).** Decode Maxwell SASS for vertex and fragment
-   stages (the instructions deko3d's compiler emits for simple GLSL),
-   translate to SPIR-V, vertex fetch, constant buffers, rasterisation
-   state. Exit: deko3d's triangle and cube examples.
+   stages (the instructions deko3d's compiler emits for simple GLSL), vertex
+   fetch, constant buffers, rasterisation state; on the CPU first, then
+   translated to SPIR-V for M2's Vulkan backend. Split into verifiable
+   steps: **M3a, the triangle: done** (`gpu_shader.c` interpreter,
+   `gpu_draw.c` rasteriser); M3b, vertex buffers, uniforms and the cube;
+   M3c, depth test, blending and the rest of deko3d's examples.
 5. **M4, textures (weeks).** TIC/TSC decoding, texture formats, samplers,
    swizzled texture upload. Exit: a textured quad; then SDL2 through Mesa.
 6. **M5, the rest (open-ended).** Compute, queries, transform feedback,
@@ -119,6 +123,25 @@ Each point below cost a failed run and is now in `nvgpu.c`:
 - Image copies go through the DMA engine with block-linear surfaces in both
   directions; a round trip alone only proves the two directions agree, so
   the test also checks the copied image against `vi`'s decoder.
+
+## What M3a taught
+
+- Read the shaders before writing the interpreter. `uam -r` writes the raw
+  Maxwell code and envytools' `envydis -m gm107` disassembles it (both are
+  free; envytools builds in a minute, `build/envytools`). The triangle
+  needed nine instructions, and the disassembler's opcode tables gave every
+  field position, so nothing about the encoding was guessed.
+- uam puts constant arrays in constant buffer 1 and indexes them with
+  `ld c1[reg+imm]`; deko3d binds that buffer per stage with 0x8E0-0x8E2 and
+  0x904 + 8 * stage.
+- Fragment inputs are perspective-correct by construction: `ipa pass
+  a[0x7c]` returns the interpolated 1/w, `mufu rcp` inverts it, and every
+  `ipa` that follows multiplies the interpolated attr/w by it.
+- Facing is decided in NDC, so the viewport's negative Y scale flips the
+  window-space sign; getting that backwards culls everything silently.
+- A reference renderer in a few lines of Python turned "looks right" into
+  "0 of 916 168 pixels differ", and caught a bug in the checker itself (a
+  PPM whose first pixel byte is 0x20 must not be split on whitespace).
 
 ## Risks and how to keep them small
 

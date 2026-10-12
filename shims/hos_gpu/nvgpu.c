@@ -25,6 +25,7 @@
 #include <time.h>
 
 #include "common/hos_log.h"
+#include "gpu_draw.h"
 #include "gpu_engines.h"
 #include "gpu_internal.h"
 
@@ -139,6 +140,27 @@ static uint64_t va_alloc(uint64_t size, uint64_t align, uint32_t page_size) {
     }
     *cursor = align_up(va + size, page_size >= g_big_page ? g_big_page : SMALL_PAGE);
     return va;
+}
+
+/* GPU VA -> host pointer and the bytes readable from there to the end of the mapping. */
+void *nv_gpu_va_to_host_span(uint64_t va, uint64_t *avail) {
+    pthread_mutex_lock(&g_lock);
+    void *p = NULL;
+    *avail = 0;
+    for (int i = 0; i < MAX_MAPPINGS; i++) {
+        gpu_mapping *m = &g_maps[i];
+        if (m->used && va >= m->va && va - m->va < m->size) {
+            uint64_t addr, size, within = m->buffer_offset + (va - m->va);
+            if (nv_map_lookup(m->handle, &addr, &size) && within < size) {
+                uint64_t left_map = m->size - (va - m->va), left_mem = size - within;
+                *avail = left_map < left_mem ? left_map : left_mem;
+                p = (void *)(addr + within);
+            }
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_lock);
+    return p;
 }
 
 /* GPU VA -> host pointer, or NULL if nothing is mapped there for `len` bytes. */
@@ -581,13 +603,16 @@ static void gpu_submit(gpu_channel *ch, const uint64_t *entries, uint32_t num) {
     ch->submits++;
     if (ch->submits <= 3 || ch->submits % 100 == 0) {
         const gpu_engine_stats *st = gpu_engines_stats(ch->engines);
+        const gpu_draw_stats *ds = gpu_engines_draw_stats(ch->engines);
         HOS_LOGI(MOD,
                  "submit %" PRIu64 " on channel fd %u: %u entries, %" PRIu64
                  " words, %ld method headers; so far %" PRIu64 " macros, %" PRIu64
                  " clears, %" PRIu64 " copies, %" PRIu64 " inline uploads, %" PRIu64
-                 " semaphore releases%s",
+                 " semaphore releases, %" PRIu64 " draws, %" PRIu64 " triangles, %" PRIu64
+                 " pixels%s",
                  ch->submits, ch->fd, num, words, headers, st->macros, st->clears, st->copies,
-                 st->inline_uploads, st->releases + ch->host_releases, bad ? ", with errors" : "");
+                 st->inline_uploads, st->releases + ch->host_releases, ds->draws, ds->triangles,
+                 ds->pixels, bad ? ", with errors" : "");
     }
 }
 

@@ -19,6 +19,7 @@ HOS_HIDDEN uint32_t nv_gpu_ioctl(int device, uint32_t fd, uint32_t cmd, uint8_t 
 HOS_HIDDEN uint32_t nv_syncpt_read(uint32_t id);
 HOS_HIDDEN uint32_t nv_syncpt_reach(uint32_t id, uint32_t threshold);
 HOS_HIDDEN void *nv_gpu_va_to_host(uint64_t va, uint64_t len);
+HOS_HIDDEN void *nv_gpu_va_to_host_span(uint64_t va, uint64_t *avail);
 HOS_HIDDEN void nv_gpu_channel_close(uint32_t fd);
 
 extern HOS_HIDDEN const hos_service_class hos_nvdrv_class;

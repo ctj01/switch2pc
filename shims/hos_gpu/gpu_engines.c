@@ -13,6 +13,7 @@
 #include <time.h>
 
 #include "common/hos_log.h"
+#include "gpu_draw.h"
 #include "gpu_internal.h"
 #include "gpu_mme.h"
 #include "swizzle.h"
@@ -122,6 +123,10 @@ struct gpu_engines {
     uint32_t mme_code[MME_CODE_WORDS];
     uint32_t mme_start[MME_MACROS];
     mme_call call;
+    uint64_t cb_addr[GPU_STAGES][GPU_CBUFS]; /* constant buffers bound per stage */
+    uint32_t cb_size[GPU_STAGES][GPU_CBUFS];
+    uint32_t instance;
+    gpu_draw_stats draw;
 };
 
 static uint64_t addr64(const uint32_t *r, uint32_t hi, uint32_t lo) {
@@ -152,13 +157,13 @@ int gpu_semaphore_release(uint64_t va, uint32_t payload, int four_words) {
 /* ---- block-linear helpers ---------------------------------------------------------- */
 
 /* Byte offset of (x bytes, y) in a block-linear surface `width_bytes` wide. */
-static uint64_t bl_offset(uint32_t x, uint32_t y, uint32_t width_bytes, uint32_t block_h_log2) {
+uint64_t gpu_bl_offset(uint32_t x, uint32_t y, uint32_t width_bytes, uint32_t block_h_log2) {
     uint32_t stride = (width_bytes + SWIZZLE_GOB_WIDTH - 1) & ~(uint32_t)(SWIZZLE_GOB_WIDTH - 1);
     return swizzle_offset(x, y, stride, 1u << block_h_log2);
 }
 
 /* Size in bytes of a block-linear surface (one layer). */
-static uint64_t bl_size(uint32_t width_bytes, uint32_t height, uint32_t block_h_log2) {
+uint64_t gpu_bl_size(uint32_t width_bytes, uint32_t height, uint32_t block_h_log2) {
     uint32_t stride = (width_bytes + SWIZZLE_GOB_WIDTH - 1) & ~(uint32_t)(SWIZZLE_GOB_WIDTH - 1);
     uint32_t rows = SWIZZLE_GOB_HEIGHT << block_h_log2;
     return (uint64_t)stride * (((uint64_t)height + rows - 1) / rows * rows);
@@ -187,7 +192,7 @@ static float linear_to_srgb(float v) {
 }
 
 /* Encode the clear colour for a render-target format; returns bytes per pixel, 0 if unknown. */
-static uint32_t encode_color(uint32_t format, const float rgba[4], uint8_t out[16]) {
+uint32_t gpu_encode_color(uint32_t format, const float rgba[4], uint8_t out[16]) {
     float c[4] = {rgba[0], rgba[1], rgba[2], rgba[3]};
     switch (format) {
     case 0xD6: /* A8B8G8R8_SRGB */
@@ -246,7 +251,7 @@ static void clear_surface(gpu_engines *e, uint32_t v) {
     float rgba[4];
     memcpy(rgba, r + M3D_COLOR_CLEAR_VALUE, sizeof(rgba));
     uint8_t px[16];
-    uint32_t bpp = encode_color(format, rgba, px);
+    uint32_t bpp = gpu_encode_color(format, rgba, px);
     if (!bpp || !va || !width || !height) {
         if (!(e->warned_format & 1)) {
             e->warned_format |= 1;
@@ -272,7 +277,8 @@ static void clear_surface(gpu_engines *e, uint32_t v) {
     if (x0 >= x1 || y0 >= y1) {
         return;
     }
-    uint64_t size = pitch_layout ? (uint64_t)row_bytes * height : bl_size(row_bytes, height, bh);
+    uint64_t size =
+        pitch_layout ? (uint64_t)row_bytes * height : gpu_bl_size(row_bytes, height, bh);
     uint8_t *base = nv_gpu_va_to_host(va, size);
     if (!base) {
         HOS_LOGW(MOD, "clear: render target at gpu va %#" PRIx64 " (%#" PRIx64 " bytes) not mapped",
@@ -292,7 +298,7 @@ static void clear_surface(gpu_engines *e, uint32_t v) {
             for (uint32_t x = x0; x < x1; x++) {
                 uint32_t xb = x * bpp;
                 uint8_t *p = base + (pitch_layout ? (uint64_t)y * row_bytes + xb
-                                                  : bl_offset(xb, y, row_bytes, bh));
+                                                  : gpu_bl_offset(xb, y, row_bytes, bh));
                 if (mask == 0xF || !comp) {
                     memcpy(p, px, bpp);
                 } else {
@@ -341,8 +347,8 @@ static void i2m_data(gpu_engines *e, int eng, uint32_t v) {
             va = base + line * r[I2M_PITCH_OUT] + col;
         } else {
             uint32_t bh = (r[I2M_DST_BLOCK_SIZE] >> 4) & 0xF;
-            va = base + bl_offset((uint32_t)(r[I2M_DST_ORIGIN_X] + col),
-                                  (uint32_t)(r[I2M_DST_ORIGIN_Y] + line), r[I2M_DST_WIDTH], bh);
+            va = base + gpu_bl_offset((uint32_t)(r[I2M_DST_ORIGIN_X] + col),
+                                      (uint32_t)(r[I2M_DST_ORIGIN_Y] + line), r[I2M_DST_WIDTH], bh);
         }
         uint8_t *p = nv_gpu_va_to_host(va, 1);
         if (p) {
@@ -364,7 +370,7 @@ static uint64_t dma_off(const uint32_t *r, int dst, int pitch_layout, uint32_t x
     uint32_t origin = r[dst ? DMA_DST_ORIGIN : DMA_SRC_ORIGIN];
     uint32_t width = r[dst ? DMA_DST_WIDTH : DMA_SRC_WIDTH];
     uint32_t bh = (r[dst ? DMA_DST_BLOCK_SIZE : DMA_SRC_BLOCK_SIZE] >> 4) & 0xF;
-    return bl_offset((origin & 0xFFFF) + x, (origin >> 16) + y, width, bh);
+    return gpu_bl_offset((origin & 0xFFFF) + x, (origin >> 16) + y, width, bh);
 }
 
 /* Host pointer to the whole surface a copy touches, resolved once. */
@@ -379,7 +385,7 @@ static uint8_t *dma_surface(const uint32_t *r, int dst, int pitch_layout, uint32
         uint32_t width = r[dst ? DMA_DST_WIDTH : DMA_SRC_WIDTH];
         uint32_t height = r[dst ? DMA_DST_HEIGHT : DMA_SRC_HEIGHT];
         uint32_t bh = (r[dst ? DMA_DST_BLOCK_SIZE : DMA_SRC_BLOCK_SIZE] >> 4) & 0xF;
-        *span = bl_size(width, height, bh);
+        *span = gpu_bl_size(width, height, bh);
     }
     return nv_gpu_va_to_host(base, *span);
 }
@@ -510,6 +516,10 @@ const gpu_engine_stats *gpu_engines_stats(const gpu_engines *e) {
     return &e->stats;
 }
 
+const gpu_draw_stats *gpu_engines_draw_stats(const gpu_engines *e) {
+    return &e->draw;
+}
+
 static void report_semaphore(gpu_engines *e, int eng, uint32_t v) {
     const uint32_t *r = e->regs[eng];
     uint32_t op = v & 3; /* 0 release, 1 acquire, 2 report only, 3 trap */
@@ -526,7 +536,19 @@ static void report_semaphore(gpu_engines *e, int eng, uint32_t v) {
 
 static void engine_write(gpu_engines *e, int eng, uint32_t method, uint32_t value);
 
+static int trace_on(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *t = getenv("HOS_GPU_TRACE");
+        on = t && *t && strcmp(t, "0") != 0;
+    }
+    return on;
+}
+
 static void mme_send(void *user, uint32_t method, uint32_t value) {
+    if (trace_on()) {
+        HOS_LOGT(MOD, "    macro -> method %#05x = %#010x", method, value);
+    }
     engine_write(user, ENG_3D, method, value);
 }
 
@@ -593,11 +615,46 @@ void gpu_engines_method(gpu_engines *e, uint32_t subch, uint32_t method, uint32_
     engine_write(e, eng, method, value);
 }
 
+/* 3D methods the draw path keeps state for, and the draw itself (M3). */
+enum {
+    M3D_VERTEX_FIRST = 0x35D,
+    M3D_VERTEX_COUNT = 0x35E,
+    M3D_VERTEX_END = 0x585,
+    M3D_VERTEX_BEGIN = 0x586, /* [15:0] topology, [26] instance next */
+    M3D_CB_SIZE = 0x8E0,
+    M3D_CB_ADDR_HI = 0x8E1,
+    M3D_CB_ADDR_LO = 0x8E2,
+    M3D_CB_BIND = 0x904, /* + 8 * stage: [0] valid, [8:4] slot */
+};
+
+static void draw_method(gpu_engines *e, uint32_t method, uint32_t value) {
+    const uint32_t *r = e->regs[ENG_3D];
+    if (method >= M3D_CB_BIND && method < M3D_CB_BIND + 8 * GPU_STAGES &&
+        ((method - M3D_CB_BIND) & 7) == 0) {
+        uint32_t stage = (method - M3D_CB_BIND) / 8, slot = (value >> 4) & 0x1F;
+        if (slot < GPU_CBUFS) {
+            e->cb_addr[stage][slot] = (value & 1) ? addr64(r, M3D_CB_ADDR_HI, M3D_CB_ADDR_LO) : 0;
+            e->cb_size[stage][slot] = (value & 1) ? r[M3D_CB_SIZE] : 0;
+        }
+    } else if (method == M3D_VERTEX_BEGIN) {
+        e->instance = ((value >> 26) & 1) ? e->instance + 1 : 0;
+    } else if (method == M3D_VERTEX_END) {
+        gpu_draw_state ds = {.r = r};
+        memcpy(ds.cb_addr, e->cb_addr, sizeof(ds.cb_addr));
+        memcpy(ds.cb_size, e->cb_size, sizeof(ds.cb_size));
+        gpu_draw_arrays(&ds, r[M3D_VERTEX_BEGIN] & 0xFFFF, r[M3D_VERTEX_FIRST], r[M3D_VERTEX_COUNT],
+                        e->instance, &e->draw);
+    }
+}
+
 static void engine_write(gpu_engines *e, int eng, uint32_t method, uint32_t value) {
     if (method >= METHODS) {
         return;
     }
     e->regs[eng][method] = value;
+    if (eng == ENG_3D) {
+        draw_method(e, method, value);
+    }
     switch (eng) {
     case ENG_3D:
     case ENG_COMPUTE:

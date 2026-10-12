@@ -44,6 +44,9 @@ void gpu_engines_bind(gpu_engines *e, uint32_t subch, uint32_t cls);
 
 const gpu_engine_stats *gpu_engines_stats(const gpu_engines *e);
 
+struct gpu_draw_stats;
+const struct gpu_draw_stats *gpu_engines_draw_stats(const gpu_engines *e);
+
 /** Write a semaphore: one word, or four (payload, 0, 64-bit timestamp). */
 int gpu_semaphore_release(uint64_t gpu_va, uint32_t payload, int four_words);
 
