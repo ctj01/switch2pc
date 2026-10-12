@@ -27,6 +27,20 @@ still sees primitives in order, and full clears fill by doubling copies. On a
 to 12.6 (textured cube), 0.75 to 7.8 (4x MSAA), 0.25 to 2.3 (MSAA teapot) and
 0.17 to 1.8 (deferred). The fragment shader interpreter is now the cost.
 
+A host profiler cannot see into qemu's translated code, so HOS_PROFILE
+samples the guest program counter (ITIMER_PROF) and scripts/profile_report.py
+maps it to our functions and lines. What it found, and what followed: the
+interpreter walked its whole decode chain per instruction per pixel (now a
+per-worker cache keyed by the instruction word; a `_Thread_local` cache cost
+more than it saved, through glibc's dynamic TLS resolver), indexed draws
+shaded every index rather than every vertex (now post-transform reuse), and
+multisampled draws shaded every sample (now once per pixel at its centre, with
+coverage and depth per sample, as the hardware does). Same 24-thread host:
+cube 27, textured cube 17.7, 4x MSAA 7.0, MSAA teapot 3.5, deferred 2.1
+frames per second. What remains is field extraction and dispatch inside the
+interpreter (a predecoded program would cut it) and qemu itself, which native
+ARM64 removes.
+
 ## Which path, and why
 
 Homebrew that uses the GPU goes through one of two libraries, both

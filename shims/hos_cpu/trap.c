@@ -1,8 +1,10 @@
 #include <inttypes.h>
 #include <signal.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -44,6 +46,81 @@ static void print_stats(void) {
             HOS_LOGI(MOD, "  svc %#04x: %" PRIu64 " (%.0f/s)", i, n, (double)n / secs);
         }
     }
+}
+
+/*
+ * HOS_PROFILE=<file>: sample the program counter on every millisecond of
+ * process CPU time (ITIMER_PROF, any thread) and write "map" lines from
+ * /proc/self/maps plus "pc count" lines at exit; scripts/profile_report.py
+ * turns them into functions. Under qemu-user the pc is the guest's, so this
+ * profiles our aarch64 code where a host profiler only sees translated code.
+ */
+#define PROF_MAX (1u << 22)
+static uint64_t *g_prof_pc;
+static _Atomic uint32_t g_prof_n;
+static char g_prof_path[256];
+
+static void prof_sample(int sig, siginfo_t *si, void *ctx) {
+    (void)sig;
+    (void)si;
+    uint32_t k = atomic_fetch_add_explicit(&g_prof_n, 1, memory_order_relaxed);
+    if (k < PROF_MAX) {
+        g_prof_pc[k] = ((ucontext_t *)ctx)->uc_mcontext.pc;
+    }
+}
+
+static int cmp_u64(const void *a, const void *b) {
+    uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+    return x < y ? -1 : x > y;
+}
+
+static void prof_write(void) {
+    struct itimerval off;
+    memset(&off, 0, sizeof(off));
+    setitimer(ITIMER_PROF, &off, NULL);
+    uint32_t n = atomic_load(&g_prof_n);
+    n = n < PROF_MAX ? n : PROF_MAX;
+    FILE *out = fopen(g_prof_path, "w");
+    if (!out) {
+        HOS_LOGW(MOD, "HOS_PROFILE: cannot write %s", g_prof_path);
+        return;
+    }
+    FILE *maps = fopen("/proc/self/maps", "r");
+    char line[512];
+    while (maps && fgets(line, sizeof(line), maps)) {
+        fprintf(out, "map %s", line);
+    }
+    if (maps) {
+        fclose(maps);
+    }
+    qsort(g_prof_pc, n, sizeof(*g_prof_pc), cmp_u64);
+    for (uint32_t i = 0; i < n;) {
+        uint32_t j = i;
+        while (j < n && g_prof_pc[j] == g_prof_pc[i]) {
+            j++;
+        }
+        fprintf(out, "pc %" PRIx64 " %u\n", g_prof_pc[i], j - i);
+        i = j;
+    }
+    fclose(out);
+    HOS_LOGI(MOD, "HOS_PROFILE: %u samples written to %s", n, g_prof_path);
+}
+
+static void prof_install(const char *path) {
+    g_prof_pc = malloc(PROF_MAX * sizeof(*g_prof_pc));
+    if (!g_prof_pc) {
+        return;
+    }
+    snprintf(g_prof_path, sizeof(g_prof_path), "%s", path);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = prof_sample;
+    sa.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGPROF, &sa, NULL);
+    struct itimerval tv = {{0, 1000}, {0, 1000}};
+    setitimer(ITIMER_PROF, &tv, NULL);
+    atexit(prof_write);
 }
 
 static const char *sig_name(int sig) {
@@ -163,6 +240,10 @@ void hos_trap_install(void) {
         g_stats = 1;
         g_stats_start_ns = mono_ns();
         atexit(print_stats);
+    }
+    const char *prof = getenv("HOS_PROFILE");
+    if (prof && *prof && !g_prof_pc) {
+        prof_install(prof);
     }
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));

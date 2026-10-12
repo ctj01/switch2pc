@@ -20,6 +20,11 @@
 
 typedef struct shader_env shader_env;
 
+/* Decode cache (instruction word -> handler). Not thread-safe: one per worker. */
+#define SHADER_DCACHE 1024
+typedef struct shader_dcache shader_dcache;
+shader_dcache *shader_dcache_new(void);
+
 /* IPA: mode 0 pass (screen-linear), 1 perspective (attr/w, the shader multiplies by w),
  * 2 constant (provoking vertex). `addr` is the attribute byte address. */
 typedef float (*shader_ipa_fn)(void *user, uint32_t addr, uint32_t mode);
@@ -38,6 +43,7 @@ struct shader_env {
     uint32_t cb_size[SHADER_CBUFS];
     shader_ipa_fn ipa;
     void *user;
+    shader_dcache *dcache; /* optional */
     shader_tex_fn tex;
     shader_texel_fn texel; /* shares tex_user */
     void *tex_user;

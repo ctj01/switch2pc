@@ -869,33 +869,66 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
     env->ipa = ipa;
     env->user = &c;
     float inv_area = 1.0f / area;
-    for (int32_t y = y0; y < y1; y++) {
-        if (((uint32_t)y / BAND_ROWS) % nbands != band) {
-            continue; /* another worker's rows */
+    /* Multisampling shades once per pixel, as the hardware does: each sample of the
+     * pixel (a gx x gy block of the target) is covered and depth-tested on its own,
+     * the shader runs once at the pixel centre, and its colour goes to every sample
+     * that passed. With one sample per pixel this is the plain loop. */
+    uint32_t gx, gy;
+    gpu_ms_grid(r[M3D_MS_MODE], &gx, &gy);
+    uint32_t ns = gx * gy;
+    int32_t bx0 = x0 - x0 % (int32_t)gx, by0 = y0 - y0 % (int32_t)gy;
+    for (int32_t by = by0; by < y1; by += (int32_t)gy) {
+        if (((uint32_t)by / BAND_ROWS) % nbands != band) {
+            continue; /* another worker's rows (blocks never straddle bands) */
         }
-        for (int32_t x = x0; x < x1; x++) {
-            float px = (float)x + 0.5f, py = (float)y + 0.5f;
-            float w0 = edge(v1->win, v2->win, px, py) * inv_area;
-            float w1 = edge(v2->win, v0->win, px, py) * inv_area;
-            float w2 = edge(v0->win, v1->win, px, py) * inv_area;
-            if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
-                continue;
-            }
-            c.l[0] = w0;
-            c.l[1] = w1;
-            c.l[2] = w2;
-            uint32_t *zp = NULL, zq = 0;
-            if (depth_test || depth_write_on) {
-                zp = depth_ptr(dt, (uint32_t)x, (uint32_t)y);
-                float z = w0 * v0->win[2] + w1 * v1->win[2] + w2 * v2->win[2];
-                zq = depth_quantize(dt, z);
-                if (zp && depth_test &&
-                    !depth_compare(depth_func, zq, depth_read(dt, zp), dt->format == 0x0A)) {
+        for (int32_t bx = bx0; bx < x1; bx += (int32_t)gx) {
+            uint32_t cover = 0, zq[16];
+            uint32_t *zp[16];
+            float l1[3] = {0, 0, 0};
+            for (uint32_t k = 0; k < ns; k++) {
+                int32_t x = bx + (int32_t)(k % gx), y = by + (int32_t)(k / gx);
+                if (x < x0 || x >= x1 || y < y0 || y >= y1) {
                     continue;
                 }
+                float px = (float)x + 0.5f, py = (float)y + 0.5f;
+                float w0 = edge(v1->win, v2->win, px, py) * inv_area;
+                float w1 = edge(v2->win, v0->win, px, py) * inv_area;
+                float w2 = edge(v0->win, v1->win, px, py) * inv_area;
+                if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
+                    continue;
+                }
+                zp[k] = NULL;
+                zq[k] = 0;
+                if (depth_test || depth_write_on) {
+                    zp[k] = depth_ptr(dt, (uint32_t)x, (uint32_t)y);
+                    float z = w0 * v0->win[2] + w1 * v1->win[2] + w2 * v2->win[2];
+                    zq[k] = depth_quantize(dt, z);
+                    if (zp[k] && depth_test &&
+                        !depth_compare(depth_func, zq[k], depth_read(dt, zp[k]),
+                                       dt->format == 0x0A)) {
+                        continue;
+                    }
+                }
+                l1[0] = w0;
+                l1[1] = w1;
+                l1[2] = w2;
+                cover |= 1u << k;
             }
-            c.px = px;
-            c.py = py;
+            if (!cover) {
+                continue;
+            }
+            if (ns == 1) {
+                memcpy(c.l, l1, sizeof(c.l));
+                c.px = (float)bx + 0.5f;
+                c.py = (float)by + 0.5f;
+            } else { /* attributes at the pixel centre; gl_FragCoord in pixels */
+                float cx = (float)bx + 0.5f * (float)gx, cy = (float)by + 0.5f * (float)gy;
+                c.l[0] = edge(v1->win, v2->win, cx, cy) * inv_area;
+                c.l[1] = edge(v2->win, v0->win, cx, cy) * inv_area;
+                c.l[2] = edge(v0->win, v1->win, cx, cy) * inv_area;
+                c.px = cx / (float)gx;
+                c.py = cy / (float)gy;
+            }
             env->killed = 0;
             uint64_t bad = 0;
             if (shader_run(fs->code, fs->words, env, &bad) != 0) {
@@ -908,35 +941,44 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
             if (env->killed) {
                 continue;
             }
-            for (uint32_t k = 0; k < ts->n; k++) {
-                const target *tk = &ts->t[k];
+            for (uint32_t t_i = 0; t_i < ts->n; t_i++) {
+                const target *tk = &ts->t[t_i];
                 uint32_t m = (omap >> (4 * tk->rt)) & 0xF, rn = first_reg[tk->rt];
                 if (!tk->base || !m) {
                     continue;
                 }
-                float rgba[4] = {0, 0, 0, 0};
+                float src[4] = {0, 0, 0, 0};
                 for (uint32_t ch = 0; ch < 4; ch++) {
                     if (m & (1u << ch)) {
-                        rgba[ch] = fbits(env->r[rn++]);
+                        src[ch] = fbits(env->r[rn++]);
                     }
                 }
-                if (r[M3D_BLEND_ENABLE + tk->rt] & 1) {
-                    uint64_t off = tk->pitch_layout
-                                       ? (uint64_t)y * tk->row_bytes + (uint64_t)x * tk->bpp
-                                       : gpu_bl_offset((uint32_t)x * tk->bpp, (uint32_t)y,
-                                                       tk->row_bytes, tk->bh);
-                    float dst[4] = {0, 0, 0, 0};
-                    if (off + tk->bpp <= tk->size) {
-                        gpu_decode_color(tk->format, tk->base + off, dst);
+                int blending = r[M3D_BLEND_ENABLE + tk->rt] & 1;
+                for (uint32_t k = 0; k < ns; k++) {
+                    if (!(cover & (1u << k))) {
+                        continue;
                     }
-                    blend(r, tk->rt, dst, rgba);
+                    uint32_t x = (uint32_t)bx + k % gx, y = (uint32_t)by + k / gx;
+                    float rgba[4] = {src[0], src[1], src[2], src[3]};
+                    if (blending) {
+                        uint64_t off = tk->pitch_layout
+                                           ? (uint64_t)y * tk->row_bytes + (uint64_t)x * tk->bpp
+                                           : gpu_bl_offset(x * tk->bpp, y, tk->row_bytes, tk->bh);
+                        float dst[4] = {0, 0, 0, 0};
+                        if (off + tk->bpp <= tk->size) {
+                            gpu_decode_color(tk->format, tk->base + off, dst);
+                        }
+                        blend(r, tk->rt, dst, rgba);
+                    }
+                    write_pixel(tk, x, y, rgba);
                 }
-                write_pixel(tk, (uint32_t)x, (uint32_t)y, rgba);
             }
-            if (zp && depth_write_on) {
-                depth_write(dt, zp, zq);
+            for (uint32_t k = 0; k < ns; k++) {
+                if ((cover & (1u << k)) && zp[k] && depth_write_on) {
+                    depth_write(dt, zp[k], zq[k]);
+                }
             }
-            st->pixels++;
+            st->pixels += (uint64_t)__builtin_popcount(cover);
         }
     }
     env->user = NULL; /* c lives on this stack frame */
@@ -980,6 +1022,13 @@ static void frag_worker(void *arg, uint32_t band, uint32_t nbands) {
         return;
     }
     memcpy(env, j->env, sizeof(*env));
+    /* Bands are exclusive while a job runs (pool_run serialises jobs), so each band
+     * keeps its decode cache across draws. */
+    static shader_dcache *dcache[MAX_WORKERS];
+    if (!dcache[band]) {
+        dcache[band] = shader_dcache_new();
+    }
+    env->dcache = dcache[band];
     if (tc) {
         memcpy(tc, j->tc, sizeof(*tc));
         env->tex_user = tc;
@@ -1138,12 +1187,31 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
     }
     depth_target dt;
     bind_depth(r, &dt);
-    vertex *verts = calloc(count, sizeof(*verts));
+    vertex *verts = calloc(count, sizeof(*verts));  /* shaded vertices, at most one per index */
+    const vertex **vp = calloc(count, sizeof(*vp)); /* per index: its shaded vertex */
     shader_env *env = calloc(1, sizeof(*env));
-    if (!verts || !env) {
+    if (!verts || !vp || !env) {
         free(verts);
+        free(vp);
         free(env);
         return;
+    }
+    /* Post-transform reuse for indexed draws: an index seen before reuses its vertex,
+     * when the index range is small enough for a direct map. */
+    int32_t *reuse = NULL;
+    uint32_t vmin = 0;
+    if (indices) {
+        uint32_t vmax = 0;
+        vmin = UINT32_MAX;
+        for (uint32_t k = 0; k < count; k++) {
+            vmin = indices[k] < vmin ? indices[k] : vmin;
+            vmax = indices[k] > vmax ? indices[k] : vmax;
+        }
+        uint64_t range = (uint64_t)vmax - vmin + 1;
+        reuse = range <= 4ull * count ? malloc(range * sizeof(*reuse)) : NULL;
+        if (reuse) {
+            memset(reuse, 0xFF, range * sizeof(*reuse));
+        }
     }
 
     /* Vertex stage. */
@@ -1153,7 +1221,21 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
     float sx = fbits(r[M3D_VIEWPORT + 0]) * (float)gx, sy = fbits(r[M3D_VIEWPORT + 1]) * (float)gy;
     float sz = fbits(r[M3D_VIEWPORT + 2]), tx = fbits(r[M3D_VIEWPORT + 3]) * (float)gx;
     float ty = fbits(r[M3D_VIEWPORT + 4]) * (float)gy, tz = fbits(r[M3D_VIEWPORT + 5]);
+    /* The vertex stage runs on the submitting thread; its decode cache is shared by
+     * every channel, hence the lock. */
+    static pthread_mutex_t vs_lock = PTHREAD_MUTEX_INITIALIZER;
+    static shader_dcache *vs_dcache;
+    pthread_mutex_lock(&vs_lock);
+    if (!vs_dcache) {
+        vs_dcache = shader_dcache_new();
+    }
+    env->dcache = vs_dcache;
+    uint32_t nv = 0;
     for (uint32_t k = 0; k < count; k++) {
+        if (reuse && reuse[indices[k] - vmin] >= 0) {
+            vp[k] = &verts[reuse[indices[k] - vmin]];
+            continue;
+        }
         memset(env->in, 0, sizeof(env->in));
         memset(env->out, 0, sizeof(env->out));
         uint32_t vid = indices ? indices[k] : first + k;
@@ -1167,11 +1249,18 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
             if (!st->shader_errors++) {
                 HOS_LOGW(MOD, "vertex shader stopped at instruction %#018" PRIx64, bad);
             }
+            pthread_mutex_unlock(&vs_lock);
+            free(reuse);
+            free(vp);
             free(verts);
             free(env);
             return;
         }
-        vertex *v = &verts[k];
+        if (reuse) {
+            reuse[indices[k] - vmin] = (int32_t)nv;
+        }
+        vertex *v = &verts[nv++];
+        vp[k] = v;
         memcpy(v->out, env->out, sizeof(v->out));
         for (int c = 0; c < 4; c++) {
             v->pos[c] = fbits(env->out[0x70 / 4 + c]);
@@ -1187,6 +1276,9 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
                      fbits(v->out[0x23]));
         }
     }
+    env->dcache = NULL;
+    pthread_mutex_unlock(&vs_lock);
+    free(reuse);
 
     /* Primitive assembly. */
     uint32_t cap = topology == TOPO_QUADS ? count / 4 * 2 : count;
@@ -1195,24 +1287,24 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
     switch (tris ? topology : ~0u) {
     case TOPO_TRIANGLES:
         for (uint32_t k = 0; k + 2 < count; k += 3) {
-            tris[nt++] = (frag_tri){{&verts[k], &verts[k + 1], &verts[k + 2]}};
+            tris[nt++] = (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}};
         }
         break;
     case TOPO_STRIP:
         for (uint32_t k = 0; k + 2 < count; k++) {
-            tris[nt++] = k & 1 ? (frag_tri){{&verts[k + 1], &verts[k], &verts[k + 2]}}
-                               : (frag_tri){{&verts[k], &verts[k + 1], &verts[k + 2]}};
+            tris[nt++] = k & 1 ? (frag_tri){{vp[k + 1], vp[k], vp[k + 2]}}
+                               : (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}};
         }
         break;
     case TOPO_FAN:
         for (uint32_t k = 1; k + 1 < count; k++) {
-            tris[nt++] = (frag_tri){{&verts[0], &verts[k], &verts[k + 1]}};
+            tris[nt++] = (frag_tri){{vp[0], vp[k], vp[k + 1]}};
         }
         break;
     case TOPO_QUADS: /* each quad as two triangles sharing its first vertex */
         for (uint32_t k = 0; k + 3 < count; k += 4) {
-            tris[nt++] = (frag_tri){{&verts[k], &verts[k + 1], &verts[k + 2]}};
-            tris[nt++] = (frag_tri){{&verts[k], &verts[k + 2], &verts[k + 3]}};
+            tris[nt++] = (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}};
+            tris[nt++] = (frag_tri){{vp[k], vp[k + 2], vp[k + 3]}};
         }
         break;
     default:
@@ -1268,6 +1360,7 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
     }
     free(tris);
     free(tc);
+    free(vp);
     free(verts);
     free(env);
 }
