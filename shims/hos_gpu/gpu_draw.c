@@ -37,7 +37,14 @@ enum {
     MAX_VERTICES = 65536,
 };
 
-enum { TOPO_POINTS = 0, TOPO_LINES = 1, TOPO_TRIANGLES = 4, TOPO_STRIP = 5, TOPO_FAN = 6 };
+enum {
+    TOPO_POINTS = 0,
+    TOPO_LINES = 1,
+    TOPO_TRIANGLES = 4,
+    TOPO_STRIP = 5,
+    TOPO_FAN = 6,
+    TOPO_QUADS = 7,
+};
 
 typedef struct vertex {
     float pos[4]; /* clip space */
@@ -396,6 +403,12 @@ void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first,
     case TOPO_FAN:
         for (uint32_t k = 1; k + 1 < count; k++) {
             raster_triangle(r, &verts[0], &verts[k], &verts[k + 1], &fs, env, &t, st);
+        }
+        break;
+    case TOPO_QUADS: /* each quad as two triangles sharing its first vertex */
+        for (uint32_t k = 0; k + 3 < count; k += 4) {
+            raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &t, st);
+            raster_triangle(r, &verts[k], &verts[k + 2], &verts[k + 3], &fs, env, &t, st);
         }
         break;
     default:

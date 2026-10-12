@@ -175,9 +175,10 @@ The GPU has started ([docs/gpu.md](docs/gpu.md), milestones M0 and M1): a
 deko3d program creates its device, swapchain and queue, and its clears,
 buffer copies, image uploads and inline data now run, on the CPU, through
 the GPU's own command stream, including the macros the 3D engine executes.
-The first triangle renders too, with real Maxwell shaders compiled by
-deko3d's toolchain and run by an interpreter in `hos_gpu`, matching an
-independent reference pixel for pixel; textures, depth and blending come
+Triangles and 3D meshes render too, with real Maxwell shaders compiled by
+deko3d's toolchain and run by an interpreter in `hos_gpu`: deko3d's
+triangle and its rotating cube (vertex buffer, uniform matrices) match
+independent references pixel for pixel. Depth, blending and textures come
 next.
 
 Not implemented yet: most of the GPU (textures, depth, blending, the Vulkan

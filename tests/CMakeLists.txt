@@ -196,6 +196,31 @@ if(S2PC_ARM64)
         endif()
     endif()
 
+    # GPU milestone M3b: a 3D cube from a vertex buffer, transformed by matrices in a
+    # uniform buffer loaded through the command stream (LOAD_CONSTANT_BUFFER), drawn as
+    # quads with back-face culling, compared with an independent double-precision
+    # reference.
+    set(cube_dir ${CMAKE_SOURCE_DIR}/examples/libnx_deko3d_cube)
+    if(EXISTS ${cube_dir}/build/deko3d_cube.nso AND EXISTS ${cube_dir}/romfs/shaders)
+        file(MAKE_DIRECTORY ${fixture_dir}/cube)
+        add_test(NAME smoke_deko3d_cube
+                 COMMAND hosrun --romfs ${cube_dir}/romfs --sdmc ${fixture_dir}/sdmc
+                         ${cube_dir}/build/deko3d_cube.nso)
+        set_tests_properties(smoke_deko3d_cube PROPERTIES
+            TIMEOUT 300
+            ENVIRONMENT "HOS_FRAMES=${fixture_dir}/cube"
+            PASS_REGULAR_EXPRESSION "cube scene ready.*1 draws, 6 triangles.*deko3d cube: done"
+            FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|shader stopped|does not parse|not mapped|result [1-9]")
+        if(Python3_FOUND)
+            add_test(NAME check_deko3d_cube
+                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/check_cube.py
+                             ${fixture_dir}/cube/frame_0002.ppm)
+            set_tests_properties(check_deko3d_cube PROPERTIES
+                DEPENDS smoke_deko3d_cube
+                PASS_REGULAR_EXPRESSION "6 front triangles.*0 differ by more than 2")
+        endif()
+    endif()
+
     # DOOM (doomgeneric + shareware IWAD): a complete game through framebuffer, input,
     # romfs and timing. 400 frames headless; frames are not dumped to keep it fast.
     set(doom_nso ${CMAKE_SOURCE_DIR}/examples/doom/build/doom_test.nso)

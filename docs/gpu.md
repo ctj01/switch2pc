@@ -1,13 +1,13 @@
 # GPU plan (#40)
 
-Status: **M3a done** (2026-10-12): the first triangle. `examples/libnx_deko3d_triangle`
-is devkitPro's deko_basic scene with its shaders compiled by uam; the vertex
-shader indexes a constant buffer by `gl_VertexID`, the fragment shader
-interpolates colour with perspective correction, and the result matches an
-independent reference pixel for pixel (`check_deko3d_triangle`: 916 168
-pixels, 0 differences). M0 and M1 are done as well. Everything runs on the
-CPU. Next: M3b (vertex buffers, more arithmetic, the cube) and M3c
-(depth, blending, more of deko3d's examples).
+Status: **M3b done** (2026-10-12): a 3D cube. `examples/libnx_deko3d_cube`
+draws deko3d's Example03 cube at a fixed rotation: 24 vertices from a vertex
+buffer, model-view and projection matrices in a uniform buffer uploaded
+through the command stream, quads, back-face culling. It matches an
+independent double-precision reference (`check_deko3d_cube`: 0 pixels off by
+more than 2, worst 1); the triangle of M3a still matches exactly. M0, M1,
+M3a and M3b are done, all on the CPU. Next: M3c (depth buffer, blending,
+more of deko3d's examples), then textures (M4).
 
 ## Which path, and why
 
@@ -81,8 +81,8 @@ other feature in this repository.
    fetch, constant buffers, rasterisation state; on the CPU first, then
    translated to SPIR-V for M2's Vulkan backend. Split into verifiable
    steps: **M3a, the triangle: done** (`gpu_shader.c` interpreter,
-   `gpu_draw.c` rasteriser); M3b, vertex buffers, uniforms and the cube;
-   M3c, depth test, blending and the rest of deko3d's examples.
+   `gpu_draw.c` rasteriser); **M3b, vertex buffers, uniforms and the cube:
+   done**; M3c, depth test, blending and the rest of deko3d's examples.
 5. **M4, textures (weeks).** TIC/TSC decoding, texture formats, samplers,
    swizzled texture upload. Exit: a textured quad; then SDL2 through Mesa.
 6. **M5, the rest (open-ended).** Compute, queries, transform feedback,
@@ -142,6 +142,22 @@ Each point below cost a failed run and is now in `nvgpu.c`:
 - A reference renderer in a few lines of Python turned "looks right" into
   "0 of 916 168 pixels differ", and caught a bug in the checker itself (a
   PPM whose first pixel byte is 0x20 must not be split on whitespace).
+
+## What M3b taught
+
+- The cube needed no new instruction: a matrix transform compiles to
+  `fmul`/`ffma`/`fadd` with constant-buffer operands. What it needed was
+  state: uniform buffer binding 0 is constant buffer 2 for the shader (c0
+  is the driver's, c1 the shader's own constants), and deko3d's
+  PushConstants is LOAD_CONSTANT_BUFFER: a position at 0x8E3 and data words
+  at 0x8E4 that land in the selected buffer and advance the position. Until
+  that ran, every vertex came out with w = 0 and nothing was drawn.
+- deko3d's debug library (`-ldeko3dd`) validated the example itself: it
+  rejected a uniform buffer size that was not a multiple of 0x100, a bug in
+  the test program rather than in the emulator.
+- Quads are split into (0, 1, 2) and (0, 2, 3). The reference does the
+  same; real hardware may choose the other diagonal, which only changes
+  how colours blend inside a quad, not what is covered.
 
 ## Risks and how to keep them small
 

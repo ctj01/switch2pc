@@ -625,10 +625,28 @@ enum {
     M3D_CB_ADDR_HI = 0x8E1,
     M3D_CB_ADDR_LO = 0x8E2,
     M3D_CB_BIND = 0x904, /* + 8 * stage: [0] valid, [8:4] slot */
+    M3D_CB_POS = 0x8E3,  /* byte offset of the next LOAD_CONSTANT_BUFFER word */
+    M3D_CB_DATA = 0x8E4, /* 0x8E4-0x8F3: LOAD_CONSTANT_BUFFER, write and advance */
 };
 
 static void draw_method(gpu_engines *e, uint32_t method, uint32_t value) {
-    const uint32_t *r = e->regs[ENG_3D];
+    uint32_t *r = e->regs[ENG_3D];
+    if (method >= M3D_CB_DATA && method < M3D_CB_DATA + 16) {
+        /* Constant buffer updates inside the command stream (deko3d's PushConstants). */
+        uint32_t pos = r[M3D_CB_POS];
+        if (pos + 4 <= r[M3D_CB_SIZE]) {
+            uint32_t *p = nv_gpu_va_to_host(addr64(r, M3D_CB_ADDR_HI, M3D_CB_ADDR_LO) + pos, 4);
+            if (p) {
+                *p = value;
+            }
+        }
+        r[M3D_CB_POS] = pos + 4;
+        return;
+    }
+    if (method == M3D_CB_POS) {
+        e->stats.inline_uploads++;
+        return;
+    }
     if (method >= M3D_CB_BIND && method < M3D_CB_BIND + 8 * GPU_STAGES &&
         ((method - M3D_CB_BIND) & 7) == 0) {
         uint32_t stage = (method - M3D_CB_BIND) / 8, slot = (value >> 4) & 0x1F;
