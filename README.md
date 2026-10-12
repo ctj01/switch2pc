@@ -177,12 +177,12 @@ buffer copies, image uploads and inline data now run, on the CPU, through
 the GPU's own command stream, including the macros the 3D engine executes.
 Triangles and 3D meshes render too, with real Maxwell shaders compiled by
 deko3d's toolchain and run by an interpreter in `hos_gpu`: deko3d's
-triangle and its rotating cube (vertex buffer, uniform matrices) match
-independent references pixel for pixel. Depth, blending and textures come
-next.
+triangle, its rotating cube (vertex buffer, uniform matrices) and a scene
+with depth testing and alpha blending match independent references pixel
+for pixel. Textures come next.
 
-Not implemented yet: most of the GPU (textures, depth, blending, the Vulkan
-backend), DNS lookups, `pctl`, config files. Track progress in
+Not implemented yet: GPU textures and the Vulkan backend, DNS lookups,
+`pctl`, config files. Track progress in
 [docs/ISSUES.md](docs/ISSUES.md).
 
 ## Quick start

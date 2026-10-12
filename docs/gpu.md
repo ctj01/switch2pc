@@ -1,13 +1,12 @@
 # GPU plan (#40)
 
-Status: **M3b done** (2026-10-12): a 3D cube. `examples/libnx_deko3d_cube`
-draws deko3d's Example03 cube at a fixed rotation: 24 vertices from a vertex
-buffer, model-view and projection matrices in a uniform buffer uploaded
-through the command stream, quads, back-face culling. It matches an
-independent double-precision reference (`check_deko3d_cube`: 0 pixels off by
-more than 2, worst 1); the triangle of M3a still matches exactly. M0, M1,
-M3a and M3b are done, all on the CPU. Next: M3c (depth buffer, blending,
-more of deko3d's examples), then textures (M4).
+Status: **M3c done** (2026-10-12): depth and blending. `examples/libnx_deko3d_depthblend`
+draws four quads with their own state over a Z24S8 depth buffer: depth test
+LESS with and without depth writes, and SrcAlpha / InvSrcAlpha blending. It
+matches a reference simulation exactly (`check_deko3d_depthblend`, worst
+difference 0), and the triangle and cube still match theirs. M0, M1 and
+M3a-c are done, all on the CPU. Next: textures (M4), then the Vulkan
+backend (M2) for speed.
 
 ## Which path, and why
 
@@ -82,7 +81,9 @@ other feature in this repository.
    translated to SPIR-V for M2's Vulkan backend. Split into verifiable
    steps: **M3a, the triangle: done** (`gpu_shader.c` interpreter,
    `gpu_draw.c` rasteriser); **M3b, vertex buffers, uniforms and the cube:
-   done**; M3c, depth test, blending and the rest of deko3d's examples.
+   done**; **M3c, depth test and blending: done** (Z16/Z24/Z32F targets, the
+   eight compare functions, per-target blend factors and operations in
+   deko3d's D3D-style numbering and OpenGL's).
 5. **M4, textures (weeks).** TIC/TSC decoding, texture formats, samplers,
    swizzled texture upload. Exit: a textured quad; then SDL2 through Mesa.
 6. **M5, the rest (open-ended).** Compute, queries, transform feedback,
@@ -158,6 +159,21 @@ Each point below cost a failed run and is now in `nvgpu.c`:
 - Quads are split into (0, 1, 2) and (0, 2, 3). The reference does the
   same; real hardware may choose the other diagonal, which only changes
   how colours blend inside a quad, not what is covered.
+
+## What M3c taught
+
+- The registers follow the colour targets' pattern: depth target at
+  0x3F8-0x3FC with its size at 0x48A/0x48B and enable at 0x54E, depth
+  test/write/function at 0x4B3/0x4BA/0x4C3, clear value at 0x364 with the
+  Z and S bits of the same CLEAR_SURFACE, per-target blending at 0x4D8 (enable)
+  and 0x780 + 8 * rt (colour and alpha operation and factors). deko3d writes
+  D3D-style values (compare 1-8, factors 1-19 and 0x21-0x24, operations
+  1-5).
+- Quantising depth to 24 bits in float is wrong: 1.0 * 16777215 + 0.5
+  rounds to 2^24, which overflowed the field and cleared the buffer to 0,
+  so every fragment failed LESS. Integer depth is computed in double.
+- Blending reads the destination as stored (8-bit), so the reference
+  simulates the same quantisation and agrees to the last bit.
 
 ## Risks and how to keep them small
 

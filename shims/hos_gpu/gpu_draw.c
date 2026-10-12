@@ -32,7 +32,22 @@ enum {
     M3D_CULL_FACE = 0x648,
     M3D_CT_WRITE_MASK = 0x680,
     M3D_VERTEX_STREAM = 0x700, /* stride|enable, addr hi, addr lo, divisor */
-    M3D_PIPELINE = 0x800,      /* select, offset, ..., register count */
+    M3D_ZT_ADDR_HI = 0x3F8,    /* depth target: address, format, block size, array pitch */
+    M3D_ZT_ADDR_LO = 0x3F9,
+    M3D_ZT_FORMAT = 0x3FA,
+    M3D_ZT_BLOCK = 0x3FB,
+    M3D_ZT_WIDTH = 0x48A,
+    M3D_ZT_HEIGHT = 0x48B,
+    M3D_ZT_ENABLE = 0x54E,
+    M3D_DEPTH_TEST = 0x4B3,
+    M3D_DEPTH_WRITE = 0x4BA,
+    M3D_DEPTH_FUNC = 0x4C3,
+    M3D_CLEAR_DEPTH = 0x364,
+    M3D_CLEAR_STENCIL = 0x368,
+    M3D_BLEND_COLOR = 0x4C7,  /* constant colour r g b a */
+    M3D_BLEND_ENABLE = 0x4D8, /* + render target */
+    M3D_BLEND_RT = 0x780,     /* + 8 * rt: separate alpha, colour op/src/dst, alpha op/src/dst */
+    M3D_PIPELINE = 0x800,     /* select, offset, ..., register count */
     SPH_SIZE = 0x50,
     MAX_VERTICES = 65536,
 };
@@ -183,6 +198,7 @@ typedef struct target {
     uint32_t width, height, format, bpp, row_bytes, bh;
     int pitch_layout;
     uint32_t mask; /* RGBA write mask */
+    uint32_t rt;   /* render target index, for its blend state */
 } target;
 
 static int bind_target(const uint32_t *r, target *t) {
@@ -199,6 +215,7 @@ static int bind_target(const uint32_t *r, target *t) {
     t->width = t->pitch_layout && t->bpp ? rt[2] / t->bpp : rt[2];
     t->height = rt[3];
     t->row_bytes = t->pitch_layout ? rt[2] : t->width * t->bpp;
+    t->rt = rt_index;
     uint32_t m = r[M3D_CT_WRITE_MASK + rt_index];
     t->mask = (m & 1) | ((m >> 3) & 2) | ((m >> 6) & 4) | ((m >> 9) & 8);
     if (!t->bpp || !va || !t->width || !t->height) {
@@ -208,6 +225,237 @@ static int bind_target(const uint32_t *r, target *t) {
                               : gpu_bl_size(t->row_bytes, t->height, t->bh);
     t->base = nv_gpu_va_to_host(va, t->size);
     return t->base != NULL;
+}
+
+/*
+ * Depth targets. How the bits are laid out only matters to this file, which is
+ * the only reader: Z32F as a float, Z16 as unorm16, the 32-bit Z24 formats
+ * (deko3d's Z24S8 is 0x14) as unorm24 << 8 | stencil.
+ */
+typedef struct depth_target {
+    uint8_t *base;
+    uint64_t size;
+    uint32_t format, bpp, width, height, row_bytes, bh;
+} depth_target;
+
+static int bind_depth(const uint32_t *r, depth_target *d) {
+    memset(d, 0, sizeof(*d));
+    if (!(r[M3D_ZT_ENABLE] & 1)) {
+        return 0;
+    }
+    d->format = r[M3D_ZT_FORMAT];
+    d->bpp = d->format == 0x13                                                 ? 2
+             : (d->format == 0x0A || (d->format >= 0x14 && d->format <= 0x16)) ? 4
+                                                                               : 0;
+    if (!d->bpp) {
+        HOS_LOGW(MOD, "depth format %#x not supported", d->format);
+        return 0;
+    }
+    d->width = r[M3D_ZT_WIDTH];
+    d->height = r[M3D_ZT_HEIGHT];
+    d->bh = (r[M3D_ZT_BLOCK] >> 4) & 0xF;
+    d->row_bytes = d->width * d->bpp;
+    d->size = gpu_bl_size(d->row_bytes, d->height, d->bh);
+    uint64_t va = ((uint64_t)(r[M3D_ZT_ADDR_HI] & 0xFF) << 32) | r[M3D_ZT_ADDR_LO];
+    d->base = nv_gpu_va_to_host(va, d->size);
+    return d->base != NULL;
+}
+
+/* Depth in [0, 1] as the stored integer (or float bits), for exact comparisons. */
+static uint32_t depth_quantize(const depth_target *d, float z) {
+    z = z < 0.0f ? 0.0f : z > 1.0f ? 1.0f : z;
+    switch (d->format) {
+    case 0x0A:
+        return ubits(z);
+    case 0x13:
+        return (uint32_t)((double)z * 65535.0 + 0.5);
+    default:
+        /* in double: z * 16777215 + 0.5 rounds to 2^24 in float and overflows the field */
+        return (uint32_t)((double)z * 16777215.0 + 0.5);
+    }
+}
+
+static uint32_t *depth_ptr(const depth_target *d, uint32_t x, uint32_t y) {
+    uint64_t off = gpu_bl_offset(x * d->bpp, y, d->row_bytes, d->bh);
+    return off + d->bpp <= d->size ? (uint32_t *)(d->base + off) : NULL;
+}
+
+static uint32_t depth_read(const depth_target *d, const uint32_t *p) {
+    if (d->bpp == 2) {
+        return *(const uint16_t *)p;
+    }
+    return d->format == 0x0A ? *p : *p >> 8;
+}
+
+static void depth_write(const depth_target *d, uint32_t *p, uint32_t q) {
+    if (d->bpp == 2) {
+        *(uint16_t *)p = (uint16_t)q;
+    } else if (d->format == 0x0A) {
+        *p = q;
+    } else {
+        *p = (q << 8) | (*p & 0xFF);
+    }
+}
+
+/* D3D-style (deko3d) and OpenGL-style compare functions. */
+static int depth_compare(uint32_t func, uint32_t z, uint32_t stored, int is_float) {
+    int lt = is_float ? fbits(z) < fbits(stored) : z < stored;
+    int eq = z == stored;
+    if (func >= 0x200 && func <= 0x207) {
+        func = func - 0x200 + 1;
+    }
+    switch (func) {
+    case 1:
+        return 0;
+    case 2:
+        return lt;
+    case 3:
+        return eq;
+    case 4:
+        return lt || eq;
+    case 5:
+        return !lt && !eq;
+    case 6:
+        return !eq;
+    case 7:
+        return !lt;
+    default:
+        return 1;
+    }
+}
+
+void gpu_clear_depth_stencil(const uint32_t *r, uint32_t surface_bits) {
+    depth_target d;
+    if (!bind_depth(r, &d)) {
+        return;
+    }
+    uint32_t q = depth_quantize(&d, fbits(r[M3D_CLEAR_DEPTH]));
+    HOS_LOGD(MOD, "clear depth %#x (%g) stencil %u, format %#x, %ux%u, %#" PRIx64 " bytes", q,
+             fbits(r[M3D_CLEAR_DEPTH]), r[M3D_CLEAR_STENCIL] & 0xFF, d.format, d.width, d.height,
+             d.size);
+    uint32_t stencil = r[M3D_CLEAR_STENCIL] & 0xFF;
+    for (uint64_t off = 0; off + d.bpp <= d.size; off += d.bpp) {
+        uint32_t *p = (uint32_t *)(d.base + off);
+        if (surface_bits & 1) {
+            depth_write(&d, p, q);
+        }
+        if ((surface_bits & 2) && d.bpp == 4 && d.format != 0x0A) {
+            *p = (*p & ~0xFFu) | stencil;
+        }
+    }
+}
+
+/* Blend factor (D3D-style as deko3d writes it; 0x4000 | GL value also accepted). */
+static float blend_factor(uint32_t f, int c, const float s[4], const float d[4], const float k[4]) {
+    if (f & 0x4000) {
+        switch (f & 0x3FFF) {
+        case 0x0000:
+            f = 1;
+            break;
+        case 0x0001:
+            f = 2;
+            break;
+        case 0x0300:
+            f = 3;
+            break;
+        case 0x0301:
+            f = 4;
+            break;
+        case 0x0302:
+            f = 5;
+            break;
+        case 0x0303:
+            f = 6;
+            break;
+        case 0x0304:
+            f = 7;
+            break;
+        case 0x0305:
+            f = 8;
+            break;
+        case 0x0306:
+            f = 9;
+            break;
+        case 0x0307:
+            f = 10;
+            break;
+        case 0x0308:
+            f = 11;
+            break;
+        default:
+            f = 2;
+            break;
+        }
+    }
+    switch (f) {
+    case 1:
+        return 0.0f;
+    case 2:
+        return 1.0f;
+    case 3:
+        return s[c];
+    case 4:
+        return 1.0f - s[c];
+    case 5:
+        return s[3];
+    case 6:
+        return 1.0f - s[3];
+    case 7:
+        return d[3];
+    case 8:
+        return 1.0f - d[3];
+    case 9:
+        return d[c];
+    case 10:
+        return 1.0f - d[c];
+    case 11:
+        return c == 3 ? 1.0f : fminf(s[3], 1.0f - d[3]);
+    case 0x21:
+        return k[c];
+    case 0x22:
+        return 1.0f - k[c];
+    case 0x23:
+        return k[3];
+    case 0x24:
+        return 1.0f - k[3];
+    default:
+        return 1.0f;
+    }
+}
+
+static float blend_op(uint32_t op, float s, float d) {
+    switch (op) {
+    case 2:
+    case 0x800A:
+        return s - d;
+    case 3:
+    case 0x800B:
+        return d - s;
+    case 4:
+    case 0x8007:
+        return fminf(s, d);
+    case 5:
+    case 0x8008:
+        return fmaxf(s, d);
+    default:
+        return s + d;
+    }
+}
+
+static void blend(const uint32_t *r, uint32_t rt, const float dst[4], float rgba[4]) {
+    const uint32_t *b = r + M3D_BLEND_RT + 8 * rt;
+    float k[4];
+    for (int c = 0; c < 4; c++) {
+        k[c] = fbits(r[M3D_BLEND_COLOR + c]);
+    }
+    float src[4] = {rgba[0], rgba[1], rgba[2], rgba[3]};
+    for (int c = 0; c < 4; c++) {
+        int alpha = c == 3;
+        uint32_t op = b[alpha ? 4 : 1], sf = b[alpha ? 5 : 2], df = b[alpha ? 6 : 3];
+        float fs = blend_factor(sf, c, src, dst, k), fd = blend_factor(df, c, src, dst, k);
+        int minmax = op == 4 || op == 5 || op == 0x8007 || op == 0x8008;
+        rgba[c] = minmax ? blend_op(op, src[c], dst[c]) : blend_op(op, src[c] * fs, dst[c] * fd);
+    }
 }
 
 static void write_pixel(const target *t, uint32_t x, uint32_t y, const float rgba[4]) {
@@ -239,7 +487,7 @@ static float edge(const float *a, const float *b, float px, float py) {
 
 static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v1, const vertex *v2,
                             const program *fs, shader_env *env, const target *t,
-                            gpu_draw_stats *st) {
+                            const depth_target *dt, gpu_draw_stats *st) {
     if (v0->pos[3] <= 0.0f || v1->pos[3] <= 0.0f || v2->pos[3] <= 0.0f) {
         return; /* FIXME(#40): clip against w > 0 instead of dropping */
     }
@@ -280,6 +528,10 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
     x1 = x1 > cx1 ? cx1 : x1;
     y1 = y1 > cy1 ? cy1 : y1;
 
+    int depth_test = dt && dt->base && (r[M3D_DEPTH_TEST] & 1);
+    int depth_write_on = dt && dt->base && (r[M3D_DEPTH_WRITE] & 1);
+    int blending = r[M3D_BLEND_ENABLE + t->rt] & 1;
+    uint32_t depth_func = r[M3D_DEPTH_FUNC];
     raster_ctx c = {.v = {v0, v1, v2}};
     env->ipa = ipa;
     env->user = &c;
@@ -296,6 +548,16 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
             c.l[0] = w0;
             c.l[1] = w1;
             c.l[2] = w2;
+            uint32_t *zp = NULL, zq = 0;
+            if (depth_test || depth_write_on) {
+                zp = depth_ptr(dt, (uint32_t)x, (uint32_t)y);
+                float z = w0 * v0->win[2] + w1 * v1->win[2] + w2 * v2->win[2];
+                zq = depth_quantize(dt, z);
+                if (zp && depth_test &&
+                    !depth_compare(depth_func, zq, depth_read(dt, zp), dt->format == 0x0A)) {
+                    continue;
+                }
+            }
             c.px = px;
             c.py = py;
             env->killed = 0;
@@ -312,7 +574,20 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
             }
             float rgba[4] = {fbits(env->r[0]), fbits(env->r[1]), fbits(env->r[2]),
                              fbits(env->r[3])};
+            if (blending) {
+                uint64_t off = t->pitch_layout ? (uint64_t)y * t->row_bytes + (uint64_t)x * t->bpp
+                                               : gpu_bl_offset((uint32_t)x * t->bpp, (uint32_t)y,
+                                                               t->row_bytes, t->bh);
+                float dst[4] = {0, 0, 0, 0};
+                if (off + t->bpp <= t->size) {
+                    gpu_decode_color(t->format, t->base + off, dst);
+                }
+                blend(r, t->rt, dst, rgba);
+            }
             write_pixel(t, (uint32_t)x, (uint32_t)y, rgba);
+            if (zp && depth_write_on) {
+                depth_write(dt, zp, zq);
+            }
             st->pixels++;
         }
     }
@@ -336,6 +611,8 @@ void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first,
     if (count == 0 || count > MAX_VERTICES) {
         return;
     }
+    depth_target dt;
+    bind_depth(r, &dt);
     vertex *verts = calloc(count, sizeof(*verts));
     shader_env *env = calloc(1, sizeof(*env));
     if (!verts || !env) {
@@ -388,27 +665,27 @@ void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first,
     switch (topology) {
     case TOPO_TRIANGLES:
         for (uint32_t k = 0; k + 2 < count; k += 3) {
-            raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &t, st);
+            raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &t, &dt, st);
         }
         break;
     case TOPO_STRIP:
         for (uint32_t k = 0; k + 2 < count; k++) {
             if (k & 1) {
-                raster_triangle(r, &verts[k + 1], &verts[k], &verts[k + 2], &fs, env, &t, st);
+                raster_triangle(r, &verts[k + 1], &verts[k], &verts[k + 2], &fs, env, &t, &dt, st);
             } else {
-                raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &t, st);
+                raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &t, &dt, st);
             }
         }
         break;
     case TOPO_FAN:
         for (uint32_t k = 1; k + 1 < count; k++) {
-            raster_triangle(r, &verts[0], &verts[k], &verts[k + 1], &fs, env, &t, st);
+            raster_triangle(r, &verts[0], &verts[k], &verts[k + 1], &fs, env, &t, &dt, st);
         }
         break;
     case TOPO_QUADS: /* each quad as two triangles sharing its first vertex */
         for (uint32_t k = 0; k + 3 < count; k += 4) {
-            raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &t, st);
-            raster_triangle(r, &verts[k], &verts[k + 2], &verts[k + 3], &fs, env, &t, st);
+            raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &t, &dt, st);
+            raster_triangle(r, &verts[k], &verts[k + 2], &verts[k + 3], &fs, env, &t, &dt, st);
         }
         break;
     default:

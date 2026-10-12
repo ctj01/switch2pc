@@ -233,10 +233,56 @@ uint32_t gpu_encode_color(uint32_t format, const float rgba[4], uint8_t out[16])
     }
 }
 
+static float srgb_to_linear(float v) {
+    return v <= 0.04045f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
+}
+
+uint32_t gpu_decode_color(uint32_t format, const uint8_t *in, float rgba[4]) {
+    switch (format) {
+    case 0xD5:
+    case 0xD6:
+        for (int c = 0; c < 4; c++) {
+            rgba[c] = in[c] / 255.0f;
+        }
+        break;
+    case 0xCF:
+    case 0xD0:
+        rgba[0] = in[2] / 255.0f;
+        rgba[1] = in[1] / 255.0f;
+        rgba[2] = in[0] / 255.0f;
+        rgba[3] = in[3] / 255.0f;
+        break;
+    case 0xE8: {
+        uint16_t v;
+        memcpy(&v, in, 2);
+        rgba[0] = ((v >> 11) & 0x1F) / 31.0f;
+        rgba[1] = ((v >> 5) & 0x3F) / 63.0f;
+        rgba[2] = (v & 0x1F) / 31.0f;
+        rgba[3] = 1.0f;
+        return 2;
+    }
+    case 0xC0:
+        memcpy(rgba, in, 16);
+        return 16;
+    default:
+        return 0;
+    }
+    if (format == 0xD6 || format == 0xD0) {
+        for (int c = 0; c < 3; c++) {
+            rgba[c] = srgb_to_linear(rgba[c]);
+        }
+    }
+    return 4;
+}
+
 static void clear_surface(gpu_engines *e, uint32_t v) {
     const uint32_t *r = e->regs[ENG_3D];
+    if (v & 3) {
+        gpu_clear_depth_stencil(r, v & 3);
+        e->stats.clears++;
+    }
     if (!(v & 0x3C)) {
-        return; /* depth/stencil only: no depth targets yet */
+        return; /* depth/stencil only */
     }
     uint32_t mrt = (v >> 6) & 0xF;
     uint32_t sel = r[M3D_CT_SELECT];

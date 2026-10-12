@@ -221,6 +221,29 @@ if(S2PC_ARM64)
         endif()
     endif()
 
+    # GPU milestone M3c: a Z24S8 depth buffer (test LESS, write on/off per draw) and
+    # alpha blending, four quads with their own state, against a reference simulation.
+    set(db_dir ${CMAKE_SOURCE_DIR}/examples/libnx_deko3d_depthblend)
+    if(EXISTS ${db_dir}/build/deko3d_depthblend.nso AND EXISTS ${db_dir}/romfs/shaders)
+        file(MAKE_DIRECTORY ${fixture_dir}/depthblend)
+        add_test(NAME smoke_deko3d_depthblend
+                 COMMAND hosrun --romfs ${db_dir}/romfs --sdmc ${fixture_dir}/sdmc
+                         ${db_dir}/build/deko3d_depthblend.nso)
+        set_tests_properties(smoke_deko3d_depthblend PROPERTIES
+            TIMEOUT 300
+            ENVIRONMENT "HOS_FRAMES=${fixture_dir}/depthblend"
+            PASS_REGULAR_EXPRESSION "depth/blend scene ready.*4 draws, 8 triangles.*deko3d depth/blend: done"
+            FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|shader stopped|does not parse|not mapped|not supported|result [1-9]")
+        if(Python3_FOUND)
+            add_test(NAME check_deko3d_depthblend
+                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/check_depthblend.py
+                             ${fixture_dir}/depthblend/frame_0002.ppm)
+            set_tests_properties(check_deko3d_depthblend PROPERTIES
+                DEPENDS smoke_deko3d_depthblend
+                PASS_REGULAR_EXPRESSION "0 differ by more than 1")
+        endif()
+    endif()
+
     # DOOM (doomgeneric + shareware IWAD): a complete game through framebuffer, input,
     # romfs and timing. 400 frames headless; frames are not dumped to keep it fast.
     set(doom_nso ${CMAKE_SOURCE_DIR}/examples/doom/build/doom_test.nso)
