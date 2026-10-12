@@ -117,6 +117,51 @@ TEST(shader_attributes_and_constant_buffer) {
     ASSERT_EQ(e.out[0x90 / 4], 44); /* c1[2*4 + 4] */
 }
 
+/* Compute: words from deko3d's sinewave kernel (S2R, ISCADD, IADD.CC/.X, STG) plus an
+ * LDG; the buffer address sits in c0[0x140] as in deko3d's driver buffer, and its low
+ * half overflows so the store needs the carry. */
+static uint8_t g_global[0x100];
+
+static void *test_mem(uint64_t va, uint32_t len) {
+    uint64_t base = 0x200000000ull;
+    return va >= base && va + len <= base + sizeof(g_global) ? g_global + (va - base) : NULL;
+}
+
+TEST(shader_compute_global_store_and_load) {
+    static uint32_t cb0[0x150 / 4];
+    cb0[0x140 / 4] = 0xFFFFFFF0u; /* buffer at 0x1_FFFFFFF0 */
+    cb0[0x144 / 4] = 0x1;
+    const uint64_t insns[] = {
+        0xf0c8000002570000ull,                                      /* s2r r0 = ctaid.x */
+        0xf0c8000002170001ull,                                      /* s2r r1 = tid.x */
+        0x5c18028000170000ull,                                      /* iscadd r0 = r0<<5 + r1 */
+        OPC(0x3848) | PT_GUARD | D(0) | A(0) | imm20i(2),           /* shl r0 <<= 2 */
+        0x4c10800005070000ull,                                      /* iadd.cc r0 += c0[0x140] */
+        0x4c1008000517ff01ull,                                      /* iadd.x r1 = c0[0x144] */
+        OPC(0x0100) | PT_GUARD | D(8) | ((uint64_t)0xC0FFEE << 20), /* mov32i r8 */
+        0xeedc200000470008ull,                                      /* stg.e [r0+4] = r8 */
+        0xeed4200000470009ull,                                      /* ldg.e r9 = [r0+4] */
+        OPC(0xeff0) | PT_GUARD | D(9) | A(RZ) | (0x80ull << 20) | C(RZ), /* st a[0x80] = r9 */
+        OPC(0xe300) | PT_GUARD,
+    };
+    uint64_t code[24];
+    uint32_t n = assemble(insns, sizeof(insns) / sizeof(insns[0]), code);
+    static shader_env e;
+    memset(&e, 0, sizeof(e));
+    memset(g_global, 0, sizeof(g_global));
+    e.cb[0] = (const uint8_t *)cb0;
+    e.cb_size[0] = sizeof(cb0);
+    e.mem = test_mem;
+    e.ctaid[0] = 1;
+    e.tid[0] = 2; /* index 34: 0xFFFFFFF0 + 136 carries into the high word */
+    uint64_t bad = 0;
+    ASSERT_EQ(shader_run(code, n, &e, &bad), 0);
+    uint32_t v;
+    memcpy(&v, g_global + 0x78 + 4, 4); /* 0x2_00000078 + 4 */
+    ASSERT_EQ(v, 0xC0FFEE);
+    ASSERT_EQ(e.out[0x80 / 4], 0xC0FFEE);
+}
+
 TEST(shader_unknown_instruction_is_reported) {
     const uint64_t insns[] = {0xdeadbeefcaf00000ull | PT_GUARD, OPC(0xe300) | PT_GUARD};
     uint64_t code[8];

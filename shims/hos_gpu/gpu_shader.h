@@ -44,6 +44,10 @@ struct shader_env {
     shader_ipa_fn ipa;
     void *user;
     shader_dcache *dcache; /* optional */
+    /* compute: S2R's thread and group ids and counts; global memory for LDG/STG */
+    uint32_t tid[3], ctaid[3], ntid[3], nctaid[3];
+    uint32_t carry; /* IADD .CC / .X */
+    void *(*mem)(uint64_t va, uint32_t len);
     shader_tex_fn tex;
     shader_texel_fn texel; /* shares tex_user */
     void *tex_user;

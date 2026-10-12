@@ -57,7 +57,9 @@ enum {
     M3D_INDEX_ADDR_LO = 0x5F3,
     M3D_INDEX_FORMAT = 0x5F6,
     M3D_BASE_VERTEX = 0x50D,
-    M3D_MS_MODE = 0x574, /* samples: 0 1x, 1 2x, 2 4x, 3 8x, 4 16x */
+    M3D_MS_MODE = 0x574,
+    M3D_LINE_WIDTH_ALIASED = 0x4ED,
+    /* float; 0x4EC is the smooth width */ /* samples: 0 1x, 1 2x, 2 4x, 3 8x, 4 16x */
     M3D_CB_ADDR_HI = 0x8E1,
     M3D_CB_ADDR_LO = 0x8E2,
     M3D_PIPELINE = 0x800, /* select, offset, ..., register count */
@@ -68,6 +70,8 @@ enum {
 enum {
     TOPO_POINTS = 0,
     TOPO_LINES = 1,
+    TOPO_LINE_LOOP = 2,
+    TOPO_LINE_STRIP = 3,
     TOPO_TRIANGLES = 4,
     TOPO_STRIP = 5,
     TOPO_FAN = 6,
@@ -806,7 +810,7 @@ void gpu_ms_grid(uint32_t mode, uint32_t *gx, uint32_t *gy) {
 
 static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v1, const vertex *v2,
                             const program *fs, shader_env *env, const targets *ts,
-                            const depth_target *dt, uint32_t band, uint32_t nbands,
+                            const depth_target *dt, int may_cull, uint32_t band, uint32_t nbands,
                             gpu_draw_stats *st) {
     const target *t = &ts->t[0];
     if (v0->pos[3] <= 0.0f || v1->pos[3] <= 0.0f || v2->pos[3] <= 0.0f) {
@@ -822,7 +826,7 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
     int front = r[M3D_FRONT_FACE] == 0x900 ? !ccw : ccw; /* 0x901 CCW, 0x900 CW */
     HOS_LOGT(MOD, "triangle: area %g, %s facing, cull %s face %#x", area, front ? "front" : "back",
              (r[M3D_CULL_ENABLE] & 1) ? "on" : "off", r[M3D_CULL_FACE]);
-    if (r[M3D_CULL_ENABLE] & 1) {
+    if (may_cull && (r[M3D_CULL_ENABLE] & 1)) {
         uint32_t cull = r[M3D_CULL_FACE];
         if (cull == 0x408 || (cull == 0x404 && front) || (cull == 0x405 && !front)) {
             return;
@@ -996,6 +1000,7 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
 
 typedef struct frag_tri {
     const vertex *v[3];
+    int no_cull; /* a line's rectangle: facing does not apply */
 } frag_tri;
 
 typedef struct frag_job {
@@ -1036,8 +1041,8 @@ static void frag_worker(void *arg, uint32_t band, uint32_t nbands) {
     st->shader_errors = j->errors;
     for (uint32_t k = 0; k < j->ntris; k++) {
         const frag_tri *t = &j->tris[k];
-        raster_triangle(j->r, t->v[0], t->v[1], t->v[2], j->fs, env, j->ts, j->dt, band, nbands,
-                        st);
+        raster_triangle(j->r, t->v[0], t->v[1], t->v[2], j->fs, env, j->ts, j->dt, !t->no_cull,
+                        band, nbands, st);
     }
     st->shader_errors -= j->errors;
     free(tc);
@@ -1280,31 +1285,70 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
     pthread_mutex_unlock(&vs_lock);
     free(reuse);
 
-    /* Primitive assembly. */
-    uint32_t cap = topology == TOPO_QUADS ? count / 4 * 2 : count;
+    /* Primitive assembly. Lines become rectangles of the line width around each
+     * segment, two triangles over copies of the segment's ends: attributes then vary
+     * along the line only. No smoothing (coverage alpha) yet. */
+    int line = topology == TOPO_LINES || topology == TOPO_LINE_LOOP || topology == TOPO_LINE_STRIP;
+    uint32_t nseg = topology == TOPO_LINES        ? count / 2
+                    : topology == TOPO_LINE_STRIP ? (count ? count - 1 : 0)
+                    : topology == TOPO_LINE_LOOP  ? (count > 1 ? count : 0)
+                                                  : 0;
+    uint32_t cap = line ? 2 * nseg : topology == TOPO_QUADS ? count / 4 * 2 : count;
     frag_tri *tris = calloc(cap ? cap : 1, sizeof(*tris));
+    vertex *lv = line && nseg ? calloc(4 * (size_t)nseg, sizeof(*lv)) : NULL;
     uint32_t nt = 0;
+    if (line && !lv) {
+        topology = ~0u;
+    }
     switch (tris ? topology : ~0u) {
+    case TOPO_LINES:
+    case TOPO_LINE_LOOP:
+    case TOPO_LINE_STRIP: {
+        float hw = fbits(r[M3D_LINE_WIDTH_ALIASED]) * 0.5f;
+        hw = hw > 0.5f ? hw : 0.5f;
+        for (uint32_t k = 0; k < nseg; k++) {
+            const vertex *a = topology == TOPO_LINES ? vp[2 * k] : vp[k];
+            const vertex *b = topology == TOPO_LINES ? vp[2 * k + 1] : vp[(k + 1) % count];
+            float dx = b->win[0] - a->win[0], dy = b->win[1] - a->win[1];
+            float len = sqrtf(dx * dx + dy * dy);
+            if (len == 0.0f) {
+                continue;
+            }
+            /* the width is in pixels; window coordinates are in samples */
+            float nx = -dy / len * hw * (float)gx, ny = dx / len * hw * (float)gy;
+            vertex *q = &lv[4 * k];
+            const vertex *ends[4] = {a, a, b, b};
+            const float side[4] = {1, -1, -1, 1};
+            for (int c = 0; c < 4; c++) {
+                memcpy(&q[c], ends[c], sizeof(*q));
+                q[c].win[0] += side[c] * nx;
+                q[c].win[1] += side[c] * ny;
+            }
+            tris[nt++] = (frag_tri){{&q[0], &q[1], &q[2]}, 1};
+            tris[nt++] = (frag_tri){{&q[0], &q[2], &q[3]}, 1};
+        }
+        break;
+    }
     case TOPO_TRIANGLES:
         for (uint32_t k = 0; k + 2 < count; k += 3) {
-            tris[nt++] = (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}};
+            tris[nt++] = (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}, 0};
         }
         break;
     case TOPO_STRIP:
         for (uint32_t k = 0; k + 2 < count; k++) {
-            tris[nt++] = k & 1 ? (frag_tri){{vp[k + 1], vp[k], vp[k + 2]}}
-                               : (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}};
+            tris[nt++] = k & 1 ? (frag_tri){{vp[k + 1], vp[k], vp[k + 2]}, 0}
+                               : (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}, 0};
         }
         break;
     case TOPO_FAN:
         for (uint32_t k = 1; k + 1 < count; k++) {
-            tris[nt++] = (frag_tri){{vp[0], vp[k], vp[k + 1]}};
+            tris[nt++] = (frag_tri){{vp[0], vp[k], vp[k + 1]}, 0};
         }
         break;
     case TOPO_QUADS: /* each quad as two triangles sharing its first vertex */
         for (uint32_t k = 0; k + 3 < count; k += 4) {
-            tris[nt++] = (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}};
-            tris[nt++] = (frag_tri){{vp[k], vp[k + 2], vp[k + 3]}};
+            tris[nt++] = (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}, 0};
+            tris[nt++] = (frag_tri){{vp[k], vp[k + 2], vp[k + 3]}, 0};
         }
         break;
     default:
@@ -1359,6 +1403,7 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
         }
     }
     free(tris);
+    free(lv);
     free(tc);
     free(vp);
     free(verts);
@@ -1477,4 +1522,90 @@ void gpu_2d_blit(const uint32_t *r) {
     pool_run(blit_rows, &b);
     HOS_LOGD(MOD, "2d blit %ux%u -> %ux%u at (%u,%u), step %.2f %s", b.src.width, b.src.height, b.w,
              b.h, b.dx0, b.dy0, b.du, b.bilinear ? "bilinear" : "point");
+}
+
+/*
+ * Compute (0xB1C0). deko3d uploads a queue meta data block (QMD, v01_07) with
+ * inline-to-memory and launches it: 0x0AD holds its address >> 8 and 0x0AF
+ * starts it. Fields used, by 32-bit word: 8 program offset (from the code
+ * address at 0x582/0x583), 12 grid x, 13 grid y [15:0] and z [31:16], 18
+ * threads x [31:16], 19 threads y [15:0] and z [31:16], 20 [7:0] valid constant
+ * buffers, 29 + 2i address low and 30 + 2i address high [7:0] and size
+ * [31:15] of buffer i. Threads run one after another, which is exact for
+ * kernels without barriers or shared memory.
+ */
+static void *compute_mem(uint64_t va, uint32_t len) {
+    return nv_gpu_va_to_host(va, len);
+}
+
+void gpu_compute_launch(const uint32_t *rc, gpu_draw_stats *st) {
+    uint64_t qmd_va = (uint64_t)rc[0x0AD] << 8;
+    const uint32_t *q = nv_gpu_va_to_host(qmd_va, 0x100);
+    if (!q) {
+        HOS_LOGW(MOD, "compute: QMD at %#" PRIx64 " not mapped", qmd_va);
+        return;
+    }
+    uint64_t base = ((uint64_t)(rc[M3D_PROGRAM_HI] & 0xFF) << 32) | rc[M3D_PROGRAM_LO];
+    uint64_t avail = 0;
+    const uint64_t *code = nv_gpu_va_to_host_span(base + q[8], &avail);
+    if (!code || avail < 16) {
+        HOS_LOGW(MOD, "compute: program at %#" PRIx64 " not mapped", base + q[8]);
+        return;
+    }
+    uint32_t words = (uint32_t)(avail / 8 < 65536 ? avail / 8 : 65536);
+    uint32_t grid[3] = {q[12], q[13] & 0xFFFF, q[13] >> 16};
+    uint32_t block[3] = {q[18] >> 16, q[19] & 0xFFFF, q[19] >> 16};
+    shader_env *env = calloc(1, sizeof(*env));
+    if (!env) {
+        return;
+    }
+    for (uint32_t i = 0; i < GPU_CBUFS && i < 8; i++) {
+        if ((q[20] >> i) & 1) {
+            uint64_t va = ((uint64_t)(q[30 + 2 * i] & 0xFF) << 32) | q[29 + 2 * i];
+            uint32_t size = q[30 + 2 * i] >> 15;
+            env->cb[i] = nv_gpu_va_to_host(va, size);
+            env->cb_size[i] = env->cb[i] ? size : 0;
+        }
+    }
+    env->mem = compute_mem;
+    static pthread_mutex_t cs_lock = PTHREAD_MUTEX_INITIALIZER;
+    static shader_dcache *cs_dcache;
+    pthread_mutex_lock(&cs_lock);
+    if (!cs_dcache) {
+        cs_dcache = shader_dcache_new();
+    }
+    env->dcache = cs_dcache;
+    HOS_LOGD(MOD, "compute: %ux%ux%u groups of %ux%ux%u at %#" PRIx64, grid[0], grid[1], grid[2],
+             block[0], block[1], block[2], base + q[8]);
+    for (uint32_t c = 0; c < 3; c++) {
+        env->ntid[c] = block[c];
+        env->nctaid[c] = grid[c];
+    }
+    int stop = 0;
+    for (uint32_t gz = 0; gz < grid[2] && !stop; gz++) {
+        for (uint32_t gy_ = 0; gy_ < grid[1] && !stop; gy_++) {
+            for (uint32_t gx_ = 0; gx_ < grid[0] && !stop; gx_++) {
+                for (uint32_t t = 0; t < block[0] * block[1] * block[2]; t++) {
+                    env->ctaid[0] = gx_;
+                    env->ctaid[1] = gy_;
+                    env->ctaid[2] = gz;
+                    env->tid[0] = t % block[0];
+                    env->tid[1] = t / block[0] % block[1];
+                    env->tid[2] = t / (block[0] * block[1]);
+                    uint64_t bad = 0;
+                    if (shader_run(code, words, env, &bad) != 0) {
+                        if (!st->shader_errors++) {
+                            HOS_LOGW(MOD, "compute shader stopped at instruction %#018" PRIx64,
+                                     bad);
+                        }
+                        stop = 1;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    pthread_mutex_unlock(&cs_lock);
+    st->dispatches++;
+    free(env);
 }

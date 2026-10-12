@@ -9,11 +9,13 @@ done, all on the CPU. Next: the Vulkan backend (M2) for speed, and M5 as real
 homebrew asks (mipmaps, more formats, compute).
 
 Real homebrew (2026-10-12): devkitPro's `deko_examples`, unmodified apart from
-a test-only selector in `main.cpp`, render 7 of 9 examples: scissored clears,
+a test-only selector in `main.cpp`, render 8 of 9 examples: scissored clears,
 the triangle, the cube, the textured cube, 4x multisampling with its 2D-engine
-resolve, the sRGB lit teapot (indexed mesh) and deferred shading (three render
-targets, `texelFetch` from the G-buffer). Missing: tessellation (05) and
-compute plus line strips (09). They are checked by eye, not by a test, since
+resolve, the sRGB lit teapot (indexed mesh), deferred shading (three render
+targets, `texelFetch` from the G-buffer) and a compute kernel writing the
+vertices of a wide line strip. Missing: tessellation (05). Line smoothing
+(coverage alpha) is not done; lines are rectangles of the line width. They
+are checked by eye, not by a test, since
 the examples need devkitPro to build. At 1280x720 on the CPU under qemu they
 run at a few frames per second, 4x MSAA well below that: M2 is what fixes it.
 
@@ -246,6 +248,19 @@ Each point below cost a failed run and is now in `nvgpu.c`:
   used: `SSY`/`SYNC` (and `PBK`/`BRK`, `PCNT`/`CONT`), `RRO` ahead of `MUFU`,
   `F2I`/`I2F`, and `TLDS` for `texelFetch`. envydis decodes none of `SYNC`
   or `TLDS`; their fields match the TEXS layout.
+
+## What compute taught
+
+- deko3d launches a kernel by uploading a QMD (v01_07) with inline-to-memory
+  and writing its address >> 8 to 0x0AD and 3 to 0x0AF. The words that matter:
+  8 program offset (from the code address 0x582/0x583, no header in front),
+  12 and 13 the grid, 18 [31:16] and 19 the block, 20 [7:0] the valid constant
+  buffers and 29 + 2i / 30 + 2i their address and size ([31:15]). The driver
+  buffer c0 follows the QMD: block size at 0x0, group count at 0xC, storage
+  buffers from 0x140 as address and size pairs.
+- Storage buffers are plain global memory: the kernel builds a 64-bit address
+  with `IADD.CC` and `IADD.X` and stores with `STG.E`. Threads run one after
+  another, exact for kernels without barriers or shared memory.
 
 ## Risks and how to keep them small
 

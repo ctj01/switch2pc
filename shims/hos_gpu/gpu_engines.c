@@ -881,6 +881,8 @@ static void engine_write(gpu_engines *e, int eng, uint32_t method, uint32_t valu
             i2m_launch(e, eng, value);
         } else if (method == I2M_LOAD_INLINE_DATA) {
             i2m_data(e, eng, value);
+        } else if (method == 0x0AF && eng == ENG_COMPUTE) { /* LAUNCH */
+            gpu_compute_launch(e->regs[ENG_COMPUTE], &e->draw);
         }
         break;
     case ENG_I2M:

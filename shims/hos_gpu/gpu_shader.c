@@ -307,6 +307,13 @@ static uint8_t classify(u64 i) {
     if (is(i, 0xc038000000000000ull, 0xfc38000000000000ull)) {
         return 32;
     }
+    if (is(i, 0xf0c8000000000000ull, 0xfff8000000000000ull)) {
+        return 33;
+    }
+    if (is(i, 0xeed8000000000000ull, 0xfff8000000000000ull) ||
+        is(i, 0xeed0000000000000ull, 0xfff8000000000000ull)) {
+        return 34;
+    }
     return 0;
 }
 
@@ -573,7 +580,13 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
             int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
             uint32_t x = bits(i, 49, 1) ? 0u - a : a;
             uint32_t b = operand_b(e, i, form, 0);
-            set_reg(e, d, x + (bits(i, 48, 1) ? 0u - b : b));
+            b = bits(i, 48, 1) ? 0u - b : b;
+            /* .X [43] adds the carry, .CC [47] sets it: 64-bit address arithmetic */
+            uint64_t sum = (uint64_t)x + b + (bits(i, 43, 1) ? e->carry : 0);
+            if (bits(i, 47, 1)) {
+                e->carry = (uint32_t)(sum >> 32) & 1;
+            }
+            set_reg(e, d, (uint32_t)sum);
         } else if (opc == 24) { /* ISCADD */
             int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
             uint32_t x = (bits(i, 49, 1) ? 0u - a : a) << bits(i, 39, 5);
@@ -673,6 +686,55 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
             for (int c = 0; c < 4; c++) {
                 if (mask & (1u << c)) {
                     set_reg(e, d == RZ ? RZ : d + k++, u(texel[c]));
+                }
+            }
+        } else if (opc == 33) { /* S2R */
+            uint32_t sr = bits(i, 20, 8), v = 0;
+            if (sr >= 0x21 && sr <= 0x23) { /* SR_TID.X/Y/Z */
+                v = e->tid[sr - 0x21];
+            } else if (sr >= 0x25 && sr <= 0x27) { /* SR_CTAID.X/Y/Z */
+                v = e->ctaid[sr - 0x25];
+            } else if (sr == 0x20) { /* SR_TID packed: x [15:0], y [25:16], z [31:26] */
+                v = e->tid[0] | (e->tid[1] << 16) | (e->tid[2] << 26);
+            } else if (sr != 0x00) { /* SR_LANEID reads 0 */
+                *bad_insn = i;
+                return -1;
+            }
+            set_reg(e, d, v);
+        } else if (opc == 34) { /* LDG, STG */
+            /* data [7:0], address A [15:8] (A, A+1 with .E [45]), offset [43:20] signed,
+             * size [50:48]: u8 s8 u16 s16 b32 b64 b128. */
+            static const uint8_t bytes[8] = {1, 1, 2, 2, 4, 8, 16, 16};
+            uint32_t ra = bits(i, 8, 8), size = bits(i, 48, 3), n = bytes[size];
+            uint64_t va = reg(e, ra);
+            if (bits(i, 45, 1) && ra != RZ) {
+                va |= (uint64_t)reg(e, ra + 1) << 32;
+            }
+            va += (uint64_t)(int64_t)((int32_t)(bits(i, 20, 24) << 8) >> 8);
+            uint8_t *p = e->mem ? e->mem(va, n) : NULL;
+            int store = is(i, 0xeed8000000000000ull, 0xfff8000000000000ull);
+            if (!p) {
+                *bad_insn = i; /* unmapped: stop rather than drop the access */
+                return -1;
+            }
+            if (store) {
+                for (uint32_t k = 0; k < (n + 3) / 4; k++) {
+                    uint32_t v = reg(e, d == RZ ? RZ : d + k);
+                    memcpy(p + 4 * k, &v, n < 4 ? n : 4);
+                }
+            } else if (n < 4) {
+                uint32_t v = n == 1 ? p[0] : (uint32_t)(p[0] | p[1] << 8);
+                if (size == 1) {
+                    v = (uint32_t)(int32_t)(int8_t)v;
+                } else if (size == 3) {
+                    v = (uint32_t)(int32_t)(int16_t)v;
+                }
+                set_reg(e, d, v);
+            } else {
+                for (uint32_t k = 0; k < n / 4; k++) {
+                    uint32_t v;
+                    memcpy(&v, p + 4 * k, 4);
+                    set_reg(e, d == RZ ? RZ : d + k, v);
                 }
             }
         } else {

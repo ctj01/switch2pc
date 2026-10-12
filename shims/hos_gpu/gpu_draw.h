@@ -24,6 +24,7 @@ typedef struct gpu_draw_stats {
     uint64_t triangles;
     uint64_t pixels;
     uint64_t shader_errors;
+    uint64_t dispatches;
 } gpu_draw_stats;
 
 /** Draw `count` vertices from `first` with the topology of VERTEX_BEGIN_GL. */
@@ -34,6 +35,10 @@ void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first,
  * each offset by the base vertex at 0x50D. */
 void gpu_draw_indexed(const gpu_draw_state *s, uint32_t topology, uint32_t first, uint32_t count,
                       uint32_t instance, gpu_draw_stats *st);
+
+/** Compute launch (0xB1C0 method 0x0AF): runs the QMD at 0x0AD << 8. `rc` is the
+ * compute engine's register file. */
+void gpu_compute_launch(const uint32_t *rc, gpu_draw_stats *st);
 
 /** The 2D engine's scaled blit (PIXELS_FROM_MEMORY), as used to resolve multisampled images. */
 void gpu_2d_blit(const uint32_t *r2d);
