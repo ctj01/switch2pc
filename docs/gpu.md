@@ -8,6 +8,15 @@ alongside the triangle, cube and depth/blend scenes. M0, M1, M3 and M4 are
 done, all on the CPU. Next: the Vulkan backend (M2) for speed, and M5 as real
 homebrew asks (mipmaps, more formats, compute).
 
+Real homebrew (2026-10-12): devkitPro's `deko_examples`, unmodified apart from
+a test-only selector in `main.cpp`, render 7 of 9 examples: scissored clears,
+the triangle, the cube, the textured cube, 4x multisampling with its 2D-engine
+resolve, the sRGB lit teapot (indexed mesh) and deferred shading (three render
+targets, `texelFetch` from the G-buffer). Missing: tessellation (05) and
+compute plus line strips (09). They are checked by eye, not by a test, since
+the examples need devkitPro to build. At 1280x720 on the CPU under qemu they
+run at a few frames per second, 4x MSAA well below that: M2 is what fixes it.
+
 ## Which path, and why
 
 Homebrew that uses the GPU goes through one of two libraries, both
@@ -193,6 +202,23 @@ Each point below cost a failed run and is now in `nvgpu.c`:
   its result across two register pairs selected by a 3-bit component code.
 - BC1 is addressed in 4x4 blocks of 8 bytes, block-linear like any other
   surface with one "texel" per block; the test covers both of its modes.
+
+## What deko_examples taught
+
+- Indexed draws: the index count at 0x5F8 (first index 0x5F7) replaces the
+  vertex count at 0x35E for the next END; the buffer is 0x5F2/0x5F3 with its
+  format (u8, u16, u32) at 0x5F6, and 0x50D adds the base vertex.
+- A multisampled target is allocated in samples (2560x1440 for 4x at 720p)
+  while viewports and scissors stay in pixels; the multisample mode at 0x574
+  gives the sample grid, and the clear scissor scales by it too. We shade
+  every sample, which is supersampling, and deko3d's resolve is a 2D engine
+  (0x902D) scaled blit from the sample image, started by method 0x237.
+- Fragment outputs follow the SPH output map (word 18, four component bits
+  per target): enabled components take consecutive registers from R0.
+- Compiled GLSL brings control flow and instructions our test shaders never
+  used: `SSY`/`SYNC` (and `PBK`/`BRK`, `PCNT`/`CONT`), `RRO` ahead of `MUFU`,
+  `F2I`/`I2F`, and `TLDS` for `texelFetch`. envydis decodes none of `SYNC`
+  or `TLDS`; their fields match the TEXS layout.
 
 ## Risks and how to keep them small
 

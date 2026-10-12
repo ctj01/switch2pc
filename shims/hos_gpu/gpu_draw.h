@@ -30,6 +30,17 @@ typedef struct gpu_draw_stats {
 void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first, uint32_t count,
                      uint32_t instance, gpu_draw_stats *st);
 
+/** Indexed draw: `count` indices from `first` in the index buffer at 0x5F2 (format 0x5F6),
+ * each offset by the base vertex at 0x50D. */
+void gpu_draw_indexed(const gpu_draw_state *s, uint32_t topology, uint32_t first, uint32_t count,
+                      uint32_t instance, gpu_draw_stats *st);
+
+/** The 2D engine's scaled blit (PIXELS_FROM_MEMORY), as used to resolve multisampled images. */
+void gpu_2d_blit(const uint32_t *r2d);
+
+/** Samples per pixel as a grid for the 3D multisample mode (0x574): 1x1, 2x1, 2x2, 4x2, 4x4. */
+void gpu_ms_grid(uint32_t mode, uint32_t *gx, uint32_t *gy);
+
 /** CLEAR_SURFACE's depth (bit 0) and stencil (bit 1) part, on the bound depth target. */
 void gpu_clear_depth_stencil(const uint32_t *r, uint32_t surface_bits);
 
@@ -37,6 +48,10 @@ void gpu_clear_depth_stencil(const uint32_t *r, uint32_t surface_bits);
 uint32_t gpu_encode_color(uint32_t format, const float rgba[4], uint8_t out[16]);
 /** Inverse of gpu_encode_color; returns bytes per pixel, 0 if the format is unknown. */
 uint32_t gpu_decode_color(uint32_t format, const uint8_t *in, float rgba[4]);
+
+/** IEEE half-precision conversions (round to nearest, ties up). */
+uint16_t gpu_float_to_half(float v);
+float gpu_half_to_float(uint16_t h);
 uint64_t gpu_bl_offset(uint32_t x_bytes, uint32_t y, uint32_t width_bytes, uint32_t block_h_log2);
 uint64_t gpu_bl_size(uint32_t width_bytes, uint32_t height, uint32_t block_h_log2);
 

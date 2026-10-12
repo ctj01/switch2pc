@@ -28,6 +28,9 @@ typedef float (*shader_ipa_fn)(void *user, uint32_t addr, uint32_t mode);
  * word `index` of the stage's texture constant buffer); coordinates are normalised. */
 typedef void (*shader_tex_fn)(void *user, uint32_t index, float u, float v, float out[4]);
 
+/* Texel fetch (texelFetch, level 0): integer texel coordinates, same `index`. */
+typedef void (*shader_texel_fn)(void *user, uint32_t index, int32_t x, int32_t y, float out[4]);
+
 struct shader_env {
     uint32_t in[SHADER_ATTR_WORDS];
     uint32_t out[SHADER_ATTR_WORDS];
@@ -36,6 +39,7 @@ struct shader_env {
     shader_ipa_fn ipa;
     void *user;
     shader_tex_fn tex;
+    shader_texel_fn texel; /* shares tex_user */
     void *tex_user;
     uint32_t r[256]; /* r255 reads as zero */
     uint8_t p[8];    /* p7 is always true */

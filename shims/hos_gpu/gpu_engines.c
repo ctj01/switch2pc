@@ -126,6 +126,7 @@ struct gpu_engines {
     uint64_t cb_addr[GPU_STAGES][GPU_CBUFS]; /* constant buffers bound per stage */
     uint32_t cb_size[GPU_STAGES][GPU_CBUFS];
     uint32_t instance;
+    int indexed; /* the last count written was an index count */
     gpu_draw_stats draw;
 };
 
@@ -181,6 +182,43 @@ static uint8_t unorm8(float v) {
     return (uint8_t)(v * 255.0f + 0.5f);
 }
 
+uint16_t gpu_float_to_half(float v) {
+    uint32_t x;
+    memcpy(&x, &v, 4);
+    uint32_t sign = (x >> 16) & 0x8000, e = (x >> 23) & 0xFF, m = x & 0x7FFFFF;
+    if (e == 0xFF) {
+        return (uint16_t)(sign | 0x7C00 | (m ? 0x200 : 0)); /* inf, nan */
+    }
+    int32_t he = (int32_t)e - 127 + 15;
+    if (he >= 0x1F) {
+        return (uint16_t)(sign | 0x7C00);
+    }
+    if (he <= 0) { /* subnormal or zero */
+        if (he < -10) {
+            return (uint16_t)sign;
+        }
+        m |= 0x800000;
+        uint32_t shift = (uint32_t)(14 - he), hm = m >> shift;
+        hm += (m >> (shift - 1)) & 1; /* round half up */
+        return (uint16_t)(sign | hm);
+    }
+    uint32_t h = sign | ((uint32_t)he << 10) | (m >> 13);
+    h += (m >> 12) & 1; /* round half up; a carry into the exponent is still right */
+    return (uint16_t)h;
+}
+
+float gpu_half_to_float(uint16_t h) {
+    uint32_t sign = (uint32_t)(h & 0x8000) << 16, e = (h >> 10) & 0x1F, m = h & 0x3FF, x;
+    if (e == 0) {
+        float v = (float)m / 16777216.0f; /* m * 2^-24 */
+        return sign ? -v : v;
+    }
+    x = sign | (e == 0x1F ? 0x7F800000 | (m << 13) : ((e + 112) << 23) | (m << 13));
+    float v;
+    memcpy(&v, &x, 4);
+    return v;
+}
+
 static float linear_to_srgb(float v) {
     if (!(v > 0.0f)) {
         return 0.0f;
@@ -228,6 +266,12 @@ uint32_t gpu_encode_color(uint32_t format, const float rgba[4], uint8_t out[16])
     case 0xC0: /* R32G32B32A32_FLOAT */
         memcpy(out, c, 16);
         return 16;
+    case 0xCA: /* R16G16B16A16_FLOAT */
+        for (int i = 0; i < 4; i++) {
+            uint16_t h = gpu_float_to_half(c[i]);
+            memcpy(out + 2 * i, &h, 2);
+        }
+        return 8;
     default:
         return 0;
     }
@@ -264,6 +308,13 @@ uint32_t gpu_decode_color(uint32_t format, const uint8_t *in, float rgba[4]) {
     case 0xC0:
         memcpy(rgba, in, 16);
         return 16;
+    case 0xCA:
+        for (int c = 0; c < 4; c++) {
+            uint16_t h;
+            memcpy(&h, in + 2 * c, 2);
+            rgba[c] = gpu_half_to_float(h);
+        }
+        return 8;
     default:
         return 0;
     }
@@ -312,11 +363,13 @@ static void clear_surface(gpu_engines *e, uint32_t v) {
     uint32_t px_w = pitch_layout ? width / bpp : width;
     uint32_t x0 = 0, y0 = 0, x1 = px_w, y1 = height;
     if ((r[M3D_CLEAR_CONTROL] >> 8) & 1 && (r[M3D_SCISSOR_BASE] & 1)) {
-        uint32_t h = r[M3D_SCISSOR_BASE + 1], vv = r[M3D_SCISSOR_BASE + 2];
-        x0 = h & 0xFFFF;
-        x1 = h >> 16;
-        y0 = vv & 0xFFFF;
-        y1 = vv >> 16;
+        /* The scissor is in pixels; a multisampled target is sized in samples. */
+        uint32_t h = r[M3D_SCISSOR_BASE + 1], vv = r[M3D_SCISSOR_BASE + 2], gx, gy;
+        gpu_ms_grid(r[0x574], &gx, &gy);
+        x0 = (h & 0xFFFF) * gx;
+        x1 = (h >> 16) * gx;
+        y0 = (vv & 0xFFFF) * gy;
+        y1 = (vv >> 16) * gy;
         x1 = x1 < px_w ? x1 : px_w;
         y1 = y1 < height ? y1 : height;
     }
@@ -663,6 +716,8 @@ void gpu_engines_method(gpu_engines *e, uint32_t subch, uint32_t method, uint32_
 
 /* 3D methods the draw path keeps state for, and the draw itself (M3). */
 enum {
+    M3D_INDEX_FIRST = 0x5F7,
+    M3D_INDEX_COUNT = 0x5F8,
     M3D_VERTEX_FIRST = 0x35D,
     M3D_VERTEX_COUNT = 0x35E,
     M3D_VERTEX_END = 0x585,
@@ -702,14 +757,23 @@ static void draw_method(gpu_engines *e, uint32_t method, uint32_t value) {
             e->cb_addr[stage][slot] = (value & 1) ? addr64(r, M3D_CB_ADDR_HI, M3D_CB_ADDR_LO) : 0;
             e->cb_size[stage][slot] = (value & 1) ? r[M3D_CB_SIZE] : 0;
         }
+    } else if (method == M3D_INDEX_COUNT) {
+        e->indexed = 1;
+    } else if (method == M3D_VERTEX_COUNT) {
+        e->indexed = 0;
     } else if (method == M3D_VERTEX_BEGIN) {
         e->instance = ((value >> 26) & 1) ? e->instance + 1 : 0;
     } else if (method == M3D_VERTEX_END) {
         gpu_draw_state ds = {.r = r};
         memcpy(ds.cb_addr, e->cb_addr, sizeof(ds.cb_addr));
         memcpy(ds.cb_size, e->cb_size, sizeof(ds.cb_size));
-        gpu_draw_arrays(&ds, r[M3D_VERTEX_BEGIN] & 0xFFFF, r[M3D_VERTEX_FIRST], r[M3D_VERTEX_COUNT],
-                        e->instance, &e->draw);
+        if (e->indexed) {
+            gpu_draw_indexed(&ds, r[M3D_VERTEX_BEGIN] & 0xFFFF, r[M3D_INDEX_FIRST],
+                             r[M3D_INDEX_COUNT], e->instance, &e->draw);
+        } else {
+            gpu_draw_arrays(&ds, r[M3D_VERTEX_BEGIN] & 0xFFFF, r[M3D_VERTEX_FIRST],
+                            r[M3D_VERTEX_COUNT], e->instance, &e->draw);
+        }
     }
 }
 
@@ -744,6 +808,12 @@ static void engine_write(gpu_engines *e, int eng, uint32_t method, uint32_t valu
     case ENG_DMA:
         if (method == DMA_LAUNCH) {
             dma_launch(e, value);
+        }
+        break;
+    case ENG_2D:
+        if (method == 0x237) { /* PIXELS_FROM_MEMORY_SRC_Y0_INT starts the blit */
+            gpu_2d_blit(e->regs[ENG_2D]);
+            e->stats.copies++;
         }
         break;
     default:

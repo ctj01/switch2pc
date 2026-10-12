@@ -51,6 +51,11 @@ enum {
     M3D_TIC_POOL = 0x55D,     /* image descriptors: address hi, lo, last index */
     M3D_TEX_CB_INDEX = 0x982, /* constant buffer that holds texture handles */
     M3D_CB_SIZE = 0x8E0,
+    M3D_INDEX_ADDR_HI = 0x5F2, /* index buffer: address, limit, format (0 u8, 1 u16, 2 u32) */
+    M3D_INDEX_ADDR_LO = 0x5F3,
+    M3D_INDEX_FORMAT = 0x5F6,
+    M3D_BASE_VERTEX = 0x50D,
+    M3D_MS_MODE = 0x574, /* samples: 0 1x, 1 2x, 2 4x, 3 8x, 4 16x */
     M3D_CB_ADDR_HI = 0x8E1,
     M3D_CB_ADDR_LO = 0x8E2,
     M3D_PIPELINE = 0x800, /* select, offset, ..., register count */
@@ -77,6 +82,7 @@ typedef struct vertex {
 typedef struct program {
     const uint64_t *code;
     uint32_t words;
+    const uint32_t *sph; /* the 0x50-byte shader program header */
 } program;
 
 /*
@@ -116,6 +122,8 @@ static uint32_t tex_bpp(uint32_t format) {
     switch (format) {
     case 0x01:
         return 16; /* R32G32B32A32 */
+    case 0x03:
+        return 8; /* R16G16B16A16 (read as half floats) */
     case 0x04:
         return 8; /* R32G32 */
     case 0x08:
@@ -295,6 +303,11 @@ static void tex_fetch(const texture *x, int32_t ix, int32_t iy, float out[4]) {
         case 0x01:
             memcpy(c, p, 16);
             break;
+        case 0x03:
+            for (int k = 0; k < 4; k++) {
+                c[k] = gpu_half_to_float((uint16_t)(p[2 * k] | p[2 * k + 1] << 8));
+            }
+            break;
         case 0x24:
             bc1_texel(p, (uint32_t)ix & 3, (uint32_t)iy & 3, c);
             break;
@@ -337,6 +350,16 @@ static void tex_sample(void *user, uint32_t index, float u, float v, float out[4
     }
 }
 
+static void tex_texel(void *user, uint32_t index, int32_t ix, int32_t iy, float out[4]) {
+    texture *x = tex_lookup(user, index);
+    if (!x->valid) {
+        out[0] = out[1] = out[2] = 0.0f;
+        out[3] = 1.0f;
+        return;
+    }
+    tex_fetch(x, ix, iy, out);
+}
+
 typedef struct raster_ctx {
     const vertex *v[3];
     float l[3]; /* screen-space barycentrics */
@@ -366,6 +389,7 @@ static int load_program(const uint32_t *r, int type, program *p) {
                 return 0;
             }
             p->code = (const uint64_t *)host;
+            p->sph = (const uint32_t *)nv_gpu_va_to_host(base + pipe[1], SPH_SIZE);
             p->words = (uint32_t)(avail / 8 < 65536 ? avail / 8 : 65536);
             return 1;
         }
@@ -465,9 +489,16 @@ typedef struct target {
     uint32_t rt;   /* render target index, for its blend state */
 } target;
 
-static int bind_target(const uint32_t *r, target *t) {
+/* The colour targets a draw writes: CT_SELECT [3:0] counts them, [6:4], [9:7].. index them. */
+typedef struct targets {
+    target t[8];
+    uint32_t n;
+} targets;
+
+static int bind_target(const uint32_t *r, uint32_t k, target *t) {
     uint32_t sel = r[M3D_CT_SELECT];
-    uint32_t rt_index = (sel & 0xF) ? (sel >> 4) & 7 : 0;
+    uint32_t rt_index = (sel & 0xF) ? (sel >> (4 + 3 * k)) & 7 : k;
+    t->base = NULL;
     const uint32_t *rt = r + M3D_RT_BASE + 16 * rt_index;
     uint64_t va = ((uint64_t)(rt[0] & 0xFF) << 32) | rt[1];
     uint8_t probe[16];
@@ -749,9 +780,19 @@ static float edge(const float *a, const float *b, float px, float py) {
     return (b[0] - a[0]) * (py - a[1]) - (b[1] - a[1]) * (px - a[0]);
 }
 
+/* Multisampled targets hold a grid of samples per pixel; we rasterise at sample resolution
+ * (one shading per sample), so window coordinates and scissors scale by this grid. */
+void gpu_ms_grid(uint32_t mode, uint32_t *gx, uint32_t *gy) {
+    static const uint8_t grid[5][2] = {{1, 1}, {2, 1}, {2, 2}, {4, 2}, {4, 4}};
+    mode = mode < 5 ? mode : 0;
+    *gx = grid[mode][0];
+    *gy = grid[mode][1];
+}
+
 static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v1, const vertex *v2,
-                            const program *fs, shader_env *env, const target *t,
+                            const program *fs, shader_env *env, const targets *ts,
                             const depth_target *dt, gpu_draw_stats *st) {
+    const target *t = &ts->t[0];
     if (v0->pos[3] <= 0.0f || v1->pos[3] <= 0.0f || v2->pos[3] <= 0.0f) {
         return; /* FIXME(#40): clip against w > 0 instead of dropping */
     }
@@ -781,11 +822,13 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
     int32_t y0 = (int32_t)floorf(miny), y1 = (int32_t)ceilf(maxy);
     int32_t cx0 = 0, cy0 = 0, cx1 = (int32_t)t->width, cy1 = (int32_t)t->height;
     if (r[M3D_SCISSOR] & 1) {
-        uint32_t h = r[M3D_SCISSOR + 1], vv = r[M3D_SCISSOR + 2];
-        cx0 = (int32_t)(h & 0xFFFF);
-        cx1 = (int32_t)(h >> 16) < cx1 ? (int32_t)(h >> 16) : cx1;
-        cy0 = (int32_t)(vv & 0xFFFF);
-        cy1 = (int32_t)(vv >> 16) < cy1 ? (int32_t)(vv >> 16) : cy1;
+        uint32_t h = r[M3D_SCISSOR + 1], vv = r[M3D_SCISSOR + 2], gx, gy;
+        gpu_ms_grid(r[M3D_MS_MODE], &gx, &gy);
+        int32_t sx1 = (int32_t)((h >> 16) * gx), sy1 = (int32_t)((vv >> 16) * gy);
+        cx0 = (int32_t)((h & 0xFFFF) * gx);
+        cx1 = sx1 < cx1 ? sx1 : cx1;
+        cy0 = (int32_t)((vv & 0xFFFF) * gy);
+        cy1 = sy1 < cy1 ? sy1 : cy1;
     }
     x0 = x0 < cx0 ? cx0 : x0;
     y0 = y0 < cy0 ? cy0 : y0;
@@ -794,7 +837,15 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
 
     int depth_test = dt && dt->base && (r[M3D_DEPTH_TEST] & 1);
     int depth_write_on = dt && dt->base && (r[M3D_DEPTH_WRITE] & 1);
-    int blending = r[M3D_BLEND_ENABLE + t->rt] & 1;
+    /* Fragment outputs: each target's enabled components (SPH word 18, 4 bits per
+     * target) take the next registers from R0 up. */
+    uint32_t omap = fs->sph ? fs->sph[18] : 0xF, first_reg[8], reg_n = 0;
+    for (uint32_t k = 0; k < 8; k++) {
+        first_reg[k] = reg_n;
+        for (uint32_t c = 0; c < 4; c++) {
+            reg_n += (omap >> (4 * k + c)) & 1;
+        }
+    }
     uint32_t depth_func = r[M3D_DEPTH_FUNC];
     raster_ctx c = {.v = {v0, v1, v2}};
     env->ipa = ipa;
@@ -836,19 +887,31 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
             if (env->killed) {
                 continue;
             }
-            float rgba[4] = {fbits(env->r[0]), fbits(env->r[1]), fbits(env->r[2]),
-                             fbits(env->r[3])};
-            if (blending) {
-                uint64_t off = t->pitch_layout ? (uint64_t)y * t->row_bytes + (uint64_t)x * t->bpp
-                                               : gpu_bl_offset((uint32_t)x * t->bpp, (uint32_t)y,
-                                                               t->row_bytes, t->bh);
-                float dst[4] = {0, 0, 0, 0};
-                if (off + t->bpp <= t->size) {
-                    gpu_decode_color(t->format, t->base + off, dst);
+            for (uint32_t k = 0; k < ts->n; k++) {
+                const target *tk = &ts->t[k];
+                uint32_t m = (omap >> (4 * tk->rt)) & 0xF, rn = first_reg[tk->rt];
+                if (!tk->base || !m) {
+                    continue;
                 }
-                blend(r, t->rt, dst, rgba);
+                float rgba[4] = {0, 0, 0, 0};
+                for (uint32_t ch = 0; ch < 4; ch++) {
+                    if (m & (1u << ch)) {
+                        rgba[ch] = fbits(env->r[rn++]);
+                    }
+                }
+                if (r[M3D_BLEND_ENABLE + tk->rt] & 1) {
+                    uint64_t off = tk->pitch_layout
+                                       ? (uint64_t)y * tk->row_bytes + (uint64_t)x * tk->bpp
+                                       : gpu_bl_offset((uint32_t)x * tk->bpp, (uint32_t)y,
+                                                       tk->row_bytes, tk->bh);
+                    float dst[4] = {0, 0, 0, 0};
+                    if (off + tk->bpp <= tk->size) {
+                        gpu_decode_color(tk->format, tk->base + off, dst);
+                    }
+                    blend(r, tk->rt, dst, rgba);
+                }
+                write_pixel(tk, (uint32_t)x, (uint32_t)y, rgba);
             }
-            write_pixel(t, (uint32_t)x, (uint32_t)y, rgba);
             if (zp && depth_write_on) {
                 depth_write(dt, zp, zq);
             }
@@ -858,8 +921,43 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
     env->user = NULL; /* c lives on this stack frame */
 }
 
+static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32_t *indices,
+                        uint32_t first, uint32_t count, uint32_t instance, gpu_draw_stats *st);
+
 void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first, uint32_t count,
                      uint32_t instance, gpu_draw_stats *st) {
+    draw_common(s, topology, NULL, first, count, instance, st);
+}
+
+void gpu_draw_indexed(const gpu_draw_state *s, uint32_t topology, uint32_t first, uint32_t count,
+                      uint32_t instance, gpu_draw_stats *st) {
+    const uint32_t *r = s->r;
+    if (count == 0 || count > MAX_VERTICES) {
+        return;
+    }
+    uint32_t fmt = r[M3D_INDEX_FORMAT], size = fmt == 0 ? 1 : fmt == 1 ? 2 : 4;
+    uint64_t va = (((uint64_t)(r[M3D_INDEX_ADDR_HI] & 0xFF) << 32) | r[M3D_INDEX_ADDR_LO]) +
+                  (uint64_t)first * size;
+    const uint8_t *src = nv_gpu_va_to_host(va, (uint64_t)count * size);
+    uint32_t *idx = malloc((size_t)count * 4);
+    if (!src || !idx) {
+        HOS_LOGW(MOD, "index buffer at %#" PRIx64 " not mapped", va);
+        free(idx);
+        return;
+    }
+    int32_t base = (int32_t)r[M3D_BASE_VERTEX];
+    for (uint32_t k = 0; k < count; k++) {
+        uint32_t v = size == 1   ? src[k]
+                     : size == 2 ? ((const uint16_t *)src)[k]
+                                 : ((const uint32_t *)src)[k];
+        idx[k] = (uint32_t)((int32_t)v + base);
+    }
+    draw_common(s, topology, idx, 0, count, instance, st);
+    free(idx);
+}
+
+static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32_t *indices,
+                        uint32_t first, uint32_t count, uint32_t instance, gpu_draw_stats *st) {
     const uint32_t *r = s->r;
     st->draws++;
     program vs, fs;
@@ -867,10 +965,17 @@ void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first,
         HOS_LOGW(MOD, "draw without a vertex and a fragment program");
         return;
     }
-    target t;
-    if (!bind_target(r, &t)) {
-        HOS_LOGW(MOD, "draw: render target format %#x not supported or not mapped", t.format);
-        return;
+    targets ts;
+    ts.n = r[M3D_CT_SELECT] & 0xF ? r[M3D_CT_SELECT] & 0xF : 1;
+    ts.n = ts.n > 8 ? 8 : ts.n;
+    for (uint32_t k = 0; k < ts.n; k++) {
+        if (!bind_target(r, k, &ts.t[k])) {
+            HOS_LOGW(MOD, "draw: render target %u format %#x not supported or not mapped", k,
+                     ts.t[k].format);
+            if (k == 0) {
+                return;
+            }
+        }
     }
     if (count == 0 || count > MAX_VERTICES) {
         return;
@@ -887,16 +992,19 @@ void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first,
 
     /* Vertex stage. */
     bind_cbufs(s, 0, env);
-    float sx = fbits(r[M3D_VIEWPORT + 0]), sy = fbits(r[M3D_VIEWPORT + 1]);
-    float sz = fbits(r[M3D_VIEWPORT + 2]), tx = fbits(r[M3D_VIEWPORT + 3]);
-    float ty = fbits(r[M3D_VIEWPORT + 4]), tz = fbits(r[M3D_VIEWPORT + 5]);
+    uint32_t gx, gy;
+    gpu_ms_grid(r[M3D_MS_MODE], &gx, &gy);
+    float sx = fbits(r[M3D_VIEWPORT + 0]) * (float)gx, sy = fbits(r[M3D_VIEWPORT + 1]) * (float)gy;
+    float sz = fbits(r[M3D_VIEWPORT + 2]), tx = fbits(r[M3D_VIEWPORT + 3]) * (float)gx;
+    float ty = fbits(r[M3D_VIEWPORT + 4]) * (float)gy, tz = fbits(r[M3D_VIEWPORT + 5]);
     for (uint32_t k = 0; k < count; k++) {
         memset(env->in, 0, sizeof(env->in));
         memset(env->out, 0, sizeof(env->out));
-        env->in[0x2fc / 4] = first + k;
+        uint32_t vid = indices ? indices[k] : first + k;
+        env->in[0x2fc / 4] = vid;
         env->in[0x2f8 / 4] = instance;
-        if (!fetch_attribs(r, first + k, instance, env)) {
-            HOS_LOGW(MOD, "vertex %u: attribute data not mapped", first + k);
+        if (!fetch_attribs(r, vid, instance, env)) {
+            HOS_LOGW(MOD, "vertex %u: attribute data not mapped", vid);
         }
         uint64_t bad = 0;
         if (shader_run(vs.code, vs.words, env, &bad) != 0) {
@@ -946,32 +1054,33 @@ void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first,
         tc->handles = size ? nv_gpu_va_to_host(addr, size) : NULL;
         tc->handles_size = tc->handles ? size : 0;
         env->tex = tex_sample;
+        env->texel = tex_texel;
         env->tex_user = tc;
     }
     switch (topology) {
     case TOPO_TRIANGLES:
         for (uint32_t k = 0; k + 2 < count; k += 3) {
-            raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &t, &dt, st);
+            raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &ts, &dt, st);
         }
         break;
     case TOPO_STRIP:
         for (uint32_t k = 0; k + 2 < count; k++) {
             if (k & 1) {
-                raster_triangle(r, &verts[k + 1], &verts[k], &verts[k + 2], &fs, env, &t, &dt, st);
+                raster_triangle(r, &verts[k + 1], &verts[k], &verts[k + 2], &fs, env, &ts, &dt, st);
             } else {
-                raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &t, &dt, st);
+                raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &ts, &dt, st);
             }
         }
         break;
     case TOPO_FAN:
         for (uint32_t k = 1; k + 1 < count; k++) {
-            raster_triangle(r, &verts[0], &verts[k], &verts[k + 1], &fs, env, &t, &dt, st);
+            raster_triangle(r, &verts[0], &verts[k], &verts[k + 1], &fs, env, &ts, &dt, st);
         }
         break;
     case TOPO_QUADS: /* each quad as two triangles sharing its first vertex */
         for (uint32_t k = 0; k + 3 < count; k += 4) {
-            raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &t, &dt, st);
-            raster_triangle(r, &verts[k], &verts[k + 2], &verts[k + 3], &fs, env, &t, &dt, st);
+            raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &ts, &dt, st);
+            raster_triangle(r, &verts[k], &verts[k + 2], &verts[k + 3], &fs, env, &ts, &dt, st);
         }
         break;
     default:
@@ -981,4 +1090,100 @@ void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first,
     free(tc);
     free(verts);
     free(env);
+}
+
+/*
+ * 2D engine (0x902D) scaled blit: destination surface 0x80-0x89, source surface
+ * 0x8C-0x95 (format, linear, block size, depth, layer, pitch, width, height,
+ * address hi, lo), sample mode 0x223 ([4] bilinear), destination rectangle
+ * 0x22C-0x22F, steps du/dx and dv/dy as 32.32 fixed point at 0x230-0x233, and
+ * the source origin likewise at 0x234-0x237, whose last word starts the blit.
+ */
+typedef struct surface_2d {
+    uint8_t *base;
+    uint64_t size;
+    uint32_t format, bpp, width, height, row_bytes, bh;
+    int pitch_layout;
+} surface_2d;
+
+static int bind_2d(const uint32_t *r, uint32_t base, surface_2d *sf) {
+    uint8_t probe[16];
+    float zero[4] = {0, 0, 0, 0};
+    sf->format = r[base + 0];
+    sf->bpp = gpu_encode_color(sf->format, zero, probe);
+    sf->pitch_layout = r[base + 1] & 1;
+    sf->bh = (r[base + 2] >> 4) & 0xF;
+    sf->width = r[base + 6];
+    sf->height = r[base + 7];
+    sf->row_bytes = sf->pitch_layout ? r[base + 5] : sf->width * sf->bpp;
+    if (!sf->bpp || !sf->width || !sf->height) {
+        return 0;
+    }
+    sf->size = sf->pitch_layout ? (uint64_t)sf->row_bytes * sf->height
+                                : gpu_bl_size(sf->row_bytes, sf->height, sf->bh);
+    uint64_t va = ((uint64_t)(r[base + 8] & 0xFF) << 32) | r[base + 9];
+    sf->base = nv_gpu_va_to_host(va, sf->size);
+    return sf->base != NULL;
+}
+
+static uint8_t *px_2d(const surface_2d *sf, int32_t x, int32_t y) {
+    x = x < 0 ? 0 : x >= (int32_t)sf->width ? (int32_t)sf->width - 1 : x;
+    y = y < 0 ? 0 : y >= (int32_t)sf->height ? (int32_t)sf->height - 1 : y;
+    uint64_t off = sf->pitch_layout
+                       ? (uint64_t)y * sf->row_bytes + (uint64_t)x * sf->bpp
+                       : gpu_bl_offset((uint32_t)x * sf->bpp, (uint32_t)y, sf->row_bytes, sf->bh);
+    return off + sf->bpp <= sf->size ? sf->base + off : NULL;
+}
+
+void gpu_2d_blit(const uint32_t *r) {
+    surface_2d dst, src;
+    if (!bind_2d(r, 0x80, &dst) || !bind_2d(r, 0x8C, &src)) {
+        HOS_LOGW(MOD, "2d blit: surface format %#x -> %#x not supported or not mapped", r[0x8C],
+                 r[0x80]);
+        return;
+    }
+    double du = (double)r[0x231] + (double)r[0x230] / 4294967296.0;
+    double dv = (double)r[0x233] + (double)r[0x232] / 4294967296.0;
+    double x0 = (double)(int32_t)r[0x235] + (double)r[0x234] / 4294967296.0;
+    double y0 = (double)(int32_t)r[0x237] + (double)r[0x236] / 4294967296.0;
+    int bilinear = (r[0x223] >> 4) & 1;
+    uint32_t dx0 = r[0x22C], dy0 = r[0x22D], w = r[0x22E], h = r[0x22F];
+    for (uint32_t j = 0; j < h; j++) {
+        for (uint32_t i = 0; i < w; i++) {
+            /* x0/y0 is where the first destination pixel's centre samples the source */
+            double sxp = x0 + (double)i * du, syp = y0 + (double)j * dv;
+            float out[4] = {0, 0, 0, 0};
+            if (bilinear) {
+                /* centre of the destination pixel's footprint, in source texel space */
+                double cx = sxp + (du - 1.0) / 2.0, cy = syp + (dv - 1.0) / 2.0;
+                int32_t xi = (int32_t)floor(cx - 0.5), yi = (int32_t)floor(cy - 0.5);
+                float ax = (float)(cx - 0.5 - xi), ay = (float)(cy - 0.5 - yi), t[4][4];
+                for (int k = 0; k < 4; k++) {
+                    uint8_t *p = px_2d(&src, xi + (k & 1), yi + (k >> 1));
+                    memset(t[k], 0, sizeof(t[k]));
+                    if (p) {
+                        gpu_decode_color(src.format, p, t[k]);
+                    }
+                }
+                for (int c = 0; c < 4; c++) {
+                    float top = t[0][c] + (t[1][c] - t[0][c]) * ax;
+                    float bot = t[2][c] + (t[3][c] - t[2][c]) * ax;
+                    out[c] = top + (bot - top) * ay;
+                }
+            } else {
+                uint8_t *p = px_2d(&src, (int32_t)floor(sxp), (int32_t)floor(syp));
+                if (p) {
+                    gpu_decode_color(src.format, p, out);
+                }
+            }
+            uint8_t *d = px_2d(&dst, (int32_t)(dx0 + i), (int32_t)(dy0 + j));
+            if (d) {
+                uint8_t enc[16];
+                gpu_encode_color(dst.format, out, enc);
+                memcpy(d, enc, dst.bpp);
+            }
+        }
+    }
+    HOS_LOGD(MOD, "2d blit %ux%u -> %ux%u at (%u,%u), step %.2f %s", src.width, src.height, w, h,
+             dx0, dy0, du, bilinear ? "bilinear" : "point");
 }

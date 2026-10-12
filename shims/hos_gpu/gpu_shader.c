@@ -15,6 +15,7 @@
 #define RZ        255
 #define PT        7
 #define MAX_STEPS 1000000
+#define CF_DEPTH  16 /* SSY, PBK and PCNT nesting */
 
 typedef uint64_t u64;
 
@@ -161,7 +162,8 @@ static int combine(uint32_t op, int a, int b) {
 }
 
 int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_t *bad_insn) {
-    uint32_t pc = 1; /* word 0 is the first control word */
+    uint32_t pc = 1;                                     /* word 0 is the first control word */
+    uint32_t stack[3][CF_DEPTH], stack_n[3] = {0, 0, 0}; /* SSY/SYNC, PBK/BRK, PCNT/CONT */
     e->r[RZ] = 0;
     for (uint32_t step = 0; step < MAX_STEPS; step++) {
         if ((pc & 3) == 0) {
@@ -188,6 +190,23 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
             int32_t off = (int32_t)(bits(i, 20, 24) << 8) >> 8;
             int64_t target = (int64_t)pc * 8 + 8 + off;
             next = (uint32_t)(target / 8);
+        } else if (is(i, 0xe290000000000000ull, 0xfff0000000000020ull) || /* SSY */
+                   is(i, 0xe2a0000000000000ull, 0xfff0000000000020ull) || /* PBK */
+                   is(i, 0xe2b0000000000000ull, 0xfff0000000000020ull)) { /* PCNT */
+            /* One thread never diverges: these only push where SYNC/BRK/CONT will jump. */
+            uint32_t kind = (uint32_t)((i >> 52) & 0xF) - 9;
+            int32_t off = (int32_t)(bits(i, 20, 24) << 8) >> 8;
+            if (stack_n[kind] < CF_DEPTH) {
+                stack[kind][stack_n[kind]++] = (uint32_t)(((int64_t)pc * 8 + 8 + off) / 8);
+            }
+        } else if (is(i, 0xf0f8000000000000ull, 0xfff8000000000000ull) || /* SYNC */
+                   is(i, 0xe340000000000000ull, 0xfff0000000000000ull) || /* BRK */
+                   is(i, 0xe350000000000000ull, 0xfff0000000000000ull)) { /* CONT */
+            uint32_t kind = (i >> 60) == 0xF ? 0 : (uint32_t)((i >> 52) & 0xF) - 3;
+            if (stack_n[kind]) {
+                /* CONT jumps back each iteration, so its target stays pushed. */
+                next = kind == 2 ? stack[kind][stack_n[kind] - 1] : stack[kind][--stack_n[kind]];
+            }
         } else if (is(i, 0x50b0000000000000ull, 0xfff8000000000000ull)) { /* NOP */
         } else if (is(i, 0xefd8000000000000ull, 0xfff8000000000000ull) || /* ALD */
                    is(i, 0xeff0000000000000ull, 0xfff8000000000000ull)) { /* AST */
@@ -233,6 +252,49 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
                 v *= f(reg(e, bits(i, 20, 8)));
             }
             set_reg(e, d, u(sat(v, bits(i, 51, 1))));
+        } else if (is(i, 0x5c90000000000000ull, 0xfff8000000000000ull) ||
+                   is(i, 0x4c90000000000000ull, 0xfff8000000000000ull) ||
+                   is(i, 0x3890000000000000ull, 0xfef8000000000000ull)) { /* RRO */
+            /* Range reduction ahead of MUFU sin/cos/ex2; our MUFU takes the plain value. */
+            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
+            float y = fmod_neg_abs(f(operand_b(e, i, form, 1)), bits(i, 45, 1), bits(i, 49, 1));
+            set_reg(e, d, u(y));
+        } else if (is(i, 0x5cb0000000000000ull, 0xfff8000000000000ull) ||
+                   is(i, 0x4cb0000000000000ull, 0xfff8000000000000ull) ||
+                   is(i, 0x38b0000000000000ull, 0xfef8000000000000ull)) { /* F2I (32-bit) */
+            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
+            float y = fmod_neg_abs(f(operand_b(e, i, form, 1)), bits(i, 45, 1), bits(i, 49, 1));
+            double v = y != y ? 0.0 : (double)y;
+            switch (bits(i, 39, 2)) { /* rounding: nearest even, floor, ceil, trunc */
+            case 0:
+                v = nearbyint(v);
+                break;
+            case 1:
+                v = floor(v);
+                break;
+            case 2:
+                v = ceil(v);
+                break;
+            default:
+                v = trunc(v);
+                break;
+            }
+            uint32_t out;
+            if (bits(i, 12, 1)) { /* signed result, saturating */
+                out = (uint32_t)(int32_t)(v < -2147483648.0  ? -2147483648.0
+                                          : v > 2147483647.0 ? 2147483647.0
+                                                             : v);
+            } else {
+                out = (uint32_t)(v < 0.0 ? 0.0 : v > 4294967295.0 ? 4294967295.0 : v);
+            }
+            set_reg(e, d, out);
+        } else if (is(i, 0x5cb8000000000000ull, 0xfff8000000000000ull) ||
+                   is(i, 0x4cb8000000000000ull, 0xfff8000000000000ull) ||
+                   is(i, 0x38b8000000000000ull, 0xfef8000000000000ull)) { /* I2F (32-bit) */
+            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
+            uint32_t b = operand_b(e, i, form, 0);
+            float y = bits(i, 13, 1) ? (float)(int32_t)b : (float)b;
+            set_reg(e, d, u(fmod_neg_abs(y, bits(i, 45, 1), bits(i, 49, 1))));
         } else if (is(i, 0x5080000000000000ull, 0xfff8000000000000ull)) { /* MUFU */
             float x = fmod_neg_abs(f(a), bits(i, 48, 1), bits(i, 46, 1)), r;
             switch (bits(i, 20, 4)) {
@@ -411,6 +473,32 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
             if (e->tex) {
                 e->tex(e->tex_user, bits(i, 36, 13), f(a), is_1d ? 0.0f : f(reg(e, bits(i, 20, 8))),
                        texel);
+            }
+            const uint8_t *comp = d2 == RZ ? one[sel] : (sel < 5 ? two[sel] : two[4]);
+            uint32_t dst[4] = {d, d == RZ ? RZ : d + 1, d2, d2 == RZ ? RZ : d2 + 1};
+            for (int k = 0; k < 4 && comp[k] != 9; k++) {
+                set_reg(e, dst[k], u(texel[comp[k]]));
+            }
+        } else if (is(i, 0xda00000000000000ull, 0xfe00000000000000ull)) { /* TLDS */
+            /* texelFetch, compact: registers and components as TEXS; [56:53] picks the form:
+             * 0/1 1D (x = A), 2 2D (x = A, y = B), 4/5/6/12 2D (x = A, y = A+1, B holds an
+             * offset, lod or sample we do not use). Level 0 only. */
+            static const uint8_t one[8][2] = {{0, 9}, {1, 9}, {2, 9}, {3, 9},
+                                              {0, 1}, {0, 3}, {1, 3}, {2, 3}};
+            static const uint8_t two[5][4] = {
+                {0, 1, 2, 9}, {0, 1, 3, 9}, {0, 2, 3, 9}, {1, 2, 3, 9}, {0, 1, 2, 3}};
+            uint32_t d2 = bits(i, 28, 8), sel = bits(i, 50, 3), form = bits(i, 53, 4);
+            uint32_t ra = bits(i, 8, 8);
+            int32_t y = form <= 1   ? 0
+                        : form == 2 ? (int32_t)reg(e, bits(i, 20, 8))
+                                    : (int32_t)reg(e, ra == RZ ? RZ : ra + 1);
+            float texel[4] = {0, 0, 0, 0};
+            if (form != 2 && form != 4 && form != 5 && form != 6 && form != 12 && form > 1) {
+                *bad_insn = i; /* 3D and array forms */
+                return -1;
+            }
+            if (e->texel) {
+                e->texel(e->tex_user, bits(i, 36, 13), (int32_t)a, y, texel);
             }
             const uint8_t *comp = d2 == RZ ? one[sel] : (sel < 5 ? two[sel] : two[4]);
             uint32_t dst[4] = {d, d == RZ ? RZ : d + 1, d2, d2 == RZ ? RZ : d2 + 1};
