@@ -10,8 +10,10 @@
 
 #include <inttypes.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "common/hos_log.h"
 #include "gpu_internal.h"
@@ -629,6 +631,17 @@ void gpu_clear_depth_stencil(const uint32_t *r, uint32_t surface_bits) {
              fbits(r[M3D_CLEAR_DEPTH]), r[M3D_CLEAR_STENCIL] & 0xFF, d.format, d.width, d.height,
              d.size);
     uint32_t stencil = r[M3D_CLEAR_STENCIL] & 0xFF;
+    int has_stencil = d.bpp == 4 && d.format != 0x0A;
+    if ((surface_bits & 1) && (!has_stencil || (surface_bits & 2))) {
+        /* Every element becomes the same value: build it once and fill. */
+        uint32_t px = 0;
+        depth_write(&d, &px, q);
+        if (has_stencil) {
+            px = (px & ~0xFFu) | stencil;
+        }
+        gpu_fill(d.base, d.size, (const uint8_t *)&px, d.bpp);
+        return;
+    }
     for (uint64_t off = 0; off + d.bpp <= d.size; off += d.bpp) {
         uint32_t *p = (uint32_t *)(d.base + off);
         if (surface_bits & 1) {
@@ -789,9 +802,12 @@ void gpu_ms_grid(uint32_t mode, uint32_t *gx, uint32_t *gy) {
     *gy = grid[mode][1];
 }
 
+#define BAND_ROWS 8 /* rows per fragment-worker band */
+
 static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v1, const vertex *v2,
                             const program *fs, shader_env *env, const targets *ts,
-                            const depth_target *dt, gpu_draw_stats *st) {
+                            const depth_target *dt, uint32_t band, uint32_t nbands,
+                            gpu_draw_stats *st) {
     const target *t = &ts->t[0];
     if (v0->pos[3] <= 0.0f || v1->pos[3] <= 0.0f || v2->pos[3] <= 0.0f) {
         return; /* FIXME(#40): clip against w > 0 instead of dropping */
@@ -812,7 +828,9 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
             return;
         }
     }
-    st->triangles++;
+    if (band == 0) {
+        st->triangles++; /* every band sees every triangle; count it once */
+    }
 
     float minx = fminf(v0->win[0], fminf(v1->win[0], v2->win[0]));
     float maxx = fmaxf(v0->win[0], fmaxf(v1->win[0], v2->win[0]));
@@ -852,6 +870,9 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
     env->user = &c;
     float inv_area = 1.0f / area;
     for (int32_t y = y0; y < y1; y++) {
+        if (((uint32_t)y / BAND_ROWS) % nbands != band) {
+            continue; /* another worker's rows */
+        }
         for (int32_t x = x0; x < x1; x++) {
             float px = (float)x + 0.5f, py = (float)y + 0.5f;
             float w0 = edge(v1->win, v2->win, px, py) * inv_area;
@@ -919,6 +940,141 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
         }
     }
     env->user = NULL; /* c lives on this stack frame */
+}
+
+/*
+ * Fragment workers. The fragment stage splits the target into bands of
+ * BAND_ROWS rows dealt round-robin to the workers; every worker walks every
+ * triangle in order but shades only its own rows, so each pixel still sees
+ * primitives in API order (depth and blending stay exact) with no locking.
+ * Each worker has its own shader registers and texture cache. HOS_GPU_THREADS
+ * sets the count (default: online CPUs, at most MAX_WORKERS; 1 is serial).
+ */
+#define MAX_WORKERS 32
+
+typedef struct frag_tri {
+    const vertex *v[3];
+} frag_tri;
+
+typedef struct frag_job {
+    const uint32_t *r;
+    const program *fs;
+    const shader_env *env; /* template: bound constant buffers and callbacks */
+    const tex_ctx *tc;     /* template texture context, may be NULL */
+    const targets *ts;
+    const depth_target *dt;
+    const frag_tri *tris;
+    uint32_t ntris;
+    uint64_t errors; /* shader errors so far: only the first ever is logged */
+    gpu_draw_stats st[MAX_WORKERS];
+} frag_job;
+
+static void frag_worker(void *arg, uint32_t band, uint32_t nbands) {
+    frag_job *j = arg;
+    gpu_draw_stats *st = &j->st[band];
+    shader_env *env = malloc(sizeof(*env));
+    tex_ctx *tc = j->tc ? malloc(sizeof(*tc)) : NULL;
+    if (!env || (j->tc && !tc)) {
+        free(env);
+        free(tc);
+        return;
+    }
+    memcpy(env, j->env, sizeof(*env));
+    if (tc) {
+        memcpy(tc, j->tc, sizeof(*tc));
+        env->tex_user = tc;
+    }
+    st->shader_errors = j->errors;
+    for (uint32_t k = 0; k < j->ntris; k++) {
+        const frag_tri *t = &j->tris[k];
+        raster_triangle(j->r, t->v[0], t->v[1], t->v[2], j->fs, env, j->ts, j->dt, band, nbands,
+                        st);
+    }
+    st->shader_errors -= j->errors;
+    free(tc);
+    free(env);
+}
+
+typedef void (*pool_fn)(void *arg, uint32_t band, uint32_t nbands);
+
+static struct {
+    pthread_mutex_t run; /* one job at a time (several channels may submit) */
+    pthread_mutex_t lock;
+    pthread_cond_t start, done;
+    uint32_t n; /* workers, the caller included */
+    uint64_t gen;
+    uint32_t pending;
+    pool_fn fn;
+    void *arg;
+} g_pool = {.run = PTHREAD_MUTEX_INITIALIZER,
+            .lock = PTHREAD_MUTEX_INITIALIZER,
+            .start = PTHREAD_COND_INITIALIZER,
+            .done = PTHREAD_COND_INITIALIZER};
+static pthread_once_t g_pool_once = PTHREAD_ONCE_INIT;
+
+static void *pool_main(void *arg) {
+    uint32_t band = (uint32_t)(uintptr_t)arg;
+    uint64_t seen = 0;
+    for (;;) {
+        pthread_mutex_lock(&g_pool.lock);
+        while (g_pool.gen == seen) {
+            pthread_cond_wait(&g_pool.start, &g_pool.lock);
+        }
+        seen = g_pool.gen;
+        pool_fn fn = g_pool.fn;
+        void *job = g_pool.arg;
+        uint32_t n = g_pool.n;
+        pthread_mutex_unlock(&g_pool.lock);
+        fn(job, band, n);
+        pthread_mutex_lock(&g_pool.lock);
+        if (--g_pool.pending == 0) {
+            pthread_cond_signal(&g_pool.done);
+        }
+        pthread_mutex_unlock(&g_pool.lock);
+    }
+    return NULL;
+}
+
+static void pool_init(void) {
+    long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    const char *env = getenv("HOS_GPU_THREADS");
+    long n = env && *env ? strtol(env, NULL, 0) : cpus;
+    n = n < 1 ? 1 : n > MAX_WORKERS ? MAX_WORKERS : n;
+    g_pool.n = (uint32_t)n; /* before any worker reads it */
+    for (long k = 1; k < n; k++) {
+        pthread_t t;
+        if (pthread_create(&t, NULL, pool_main, (void *)(uintptr_t)k) != 0) {
+            g_pool.n = (uint32_t)k; /* workers k.. never started; none ran a job yet */
+            break;
+        }
+        pthread_detach(t);
+    }
+    HOS_LOGI(MOD, "fragment stage on %u threads", g_pool.n);
+}
+
+/* Run fn(arg, band, n) for band 0..n-1 on the pool; the caller takes band 0. */
+static void pool_run(pool_fn fn, void *arg) {
+    pthread_once(&g_pool_once, pool_init);
+    pthread_mutex_lock(&g_pool.run);
+    uint32_t n = g_pool.n;
+    if (n > 1) {
+        pthread_mutex_lock(&g_pool.lock);
+        g_pool.fn = fn;
+        g_pool.arg = arg;
+        g_pool.pending = n - 1;
+        g_pool.gen++;
+        pthread_cond_broadcast(&g_pool.start);
+        pthread_mutex_unlock(&g_pool.lock);
+    }
+    fn(arg, 0, n);
+    if (n > 1) {
+        pthread_mutex_lock(&g_pool.lock);
+        while (g_pool.pending) {
+            pthread_cond_wait(&g_pool.done, &g_pool.lock);
+        }
+        pthread_mutex_unlock(&g_pool.lock);
+    }
+    pthread_mutex_unlock(&g_pool.run);
 }
 
 static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32_t *indices,
@@ -1032,7 +1188,39 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
         }
     }
 
-    /* Primitive assembly and the fragment stage. */
+    /* Primitive assembly. */
+    uint32_t cap = topology == TOPO_QUADS ? count / 4 * 2 : count;
+    frag_tri *tris = calloc(cap ? cap : 1, sizeof(*tris));
+    uint32_t nt = 0;
+    switch (tris ? topology : ~0u) {
+    case TOPO_TRIANGLES:
+        for (uint32_t k = 0; k + 2 < count; k += 3) {
+            tris[nt++] = (frag_tri){{&verts[k], &verts[k + 1], &verts[k + 2]}};
+        }
+        break;
+    case TOPO_STRIP:
+        for (uint32_t k = 0; k + 2 < count; k++) {
+            tris[nt++] = k & 1 ? (frag_tri){{&verts[k + 1], &verts[k], &verts[k + 2]}}
+                               : (frag_tri){{&verts[k], &verts[k + 1], &verts[k + 2]}};
+        }
+        break;
+    case TOPO_FAN:
+        for (uint32_t k = 1; k + 1 < count; k++) {
+            tris[nt++] = (frag_tri){{&verts[0], &verts[k], &verts[k + 1]}};
+        }
+        break;
+    case TOPO_QUADS: /* each quad as two triangles sharing its first vertex */
+        for (uint32_t k = 0; k + 3 < count; k += 4) {
+            tris[nt++] = (frag_tri){{&verts[k], &verts[k + 1], &verts[k + 2]}};
+            tris[nt++] = (frag_tri){{&verts[k], &verts[k + 2], &verts[k + 3]}};
+        }
+        break;
+    default:
+        HOS_LOGW(MOD, "topology %u not supported yet", topology);
+        break;
+    }
+
+    /* The fragment stage. */
     bind_cbufs(s, 4, env);
     tex_ctx *tc = calloc(1, sizeof(*tc));
     if (tc) {
@@ -1057,36 +1245,28 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
         env->texel = tex_texel;
         env->tex_user = tc;
     }
-    switch (topology) {
-    case TOPO_TRIANGLES:
-        for (uint32_t k = 0; k + 2 < count; k += 3) {
-            raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &ts, &dt, st);
-        }
-        break;
-    case TOPO_STRIP:
-        for (uint32_t k = 0; k + 2 < count; k++) {
-            if (k & 1) {
-                raster_triangle(r, &verts[k + 1], &verts[k], &verts[k + 2], &fs, env, &ts, &dt, st);
-            } else {
-                raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &ts, &dt, st);
+    if (nt) {
+        frag_job *job = calloc(1, sizeof(*job));
+        if (job) {
+            *job = (frag_job){.r = r,
+                              .fs = &fs,
+                              .env = env,
+                              .tc = tc,
+                              .ts = &ts,
+                              .dt = &dt,
+                              .tris = tris,
+                              .ntris = nt,
+                              .errors = st->shader_errors};
+            pool_run(frag_worker, job);
+            for (uint32_t w = 0; w < MAX_WORKERS; w++) {
+                st->triangles += job->st[w].triangles;
+                st->pixels += job->st[w].pixels;
+                st->shader_errors += job->st[w].shader_errors;
             }
+            free(job);
         }
-        break;
-    case TOPO_FAN:
-        for (uint32_t k = 1; k + 1 < count; k++) {
-            raster_triangle(r, &verts[0], &verts[k], &verts[k + 1], &fs, env, &ts, &dt, st);
-        }
-        break;
-    case TOPO_QUADS: /* each quad as two triangles sharing its first vertex */
-        for (uint32_t k = 0; k + 3 < count; k += 4) {
-            raster_triangle(r, &verts[k], &verts[k + 1], &verts[k + 2], &fs, env, &ts, &dt, st);
-            raster_triangle(r, &verts[k], &verts[k + 2], &verts[k + 3], &fs, env, &ts, &dt, st);
-        }
-        break;
-    default:
-        HOS_LOGW(MOD, "topology %u not supported yet", topology);
-        break;
     }
+    free(tris);
     free(tc);
     free(verts);
     free(env);
@@ -1135,34 +1315,33 @@ static uint8_t *px_2d(const surface_2d *sf, int32_t x, int32_t y) {
     return off + sf->bpp <= sf->size ? sf->base + off : NULL;
 }
 
-void gpu_2d_blit(const uint32_t *r) {
+typedef struct blit_job {
     surface_2d dst, src;
-    if (!bind_2d(r, 0x80, &dst) || !bind_2d(r, 0x8C, &src)) {
-        HOS_LOGW(MOD, "2d blit: surface format %#x -> %#x not supported or not mapped", r[0x8C],
-                 r[0x80]);
-        return;
-    }
-    double du = (double)r[0x231] + (double)r[0x230] / 4294967296.0;
-    double dv = (double)r[0x233] + (double)r[0x232] / 4294967296.0;
-    double x0 = (double)(int32_t)r[0x235] + (double)r[0x234] / 4294967296.0;
-    double y0 = (double)(int32_t)r[0x237] + (double)r[0x236] / 4294967296.0;
-    int bilinear = (r[0x223] >> 4) & 1;
-    uint32_t dx0 = r[0x22C], dy0 = r[0x22D], w = r[0x22E], h = r[0x22F];
-    for (uint32_t j = 0; j < h; j++) {
-        for (uint32_t i = 0; i < w; i++) {
+    double du, dv, x0, y0;
+    int bilinear;
+    uint32_t dx0, dy0, w, h;
+} blit_job;
+
+static void blit_rows(void *arg, uint32_t band, uint32_t nbands) {
+    const blit_job *b = arg;
+    for (uint32_t j = 0; j < b->h; j++) {
+        if ((j / BAND_ROWS) % nbands != band) {
+            continue;
+        }
+        for (uint32_t i = 0; i < b->w; i++) {
             /* x0/y0 is where the first destination pixel's centre samples the source */
-            double sxp = x0 + (double)i * du, syp = y0 + (double)j * dv;
+            double sxp = b->x0 + (double)i * b->du, syp = b->y0 + (double)j * b->dv;
             float out[4] = {0, 0, 0, 0};
-            if (bilinear) {
+            if (b->bilinear) {
                 /* centre of the destination pixel's footprint, in source texel space */
-                double cx = sxp + (du - 1.0) / 2.0, cy = syp + (dv - 1.0) / 2.0;
+                double cx = sxp + (b->du - 1.0) / 2.0, cy = syp + (b->dv - 1.0) / 2.0;
                 int32_t xi = (int32_t)floor(cx - 0.5), yi = (int32_t)floor(cy - 0.5);
                 float ax = (float)(cx - 0.5 - xi), ay = (float)(cy - 0.5 - yi), t[4][4];
                 for (int k = 0; k < 4; k++) {
-                    uint8_t *p = px_2d(&src, xi + (k & 1), yi + (k >> 1));
+                    uint8_t *p = px_2d(&b->src, xi + (k & 1), yi + (k >> 1));
                     memset(t[k], 0, sizeof(t[k]));
                     if (p) {
-                        gpu_decode_color(src.format, p, t[k]);
+                        gpu_decode_color(b->src.format, p, t[k]);
                     }
                 }
                 for (int c = 0; c < 4; c++) {
@@ -1171,19 +1350,38 @@ void gpu_2d_blit(const uint32_t *r) {
                     out[c] = top + (bot - top) * ay;
                 }
             } else {
-                uint8_t *p = px_2d(&src, (int32_t)floor(sxp), (int32_t)floor(syp));
+                uint8_t *p = px_2d(&b->src, (int32_t)floor(sxp), (int32_t)floor(syp));
                 if (p) {
-                    gpu_decode_color(src.format, p, out);
+                    gpu_decode_color(b->src.format, p, out);
                 }
             }
-            uint8_t *d = px_2d(&dst, (int32_t)(dx0 + i), (int32_t)(dy0 + j));
+            uint8_t *d = px_2d(&b->dst, (int32_t)(b->dx0 + i), (int32_t)(b->dy0 + j));
             if (d) {
                 uint8_t enc[16];
-                gpu_encode_color(dst.format, out, enc);
-                memcpy(d, enc, dst.bpp);
+                gpu_encode_color(b->dst.format, out, enc);
+                memcpy(d, enc, b->dst.bpp);
             }
         }
     }
-    HOS_LOGD(MOD, "2d blit %ux%u -> %ux%u at (%u,%u), step %.2f %s", src.width, src.height, w, h,
-             dx0, dy0, du, bilinear ? "bilinear" : "point");
+}
+
+void gpu_2d_blit(const uint32_t *r) {
+    blit_job b;
+    if (!bind_2d(r, 0x80, &b.dst) || !bind_2d(r, 0x8C, &b.src)) {
+        HOS_LOGW(MOD, "2d blit: surface format %#x -> %#x not supported or not mapped", r[0x8C],
+                 r[0x80]);
+        return;
+    }
+    b.du = (double)r[0x231] + (double)r[0x230] / 4294967296.0;
+    b.dv = (double)r[0x233] + (double)r[0x232] / 4294967296.0;
+    b.x0 = (double)(int32_t)r[0x235] + (double)r[0x234] / 4294967296.0;
+    b.y0 = (double)(int32_t)r[0x237] + (double)r[0x236] / 4294967296.0;
+    b.bilinear = (r[0x223] >> 4) & 1;
+    b.dx0 = r[0x22C];
+    b.dy0 = r[0x22D];
+    b.w = r[0x22E];
+    b.h = r[0x22F];
+    pool_run(blit_rows, &b);
+    HOS_LOGD(MOD, "2d blit %ux%u -> %ux%u at (%u,%u), step %.2f %s", b.src.width, b.src.height, b.w,
+             b.h, b.dx0, b.dy0, b.du, b.bilinear ? "bilinear" : "point");
 }

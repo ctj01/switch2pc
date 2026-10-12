@@ -49,6 +49,9 @@ uint32_t gpu_encode_color(uint32_t format, const float rgba[4], uint8_t out[16])
 /** Inverse of gpu_encode_color; returns bytes per pixel, 0 if the format is unknown. */
 uint32_t gpu_decode_color(uint32_t format, const uint8_t *in, float rgba[4]);
 
+/** Fill `size` bytes with a repeated `bpp`-byte pattern (a trailing partial element is left). */
+void gpu_fill(uint8_t *base, uint64_t size, const uint8_t *px, uint32_t bpp);
+
 /** IEEE half-precision conversions (round to nearest, ties up). */
 uint16_t gpu_float_to_half(float v);
 float gpu_half_to_float(uint16_t h);

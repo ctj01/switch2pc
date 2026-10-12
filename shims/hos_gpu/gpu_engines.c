@@ -219,6 +219,19 @@ float gpu_half_to_float(uint16_t h) {
     return v;
 }
 
+void gpu_fill(uint8_t *base, uint64_t size, const uint8_t *px, uint32_t bpp) {
+    if (!bpp || size < bpp) {
+        return;
+    }
+    uint64_t total = size - size % bpp, done = bpp;
+    memcpy(base, px, bpp);
+    while (done < total) { /* doubling copies: a few large memcpy calls */
+        uint64_t n = done < total - done ? done : total - done;
+        memcpy(base + done, base, n);
+        done += n;
+    }
+}
+
 static float linear_to_srgb(float v) {
     if (!(v > 0.0f)) {
         return 0.0f;
@@ -388,9 +401,7 @@ static void clear_surface(gpu_engines *e, uint32_t v) {
     int full = mask == 0xF && x0 == 0 && y0 == 0 && x1 == px_w && y1 == height;
     if (full) {
         /* Whole surface: every byte of the allocation takes the pattern, layout or not. */
-        for (uint64_t off = 0; off + bpp <= size; off += bpp) {
-            memcpy(base + off, px, bpp);
-        }
+        gpu_fill(base, size, px, bpp);
     } else {
         uint32_t comp = bpp >= 4 ? bpp / 4 : 0; /* bytes per component (8888, float) */
         for (uint32_t y = y0; y < y1; y++) {

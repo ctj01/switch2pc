@@ -17,6 +17,16 @@ compute plus line strips (09). They are checked by eye, not by a test, since
 the examples need devkitPro to build. At 1280x720 on the CPU under qemu they
 run at a few frames per second, 4x MSAA well below that: M2 is what fixes it.
 
+M2 only pays off on native ARM64 with a GPU: under qemu-user (WSL2) the
+process cannot load the host's x86-64 Vulkan driver, and lavapipe would be
+emulated too. Until there is such hardware the CPU path is the one to make
+fast. The fragment stage and the 2D blit run on a worker pool
+(HOS_GPU_THREADS, default all CPUs) in interleaved row bands, so each pixel
+still sees primitives in order, and full clears fill by doubling copies. On a
+24-thread host, frames per second over 40 s went from 4.5 to 15.5 (cube), 2.7
+to 12.6 (textured cube), 0.75 to 7.8 (4x MSAA), 0.25 to 2.3 (MSAA teapot) and
+0.17 to 1.8 (deferred). The fragment shader interpreter is now the cost.
+
 ## Which path, and why
 
 Homebrew that uses the GPU goes through one of two libraries, both
