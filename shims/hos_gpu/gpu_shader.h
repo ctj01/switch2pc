@@ -24,6 +24,10 @@ typedef struct shader_env shader_env;
  * 2 constant (provoking vertex). `addr` is the attribute byte address. */
 typedef float (*shader_ipa_fn)(void *user, uint32_t addr, uint32_t mode);
 
+/* Texture sample: `index` is the instruction's texture index (the handle sits at
+ * word `index` of the stage's texture constant buffer); coordinates are normalised. */
+typedef void (*shader_tex_fn)(void *user, uint32_t index, float u, float v, float out[4]);
+
 struct shader_env {
     uint32_t in[SHADER_ATTR_WORDS];
     uint32_t out[SHADER_ATTR_WORDS];
@@ -31,6 +35,8 @@ struct shader_env {
     uint32_t cb_size[SHADER_CBUFS];
     shader_ipa_fn ipa;
     void *user;
+    shader_tex_fn tex;
+    void *tex_user;
     uint32_t r[256]; /* r255 reads as zero */
     uint8_t p[8];    /* p7 is always true */
     int killed;      /* fragment discarded */

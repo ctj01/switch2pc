@@ -680,7 +680,9 @@ static void draw_method(gpu_engines *e, uint32_t method, uint32_t value) {
     if (method >= M3D_CB_DATA && method < M3D_CB_DATA + 16) {
         /* Constant buffer updates inside the command stream (deko3d's PushConstants). */
         uint32_t pos = r[M3D_CB_POS];
-        if (pos + 4 <= r[M3D_CB_SIZE]) {
+        /* Not bounded by CB_SIZE: deko3d sets the size to 0 when it only updates words
+         * (texture handles), so the 64 KiB a constant buffer can span is the limit. */
+        if (pos + 4 <= 0x10000) {
             uint32_t *p = nv_gpu_va_to_host(addr64(r, M3D_CB_ADDR_HI, M3D_CB_ADDR_LO) + pos, 4);
             if (p) {
                 *p = value;

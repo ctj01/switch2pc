@@ -1,12 +1,12 @@
 # GPU plan (#40)
 
-Status: **M3c done** (2026-10-12): depth and blending. `examples/libnx_deko3d_depthblend`
-draws four quads with their own state over a Z24S8 depth buffer: depth test
-LESS with and without depth writes, and SrcAlpha / InvSrcAlpha blending. It
-matches a reference simulation exactly (`check_deko3d_depthblend`, worst
-difference 0), and the triangle and cube still match theirs. M0, M1 and
-M3a-c are done, all on the CPU. Next: textures (M4), then the Vulkan
-backend (M2) for speed.
+Status: **M4 done** (2026-10-12): textures. `examples/libnx_deko3d_texture`
+samples an RGBA8 texture with nearest/clamp and with bilinear/repeat, and a
+BC1-compressed texture, through deko3d's image and sampler descriptors; it
+matches a reference sampler (`check_deko3d_texture`, worst difference 1),
+alongside the triangle, cube and depth/blend scenes. M0, M1, M3 and M4 are
+done, all on the CPU. Next: the Vulkan backend (M2) for speed, and M5 as real
+homebrew asks (mipmaps, more formats, compute).
 
 ## Which path, and why
 
@@ -84,8 +84,12 @@ other feature in this repository.
    done**; **M3c, depth test and blending: done** (Z16/Z24/Z32F targets, the
    eight compare functions, per-target blend factors and operations in
    deko3d's D3D-style numbering and OpenGL's).
-5. **M4, textures (weeks).** TIC/TSC decoding, texture formats, samplers,
-   swizzled texture upload. Exit: a textured quad; then SDL2 through Mesa.
+5. **M4, textures. Done.** TIC/TSC decoding, handles from the texture
+   constant buffer, RGBA8/RGB565/R8/RG8/float formats and BC1, swizzles,
+   wrap modes, nearest and bilinear filtering (magnification filter; no
+   mipmaps yet), `TEXS` and `TEX`. Exit met: textured quads match a
+   reference. Still open: mipmaps and the minification filter, BC2-BC7,
+   SDL2 through Mesa.
 6. **M5, the rest (open-ended).** Compute, queries, transform feedback,
    tessellation and geometry stages, as real homebrew needs them.
 
@@ -174,6 +178,21 @@ Each point below cost a failed run and is now in `nvgpu.c`:
   so every fragment failed LESS. Integer depth is computed in double.
 - Blending reads the destination as stored (8-bit), so the reference
   simulates the same quantisation and agrees to the last bit.
+
+## What M4 taught
+
+- A texture instruction carries an index, not a texture: the handle (image
+  id [19:0], sampler id [31:20]) is word `index` of the texture constant
+  buffer (0x982 selects it; deko3d uses its driver buffer, c0), and the ids
+  index the image descriptor pool (0x55D) and the sampler pool (0x557).
+- deko3d updates handles with LOAD_CONSTANT_BUFFER after setting the buffer
+  size to 0, so those loads must not be bounded by CB_SIZE. With the bound,
+  every draw kept the first handle and the second quad sampled with the
+  first quad's sampler.
+- `TEXS`, the compact form uv compilers emit for plain 2D sampling, splits
+  its result across two register pairs selected by a 3-bit component code.
+- BC1 is addressed in 4x4 blocks of 8 bytes, block-linear like any other
+  surface with one "texel" per block; the test covers both of its modes.
 
 ## Risks and how to keep them small
 

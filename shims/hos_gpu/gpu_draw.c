@@ -47,7 +47,13 @@ enum {
     M3D_BLEND_COLOR = 0x4C7,  /* constant colour r g b a */
     M3D_BLEND_ENABLE = 0x4D8, /* + render target */
     M3D_BLEND_RT = 0x780,     /* + 8 * rt: separate alpha, colour op/src/dst, alpha op/src/dst */
-    M3D_PIPELINE = 0x800,     /* select, offset, ..., register count */
+    M3D_TSC_POOL = 0x557,     /* sampler descriptors: address hi, lo, last index */
+    M3D_TIC_POOL = 0x55D,     /* image descriptors: address hi, lo, last index */
+    M3D_TEX_CB_INDEX = 0x982, /* constant buffer that holds texture handles */
+    M3D_CB_SIZE = 0x8E0,
+    M3D_CB_ADDR_HI = 0x8E1,
+    M3D_CB_ADDR_LO = 0x8E2,
+    M3D_PIPELINE = 0x800, /* select, offset, ..., register count */
     SPH_SIZE = 0x50,
     MAX_VERTICES = 65536,
 };
@@ -72,6 +78,264 @@ typedef struct program {
     const uint64_t *code;
     uint32_t words;
 } program;
+
+/*
+ * Textures. A handle (image id [19:0], sampler id [31:20]) is read from the
+ * texture constant buffer; the image descriptor (TIC, 32 bytes) and sampler
+ * descriptor (TSC, 32 bytes) come from the pools at 0x55D and 0x557. Field
+ * layouts follow the public Maxwell texture header documentation (as used by
+ * nouveau): TIC word 0 format [6:0], component types [18:7], swizzle [30:19];
+ * words 1-2 address; word 2 [23:21] layout (2 pitch, 3 block-linear); word 3
+ * block height [5:3] or pitch; words 4-5 width and height minus one. TSC word 0
+ * wrap modes [2:0] [5:3]; word 1 filters (mag [1:0], min [5:4]).
+ */
+#define TEX_CACHE 8
+
+typedef struct texture {
+    uint32_t index; /* texture index in the instruction, cache key */
+    uint32_t handle;
+    int valid;
+    const uint8_t *base;
+    uint64_t size;
+    uint32_t format, width, height, bpp, row_bytes, bh, swizzle;
+    int pitch_layout;
+    uint32_t wrap_u, wrap_v, mag_filter;
+    float border[4];
+} texture;
+
+typedef struct tex_ctx {
+    const uint32_t *r;
+    const uint8_t *handles;
+    uint32_t handles_size;
+    texture cache[TEX_CACHE];
+    uint32_t used;
+    uint32_t warned;
+} tex_ctx;
+
+static uint32_t tex_bpp(uint32_t format) {
+    switch (format) {
+    case 0x01:
+        return 16; /* R32G32B32A32 */
+    case 0x04:
+        return 8; /* R32G32 */
+    case 0x08:
+        return 4; /* A8B8G8R8 */
+    case 0x0F:
+        return 4; /* R32 */
+    case 0x15:
+        return 2; /* B5G6R5 */
+    case 0x18:
+        return 2; /* G8R8 */
+    case 0x1D:
+        return 1; /* R8 */
+    case 0x24:
+        return 8; /* BC1: bytes per 4x4 block */
+    default:
+        return 0;
+    }
+}
+
+static void tex_resolve(tex_ctx *t, texture *x, uint32_t index) {
+    memset(x, 0, sizeof(*x));
+    x->index = index;
+    if ((uint64_t)index * 4 + 4 > t->handles_size || !t->handles) {
+        return;
+    }
+    memcpy(&x->handle, t->handles + index * 4, 4);
+    const uint32_t *r = t->r;
+    uint32_t tic_id = x->handle & 0xFFFFF, tsc_id = x->handle >> 20;
+    if (tic_id > r[M3D_TIC_POOL + 2] || tsc_id > r[M3D_TSC_POOL + 2]) {
+        return;
+    }
+    uint64_t tic_va =
+        (((uint64_t)(r[M3D_TIC_POOL] & 0xFF) << 32) | r[M3D_TIC_POOL + 1]) + (uint64_t)tic_id * 32;
+    uint64_t tsc_va =
+        (((uint64_t)(r[M3D_TSC_POOL] & 0xFF) << 32) | r[M3D_TSC_POOL + 1]) + (uint64_t)tsc_id * 32;
+    const uint32_t *tic = nv_gpu_va_to_host(tic_va, 32), *tsc = nv_gpu_va_to_host(tsc_va, 32);
+    if (!tic || !tsc) {
+        return;
+    }
+    x->format = tic[0] & 0x7F;
+    x->swizzle = (tic[0] >> 19) & 0xFFF;
+    x->bpp = tex_bpp(x->format);
+    uint32_t layout = (tic[2] >> 21) & 7;
+    x->pitch_layout = layout == 2;
+    x->width = (tic[4] & 0xFFFF) + 1;
+    x->height = (tic[5] & 0xFFFF) + 1;
+    x->bh = (tic[3] >> 3) & 7;
+    uint64_t va = ((uint64_t)(tic[2] & 0xFFFF) << 32) | tic[1];
+    x->wrap_u = tsc[0] & 7;
+    x->wrap_v = (tsc[0] >> 3) & 7;
+    x->mag_filter = tsc[1] & 3;
+    for (int c = 0; c < 4; c++) {
+        memcpy(&x->border[c], &tsc[4 + c], 4);
+    }
+    if (!x->bpp || (layout != 2 && layout != 3)) {
+        if (!(t->warned & 1)) {
+            t->warned |= 1;
+            HOS_LOGW(MOD, "texture format %#x layout %u not supported", x->format, layout);
+        }
+        return;
+    }
+    /* Block-compressed formats are laid out in 4x4 blocks: one "texel" per block. */
+    uint32_t units_w = x->format == 0x24 ? (x->width + 3) / 4 : x->width;
+    uint32_t units_h = x->format == 0x24 ? (x->height + 3) / 4 : x->height;
+    x->row_bytes = x->pitch_layout ? (tic[3] & 0xFFFF) << 5 : units_w * x->bpp;
+    x->size = x->pitch_layout ? (uint64_t)x->row_bytes * units_h
+                              : gpu_bl_size(x->row_bytes, units_h, x->bh);
+    x->base = nv_gpu_va_to_host(va, x->size);
+    x->valid = x->base != NULL;
+}
+
+static texture *tex_lookup(tex_ctx *t, uint32_t index) {
+    for (uint32_t k = 0; k < t->used; k++) {
+        if (t->cache[k].index == index) {
+            return &t->cache[k];
+        }
+    }
+    texture *x = &t->cache[t->used < TEX_CACHE ? t->used++ : TEX_CACHE - 1];
+    tex_resolve(t, x, index);
+    return x;
+}
+
+/* Texel coordinate after the wrap mode; -1 selects the border colour. */
+static int32_t tex_wrap(int32_t i, int32_t n, uint32_t mode) {
+    switch (mode) {
+    case 0: /* repeat */
+        i %= n;
+        return i < 0 ? i + n : i;
+    case 1: { /* mirrored repeat */
+        int32_t p = 2 * n, m = i % p;
+        m = m < 0 ? m + p : m;
+        return m < n ? m : p - 1 - m;
+    }
+    case 3: /* border */
+    case 6:
+        return i < 0 || i >= n ? -1 : i;
+    default: /* clamp to edge and the clamp variants */
+        return i < 0 ? 0 : i >= n ? n - 1 : i;
+    }
+}
+
+static void rgb565_to_float(uint16_t v, float c[3]) {
+    uint32_t r = (v >> 11) & 0x1F, g = (v >> 5) & 0x3F, b = v & 0x1F;
+    c[0] = (float)((r << 3) | (r >> 2)) / 255.0f; /* bit replication to 8 bits */
+    c[1] = (float)((g << 2) | (g >> 4)) / 255.0f;
+    c[2] = (float)((b << 3) | (b >> 2)) / 255.0f;
+}
+
+/* One texel of a BC1 block: two RGB565 endpoints, 2-bit indices (row-major, LSB first);
+ * c0 > c1 selects four colours, otherwise three and transparent black. */
+static void bc1_texel(const uint8_t *b, uint32_t tx, uint32_t ty, float c[4]) {
+    uint16_t c0 = (uint16_t)(b[0] | b[1] << 8), c1 = (uint16_t)(b[2] | b[3] << 8);
+    uint32_t idx = (b[4 + ty] >> (2 * tx)) & 3;
+    float e0[3], e1[3];
+    rgb565_to_float(c0, e0);
+    rgb565_to_float(c1, e1);
+    c[3] = 1.0f;
+    for (int k = 0; k < 3; k++) {
+        float v;
+        if (idx == 0) {
+            v = e0[k];
+        } else if (idx == 1) {
+            v = e1[k];
+        } else if (c0 > c1) {
+            v = idx == 2 ? (2.0f * e0[k] + e1[k]) / 3.0f : (e0[k] + 2.0f * e1[k]) / 3.0f;
+        } else {
+            v = idx == 2 ? (e0[k] + e1[k]) / 2.0f : 0.0f;
+        }
+        c[k] = v;
+    }
+    if (c0 <= c1 && idx == 3) {
+        c[3] = 0.0f;
+    }
+}
+
+static void tex_fetch(const texture *x, int32_t ix, int32_t iy, float out[4]) {
+    ix = tex_wrap(ix, (int32_t)x->width, x->wrap_u);
+    iy = tex_wrap(iy, (int32_t)x->height, x->wrap_v);
+    if (ix < 0 || iy < 0) {
+        memcpy(out, x->border, 16);
+        return;
+    }
+    int block = x->format == 0x24;
+    uint32_t ux = block ? (uint32_t)ix / 4 : (uint32_t)ix,
+             uy = block ? (uint32_t)iy / 4 : (uint32_t)iy;
+    uint64_t off = x->pitch_layout ? (uint64_t)uy * x->row_bytes + (uint64_t)ux * x->bpp
+                                   : gpu_bl_offset(ux * x->bpp, uy, x->row_bytes, x->bh);
+    float c[4] = {0, 0, 0, 1};
+    if (off + x->bpp <= x->size) {
+        const uint8_t *p = x->base + off;
+        switch (x->format) {
+        case 0x08:
+            for (int k = 0; k < 4; k++) {
+                c[k] = p[k] / 255.0f;
+            }
+            break;
+        case 0x15: {
+            uint16_t v = (uint16_t)(p[0] | p[1] << 8);
+            c[0] = (v & 0x1F) / 31.0f; /* B5G6R5: R in the low bits */
+            c[1] = ((v >> 5) & 0x3F) / 63.0f;
+            c[2] = ((v >> 11) & 0x1F) / 31.0f;
+            break;
+        }
+        case 0x18:
+            c[0] = p[0] / 255.0f;
+            c[1] = p[1] / 255.0f;
+            break;
+        case 0x1D:
+            c[0] = p[0] / 255.0f;
+            break;
+        case 0x0F:
+            memcpy(&c[0], p, 4);
+            break;
+        case 0x04:
+            memcpy(c, p, 8);
+            break;
+        case 0x01:
+            memcpy(c, p, 16);
+            break;
+        case 0x24:
+            bc1_texel(p, (uint32_t)ix & 3, (uint32_t)iy & 3, c);
+            break;
+        default:
+            break;
+        }
+    }
+    /* Swizzle: per destination component, 0 zero, 2-5 R G B A, 6/7 one. */
+    for (int k = 0; k < 4; k++) {
+        uint32_t src = (x->swizzle >> (3 * k)) & 7;
+        out[k] = src >= 2 && src <= 5 ? c[src - 2] : src >= 6 ? 1.0f : 0.0f;
+    }
+}
+
+static void tex_sample(void *user, uint32_t index, float u, float v, float out[4]) {
+    tex_ctx *t = user;
+    texture *x = tex_lookup(t, index);
+    if (!x->valid) {
+        out[0] = out[1] = out[2] = 0.0f;
+        out[3] = 1.0f;
+        return;
+    }
+    float fx = u * (float)x->width, fy = v * (float)x->height;
+    if (x->mag_filter != 2) { /* nearest (the magnification filter; no mipmaps yet) */
+        tex_fetch(x, (int32_t)floorf(fx), (int32_t)floorf(fy), out);
+        return;
+    }
+    fx -= 0.5f;
+    fy -= 0.5f;
+    int32_t x0 = (int32_t)floorf(fx), y0 = (int32_t)floorf(fy);
+    float ax = fx - (float)x0, ay = fy - (float)y0;
+    float t00[4], t10[4], t01[4], t11[4];
+    tex_fetch(x, x0, y0, t00);
+    tex_fetch(x, x0 + 1, y0, t10);
+    tex_fetch(x, x0, y0 + 1, t01);
+    tex_fetch(x, x0 + 1, y0 + 1, t11);
+    for (int k = 0; k < 4; k++) {
+        float top = t00[k] + (t10[k] - t00[k]) * ax, bottom = t01[k] + (t11[k] - t01[k]) * ax;
+        out[k] = top + (bottom - top) * ay;
+    }
+}
 
 typedef struct raster_ctx {
     const vertex *v[3];
@@ -662,6 +926,28 @@ void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first,
 
     /* Primitive assembly and the fragment stage. */
     bind_cbufs(s, 4, env);
+    tex_ctx *tc = calloc(1, sizeof(*tc));
+    if (tc) {
+        /* Texture handles live in the stage's texture constant buffer (0x982, deko3d: c0);
+         * deko3d binds its driver buffer explicitly only for the vertex stage, so fall back
+         * to that binding and then to the buffer currently selected for updates. */
+        uint32_t slot = r[M3D_TEX_CB_INDEX] < GPU_CBUFS ? r[M3D_TEX_CB_INDEX] : 0;
+        uint64_t addr = s->cb_addr[4][slot];
+        uint32_t size = s->cb_size[4][slot];
+        if (!size) {
+            addr = s->cb_addr[0][slot];
+            size = s->cb_size[0][slot];
+        }
+        if (!size) {
+            addr = ((uint64_t)(r[M3D_CB_ADDR_HI] & 0xFF) << 32) | r[M3D_CB_ADDR_LO];
+            size = r[M3D_CB_SIZE];
+        }
+        tc->r = r;
+        tc->handles = size ? nv_gpu_va_to_host(addr, size) : NULL;
+        tc->handles_size = tc->handles ? size : 0;
+        env->tex = tex_sample;
+        env->tex_user = tc;
+    }
     switch (topology) {
     case TOPO_TRIANGLES:
         for (uint32_t k = 0; k + 2 < count; k += 3) {
@@ -692,6 +978,7 @@ void gpu_draw_arrays(const gpu_draw_state *s, uint32_t topology, uint32_t first,
         HOS_LOGW(MOD, "topology %u not supported yet", topology);
         break;
     }
+    free(tc);
     free(verts);
     free(env);
 }

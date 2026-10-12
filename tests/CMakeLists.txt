@@ -244,6 +244,29 @@ if(S2PC_ARM64)
         endif()
     endif()
 
+    # GPU milestone M4: textures through image and sampler descriptors (TIC/TSC): RGBA8
+    # with nearest/clamp and bilinear/repeat, and BC1, against a reference sampler.
+    set(tex_dir ${CMAKE_SOURCE_DIR}/examples/libnx_deko3d_texture)
+    if(EXISTS ${tex_dir}/build/deko3d_texture.nso AND EXISTS ${tex_dir}/romfs/shaders)
+        file(MAKE_DIRECTORY ${fixture_dir}/texture)
+        add_test(NAME smoke_deko3d_texture
+                 COMMAND hosrun --romfs ${tex_dir}/romfs --sdmc ${fixture_dir}/sdmc
+                         ${tex_dir}/build/deko3d_texture.nso)
+        set_tests_properties(smoke_deko3d_texture PROPERTIES
+            TIMEOUT 300
+            ENVIRONMENT "HOS_FRAMES=${fixture_dir}/texture"
+            PASS_REGULAR_EXPRESSION "texture scene ready.*3 draws, 6 triangles.*deko3d texture: done"
+            FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|shader stopped|does not parse|not mapped|not supported|result [1-9]")
+        if(Python3_FOUND)
+            add_test(NAME check_deko3d_texture
+                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/check_texture.py
+                             ${fixture_dir}/texture/frame_0002.ppm)
+            set_tests_properties(check_deko3d_texture PROPERTIES
+                DEPENDS smoke_deko3d_texture
+                PASS_REGULAR_EXPRESSION "0 differ by more than 1")
+        endif()
+    endif()
+
     # DOOM (doomgeneric + shareware IWAD): a complete game through framebuffer, input,
     # romfs and timing. 400 frames headless; frames are not dumped to keep it fast.
     set(doom_nso ${CMAKE_SOURCE_DIR}/examples/doom/build/doom_test.nso)

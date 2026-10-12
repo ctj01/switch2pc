@@ -397,6 +397,41 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
             uint32_t op = bits(i, 45, 2);
             set_pred(e, bits(i, 3, 3), combine(op, r, c));
             set_pred(e, bits(i, 0, 3), combine(op, !r, c));
+        } else if (is(i, 0xd000000000000000ull, 0xf600000000000000ull)) { /* TEXS */
+            /* dst1 [7:0] (+1), dst2 [35:28] (+1), u = A [15:8], v = B [27:20], texture index
+             * [48:36], type/lod [56:53] (all 2D forms sample level 0 here), components [52:50]:
+             * with dst2 = RZ one of r g b a rg ra ga ba, else rgb rga rba gba rgba. */
+            static const uint8_t one[8][2] = {{0, 9}, {1, 9}, {2, 9}, {3, 9},
+                                              {0, 1}, {0, 3}, {1, 3}, {2, 3}};
+            static const uint8_t two[5][4] = {
+                {0, 1, 2, 9}, {0, 1, 3, 9}, {0, 2, 3, 9}, {1, 2, 3, 9}, {0, 1, 2, 3}};
+            uint32_t d2 = bits(i, 28, 8), sel = bits(i, 50, 3);
+            int is_1d = bits(i, 53, 4) == 0;
+            float texel[4] = {0, 0, 0, 0};
+            if (e->tex) {
+                e->tex(e->tex_user, bits(i, 36, 13), f(a), is_1d ? 0.0f : f(reg(e, bits(i, 20, 8))),
+                       texel);
+            }
+            const uint8_t *comp = d2 == RZ ? one[sel] : (sel < 5 ? two[sel] : two[4]);
+            uint32_t dst[4] = {d, d == RZ ? RZ : d + 1, d2, d2 == RZ ? RZ : d2 + 1};
+            for (int k = 0; k < 4 && comp[k] != 9; k++) {
+                set_reg(e, dst[k], u(texel[comp[k]]));
+            }
+        } else if (is(i, 0xc038000000000000ull, 0xfc38000000000000ull)) { /* TEX */
+            /* dst [7:0].., coordinates A [15:8] (u) and A+1 (v), index [48:36],
+             * write mask [34:31] filling consecutive registers. */
+            float texel[4] = {0, 0, 0, 0};
+            uint32_t ra = bits(i, 8, 8);
+            if (e->tex) {
+                e->tex(e->tex_user, bits(i, 36, 13), f(a), f(reg(e, ra == RZ ? RZ : ra + 1)),
+                       texel);
+            }
+            uint32_t mask = bits(i, 31, 4), k = 0;
+            for (int c = 0; c < 4; c++) {
+                if (mask & (1u << c)) {
+                    set_reg(e, d == RZ ? RZ : d + k++, u(texel[c]));
+                }
+            }
         } else {
             *bad_insn = i;
             return -1;
