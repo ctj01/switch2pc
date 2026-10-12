@@ -255,6 +255,10 @@ static float srgb_to_linear(float v) {
  */
 static float g_srgb_dec[256];
 static float g_srgb_thr[256]; /* [k]: smallest v in (0, 1) that encodes to k or more */
+/* By the top bits of v (exponent and 8 mantissa bits): the byte of the smallest
+ * float in that bucket. A bucket spans less than one byte step, so the answer is
+ * it or the next. */
+static uint8_t g_srgb_start[0x3F800000 >> 15];
 static pthread_once_t g_srgb_once = PTHREAD_ONCE_INIT;
 
 static float float_of(uint32_t b) {
@@ -281,6 +285,14 @@ static void srgb_init(void) {
         }
         g_srgb_thr[k] = float_of(lo);
     }
+    uint32_t k = 0;
+    for (uint32_t b = 0; b < (0x3F800000 >> 15); b++) {
+        float v = float_of(b << 15);
+        while (k < 255 && g_srgb_thr[k + 1] <= v) {
+            k++;
+        }
+        g_srgb_start[b] = (uint8_t)k;
+    }
 }
 
 static uint8_t srgb8(float v) {
@@ -290,16 +302,13 @@ static uint8_t srgb8(float v) {
     if (v >= 1.0f) {
         return 255;
     }
-    uint32_t lo = 0, hi = 255; /* largest k with thr[k] <= v */
-    while (lo < hi) {
-        uint32_t mid = (lo + hi + 1) / 2;
-        if (g_srgb_thr[mid] <= v) {
-            lo = mid;
-        } else {
-            hi = mid - 1;
-        }
+    uint32_t b;
+    memcpy(&b, &v, 4);
+    uint32_t k = g_srgb_start[b >> 15]; /* largest k with thr[k] <= v */
+    while (k < 255 && g_srgb_thr[k + 1] <= v) {
+        k++;
     }
-    return (uint8_t)lo;
+    return (uint8_t)k;
 }
 
 /* Encode the clear colour for a render-target format; returns bytes per pixel, 0 if unknown. */

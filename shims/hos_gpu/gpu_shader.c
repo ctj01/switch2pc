@@ -310,10 +310,17 @@ static uint8_t classify(u64 i) {
     return 0;
 }
 
+/* What every instruction needs before its handler: handler, guard, d and a. */
+typedef struct decoded {
+    uint8_t op;
+    uint8_t guard; /* predicate [2:0], negated [3] */
+    uint8_t d, ra;
+} decoded;
+
 struct shader_dcache {
     struct {
         u64 insn;
-        uint8_t op; /* classify() + 1, 0 empty */
+        decoded k; /* k.op is classify() + 1, 0 empty */
     } e[SHADER_DCACHE];
 };
 
@@ -324,18 +331,27 @@ shader_dcache *shader_dcache_new(void) {
 /* Indexed by pc: a program's instructions never collide with each other, and the
  * word tag catches another program at the same pc (a hash of the word collided
  * often enough within one shader to miss on 14% of lookups). */
-static INLINE uint8_t decode_op(shader_dcache *c, uint32_t pc, u64 i) {
+static INLINE decoded decode_fields(u64 i) {
+    decoded k = {classify(i), (uint8_t)bits(i, 16, 4), (uint8_t)bits(i, 0, 8),
+                 (uint8_t)bits(i, 8, 8)};
+    return k;
+}
+
+static INLINE decoded decode(shader_dcache *c, uint32_t pc, u64 i) {
     if (!c) {
-        return classify(i);
+        return decode_fields(i);
     }
     uint32_t h = pc & (SHADER_DCACHE - 1);
-    if (c->e[h].op && c->e[h].insn == i) {
-        return (uint8_t)(c->e[h].op - 1);
+    if (c->e[h].k.op && c->e[h].insn == i) {
+        decoded k = c->e[h].k;
+        k.op--;
+        return k;
     }
-    uint8_t op = classify(i);
+    decoded k = decode_fields(i);
     c->e[h].insn = i;
-    c->e[h].op = (uint8_t)(op + 1);
-    return op;
+    c->e[h].k = k;
+    c->e[h].k.op++;
+    return k;
 }
 
 int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_t *bad_insn) {
@@ -351,11 +367,12 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
             return -1;
         }
         u64 i = code[pc];
-        uint8_t opc = decode_op(e->dcache, pc, i);
+        decoded dk = decode(e->dcache, pc, i);
+        uint32_t opc = dk.op;
         uint32_t next = pc + 1;
-        int guard = pred(e, bits(i, 16, 3)) ^ bits(i, 19, 1);
-        uint32_t d = bits(i, 0, 8);
-        uint32_t a = reg(e, bits(i, 8, 8));
+        int guard = pred(e, dk.guard & 7) ^ (dk.guard >> 3);
+        uint32_t d = dk.d;
+        uint32_t a = reg(e, dk.ra);
 
         if (!guard) {
             pc = next;
