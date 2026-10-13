@@ -276,6 +276,116 @@ TEST(ipc_fsp_bis_and_save_info) {
     ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
 }
 
+static void wr32_at(uint8_t *p, size_t off, uint32_t v) {
+    memcpy(p + off, &v, 4);
+}
+
+/* The audio renderer keeps time: its event ticks, pools attach, a queued wave
+ * buffer is consumed once its samples have played at the voice's rate. */
+TEST(ipc_audren_silent_renderer) {
+    init_once();
+    uint32_t sm = connect_sm();
+    uint32_t mgr = get_service(sm, "audren:u");
+    ASSERT_TRUE(mgr != 0);
+    ipc_response resp;
+    /* AudioRendererParameter: 48 kHz, 240 samples, 2 mix buffers, 0 submixes, 1 voice,
+     * 1 sink, 0 effects, ..., revision REV5 */
+    uint32_t param[13] = {48000, 240, 2, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0x35564552};
+    ipc_request req = {.type = IPC_TYPE_REQUEST, .cmd = 1, .data = param, .data_size = 52};
+    ASSERT_EQ(ipc_call(mgr, &req, &resp), 0); /* GetWorkBufferSize */
+    uint64_t work;
+    memcpy(&work, resp.data, 8);
+    ASSERT_TRUE(work > 0);
+    struct {
+        uint32_t param[13];
+        uint32_t pad;
+        uint64_t work_size;
+        uint64_t aruid;
+    } open = {{0}, 0, work, 0};
+    memcpy(open.param, param, sizeof(param));
+    req = (ipc_request){.type = IPC_TYPE_REQUEST,
+                        .cmd = 0, /* OpenAudioRenderer */
+                        .send_pid = 1,
+                        .data = &open,
+                        .data_size = sizeof(open)};
+    ASSERT_EQ(ipc_call(mgr, &req, &resp), 0);
+    ASSERT_EQ(resp.num_move, 1);
+    uint32_t ren = resp.move_handles[0];
+
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 0}; /* GetSampleRate */
+    ASSERT_EQ(ipc_call(ren, &req, &resp), 0);
+    ASSERT_EQ(resp.data[0], 48000);
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 7}; /* QuerySystemEvent */
+    ASSERT_EQ(ipc_call(ren, &req, &resp), 0);
+    ASSERT_EQ(resp.num_copy, 1);
+    uint32_t event = resp.copy_handles[0];
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 5}; /* Start */
+    ASSERT_EQ(ipc_call(ren, &req, &resp), 0);
+    hos_svc_regs hr = call(0x01, 0, 0x200000, 0, 0);
+    ASSERT_EQ(hr.x[0], 0);
+    uint8_t *heap = (uint8_t *)hr.x[1];
+    uint32_t *handles = (uint32_t *)heap;
+    handles[0] = event;
+    hr = call(0x18, 0, (uint64_t)handles, 1, 200000000); /* the frame timer ticks within 200 ms */
+    ASSERT_EQ(hr.x[0], 0);
+
+    /* One update request: header, behaviour, 1 pool asking to attach, 1 channel, 1 voice
+     * playing one 240-sample buffer, 1 mix, 1 sink, perf. */
+    uint8_t *in = heap + 0x1000;
+    size_t in_size = 0x40 + 0x10 + 0x20 + 0x70 + 0x170 + 0x930 + 0x140 + 0x10;
+    memset(in, 0, in_size);
+    wr32_at(in, 4, 0x10);   /* behavior_sz */
+    wr32_at(in, 8, 0x20);   /* mempools_sz */
+    wr32_at(in, 12, 0x170); /* voices_sz */
+    wr32_at(in, 16, 0x70);  /* channels_sz */
+    wr32_at(in, 24, 0x930); /* mixes_sz */
+    wr32_at(in, 28, 0x140); /* sinks_sz */
+    wr32_at(in, 32, 0x10);  /* perfmgr_sz */
+    wr32_at(in, 60, (uint32_t)in_size);
+    uint8_t *pool = in + 0x40 + 0x10;
+    wr32_at(pool, 16, 4); /* RequestAttach */
+    uint8_t *voice = pool + 0x20 + 0x70;
+    voice[8] = 1;  /* is_new */
+    voice[9] = 1;  /* is_used */
+    voice[10] = 0; /* Started */
+    wr32_at(voice, 12, 48000);
+    wr32_at(voice, 0x3C, 1);          /* one wave buffer at head 0 */
+    wr32_at(voice + 0x60, 0x14, 240); /* end_sample_offset */
+    uint8_t *out = in + 0x2000;
+    size_t out_size = 0x40 + 0x10 + 0x10 + 0x20 + 0x10 + 0xB0;
+    req = (ipc_request){.type = IPC_TYPE_REQUEST,
+                        .cmd = 4, /* RequestUpdate */
+                        .b_buf = out,
+                        .b_size = out_size,
+                        .a_buf = in,
+                        .a_size = in_size};
+    ASSERT_EQ(ipc_call(ren, &req, &resp), 0);
+    uint32_t v;
+    memcpy(&v, out + 8, 4);
+    ASSERT_EQ(v, 0x10); /* mempools_sz */
+    memcpy(&v, out + 12, 4);
+    ASSERT_EQ(v, 0x10); /* voices_sz */
+    memcpy(&v, out + 0x40, 4);
+    ASSERT_EQ(v, 5); /* the pool is Attached */
+    memcpy(&v, out + 0x50 + 8, 4);
+    ASSERT_EQ(v, 0); /* nothing consumed on the update that queued it */
+    voice[8] = 0;
+    call(0x0B, 20000000, 0, 0, 0); /* sleep 20 ms: 960 samples at 48 kHz */
+    ASSERT_EQ(ipc_call(ren, &req, &resp), 0);
+    memcpy(&v, out + 0x50 + 8, 4);
+    ASSERT_EQ(v, 1); /* the 240-sample buffer has played */
+    uint64_t played;
+    memcpy(&played, out + 0x50, 8);
+    ASSERT_EQ(played, 240);
+
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 6}; /* Stop */
+    ASSERT_EQ(ipc_call(ren, &req, &resp), 0);
+    ASSERT_EQ(call(0x16, event, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, ren, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, mgr, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
+}
+
 static size_t make_log_packet(uint8_t *out, const char *text) {
     size_t n = strlen(text);
     memset(out, 0, 0x18);
