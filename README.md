@@ -284,7 +284,8 @@ hosrun [options] <exefs directory>                  loads rtld, main, subsdk0-9,
 
 Environment: `HOS_LOG_LEVEL=error|warn|info|debug|trace`, `HOS_BREAK=continue`
 to resume after a fatal `svcBreak`, `HOS_ROMFS`/`HOS_SDMC`/`HOS_SAVE` as the
-options above.
+options above, `HOS_FONT=<file.ttf>` for the shared font (`pl:u`; default: DejaVu,
+Liberation or Noto Sans from the host).
 
 Debugging: `qemu-aarch64 -g 1234 hosrun game.nso` then
 `gdb-multiarch -ex 'target remote :1234' hosrun`. Game code shows up at
