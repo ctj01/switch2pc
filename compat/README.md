@@ -54,9 +54,11 @@ Each app lands in exactly one level, worst to best:
 | `runs` | renders, and exited cleanly after the exit request (or on its own exit path, e.g. Plus from the input script) |
 
 An app that renders but ignores the exit request stays at `renders` with the
-note "did not exit on the exit request". A thumbnail of the last non-black
-frame is kept whatever the level: it often says more than the log (nx-hbmenu,
-for instance, "runs" but shows `launchInit() failed`).
+note "did not exit on the exit request"; devkitPro's SDL2 turns the request
+into `SDL_QUIT`, so an SDL2 app that only quits on a button needs that button
+in its `input` (sdl2-simple: Plus, SpaceNX: Minus). A thumbnail of the last
+non-black frame is kept whatever the level: it often says more than the log
+(an app can "run" while showing an error on its console).
 
 ## Blockers
 

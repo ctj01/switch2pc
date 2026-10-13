@@ -25,7 +25,7 @@
       "build": "make -C graphics/sdl2/sdl2-simple",
       "nro": "graphics/sdl2/sdl2-simple/sdl2-simple.nro",
       "duration_ms": 8000,
-      "notes": "SDL2 renderer (devkitPro's Switch SDL2, GL-backed) drawing coloured rectangles; the example ignores SDL_QUIT and exits on Plus, which the input script presses.",
+      "notes": "SDL2 renderer (devkitPro's Switch SDL2, GL-backed) drawing coloured rectangles; SDL turns the applet exit request into SDL_QUIT, which this example ignores, so the input script presses Plus, its own exit button.",
       "input": [
         "6000 400",
         "6200 0"
@@ -274,9 +274,11 @@
       "duration_ms": 10000,
       "input": [
         "3000 1",
-        "3200 0"
+        "3200 0",
+        "8000 800",
+        "8200 0"
       ],
-      "notes": "Small SDL2 space shooter with everything drawn in code (no data files). Makefile.libnx predates the current toolchain, so the build passes CFLAGS (-fpermissive and -fcommon: GCC 15 rejects its return-type and pointer-type mismatches and its tentative definitions in a header) and LIBS (SDL2 now needs EGL, glapi, drm_nouveau and libstdc++ for Mesa) whole."
+      "notes": "Small SDL2 space shooter with everything drawn in code (no data files); it reads the pad itself and leaves on Minus, which the input script presses. Makefile.libnx predates the current toolchain, so the build passes CFLAGS (-fpermissive and -fcommon: GCC 15 rejects its return-type and pointer-type mismatches and its tentative definitions in a header) and LIBS (SDL2 now needs EGL, glapi, drm_nouveau and libstdc++ for Mesa) whole."
     },
     {
       "name": "vgedit",
