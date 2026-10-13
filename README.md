@@ -230,8 +230,10 @@ storage sizes from the host) and `pdm:qry` (no play history).
 Sockets work: `bsd:u` is served with host sockets (TCP and UDP over IPv4,
 poll, non-blocking mode, socket options), so homebrew that talks to the
 network through libnx's POSIX API runs unchanged; `examples/libnx_sockets`
-checks it. Name lookups (`sfdnsres`) are not served yet, so use numeric
-addresses.
+checks it. Name lookups go through `sfdnsres` to the host resolver (IPv4),
+`csrng` hands out random bytes, and `ssl` exists without TLS behind it yet:
+contexts and connections are configured, the handshake fails cleanly, so curl
+and the apps on it report an error and carry on offline.
 
 The GPU has started ([docs/gpu.md](docs/gpu.md), milestones M0 and M1): a
 deko3d program creates its device, swapchain and queue, and its clears,
@@ -244,7 +246,7 @@ with depth testing and alpha blending, and textured quads (RGBA8 and BC1,
 nearest and bilinear, clamp and repeat) match independent references pixel
 for pixel. The GPU runs on the CPU for now; a Vulkan backend is next.
 
-Not implemented yet: the GPU's Vulkan backend and mipmaps, DNS lookups,
+Not implemented yet: the GPU's Vulkan backend and mipmaps, TLS behind `ssl`,
 `pctl`, config files. Track progress in
 [docs/ISSUES.md](docs/ISSUES.md).
 

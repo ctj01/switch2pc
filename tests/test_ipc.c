@@ -389,6 +389,103 @@ TEST(ipc_audren_silent_renderer) {
     ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
 }
 
+static uint32_t be32_at(const uint8_t *p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+}
+
+/* Name resolution over the host resolver: localhost packs as one IPv4 result in
+ * nnSdk's big-endian addrinfo format; a name that cannot exist fails with EAI_NONAME. */
+TEST(ipc_sfdnsres_getaddrinfo) {
+    init_once();
+    uint32_t sm = connect_sm();
+    uint32_t dns = get_service(sm, "sfdnsres");
+    ASSERT_TRUE(dns != 0);
+    hos_svc_regs hr = call(0x01, 0, 0x200000, 0, 0);
+    ASSERT_EQ(hr.x[0], 0);
+    uint8_t *heap = (uint8_t *)hr.x[1];
+    char *host = (char *)heap;
+    strcpy(host, "localhost");
+    uint8_t *out = heap + 0x1000;
+    memset(out, 0, 0x400);
+    struct {
+        uint32_t use_nsd;
+        uint32_t cancel_handle;
+        uint64_t pid_placeholder;
+    } in = {0, 0, 0};
+    ipc_response resp;
+    ipc_request req = {.type = IPC_TYPE_REQUEST,
+                       .cmd = 6, /* GetAddrInfoRequest */
+                       .send_pid = 1,
+                       .data = &in,
+                       .data_size = sizeof(in),
+                       .a_buf = host,
+                       .a_size = strlen(host) + 1,
+                       .b_buf = out,
+                       .b_size = 0x400};
+    ASSERT_EQ(ipc_call(dns, &req, &resp), 0);
+    ASSERT_EQ((int32_t)resp.data[1], 0); /* ret */
+    uint32_t size = resp.data[2];
+    ASSERT_TRUE(size >= 44);
+    ASSERT_EQ(be32_at(out), 0xBEEFCAFEu);
+    ASSERT_EQ(be32_at(out + 8), 2);   /* AF_INET */
+    ASSERT_EQ(be32_at(out + 20), 16); /* sockaddr_in */
+    ASSERT_EQ(out[24], 16);
+    ASSERT_EQ(out[25], 2);
+    ASSERT_EQ(out[28], 1); /* 127.0.0.1, byte-reversed as libnx expects */
+    ASSERT_EQ(out[31], 127);
+    ASSERT_EQ(be32_at(out + size - 4), 0); /* terminator */
+
+    strcpy(host, "no-such-host.invalid");
+    req.a_size = strlen(host) + 1;
+    ASSERT_EQ(ipc_call(dns, &req, &resp), 0);
+    ASSERT_EQ((int32_t)resp.data[1], 8); /* EAI_NONAME */
+    ASSERT_EQ(call(0x16, dns, 0, 0, 0).x[0], 0);
+
+    /* ssl: a context and a connection exist, the handshake fails cleanly. */
+    uint32_t ssl = get_service(sm, "ssl");
+    ASSERT_TRUE(ssl != 0);
+    struct {
+        uint32_t version;
+        uint32_t pad;
+        uint64_t pid_placeholder;
+    } create = {0, 0, 0};
+    req = (ipc_request){.type = IPC_TYPE_REQUEST,
+                        .cmd = 0, /* CreateContext */
+                        .send_pid = 1,
+                        .data = &create,
+                        .data_size = sizeof(create)};
+    ASSERT_EQ(ipc_call(ssl, &req, &resp), 0);
+    ASSERT_EQ(resp.num_move, 1);
+    uint32_t sslctx = resp.move_handles[0];
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 2}; /* CreateConnection */
+    ASSERT_EQ(ipc_call(sslctx, &req, &resp), 0);
+    ASSERT_EQ(resp.num_move, 1);
+    uint32_t conn = resp.move_handles[0];
+    int32_t fd = 3;
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 0, .data = &fd, .data_size = 4};
+    ASSERT_EQ(ipc_call(conn, &req, &resp), 0); /* SetSocketDescriptor */
+    ASSERT_EQ((int32_t)resp.data[0], 3);
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 8}; /* DoHandshake */
+    ASSERT_EQ(ipc_call(conn, &req, &resp), HOS_RESULT_MAKE(123, 1500));
+    ASSERT_EQ(call(0x16, conn, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, sslctx, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, ssl, 0, 0, 0).x[0], 0);
+
+    /* csrng fills the buffer with something other than zeros. */
+    uint32_t rng = get_service(sm, "csrng");
+    ASSERT_TRUE(rng != 0);
+    memset(out, 0, 32);
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 0, .b_buf = out, .b_size = 32};
+    ASSERT_EQ(ipc_call(rng, &req, &resp), 0);
+    int nonzero = 0;
+    for (int i = 0; i < 32; i++) {
+        nonzero |= out[i];
+    }
+    ASSERT_TRUE(nonzero != 0);
+    ASSERT_EQ(call(0x16, rng, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
+}
+
 static size_t make_log_packet(uint8_t *out, const char *text) {
     size_t n = strlen(text);
     memset(out, 0, 0x18);

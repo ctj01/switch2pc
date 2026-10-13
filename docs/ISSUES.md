@@ -44,6 +44,7 @@ numbers.
 | 39 | hos_net  | `bsd:u` sockets over host sockets | done (bsd.c: IPv4 TCP/UDP, poll, fcntl, socket options; FreeBSD sockaddr/MSG/SO/IP constants translated, errno in Linux numbering and O_NONBLOCK 0x800 as libnx expects; blocking calls drop the IPC lock; smoke_libnx_sockets) |
 | 41 | hos_net  | `sfdnsres` lookups (GetAddrInfo/GetHostByName serialisation) over the host resolver; Select/Ioctl/Sysctl in bsd:u | open |
 | 40 | hos_gpu  | GPU for homebrew (deko3d, Mesa): nvhost-gpu channels, GPFIFO and a Maxwell pushbuffer decoder feeding Vulkan; milestones M0-M5 in docs/gpu.md | open (M0, M1, M3, M4 done on the CPU: shaders, rasteriser, depth, blending, textures incl. BC1; five scenes match references; deko_examples render except 05 (indexed draws, MSAA + 2D resolve, MRT, RGBA16F, compute, wide lines). Next M2 Vulkan, tessellation, mipmaps) |
+| 42 | hos_net  | TLS behind `ssl` (ssl.c keeps contexts and connections and fails the handshake): the host's OpenSSL over the bsd:u socket, loaded at run time like the audio sinks | open |
 | 19 | hos_fs  | Build a romfs image from a directory at load time               | done (romfs_build.c; lazy, file data read on demand) |
 | 20 | hos_input | Controller input into the hid shared memory                   | done (input_state.c: 60 Hz writer; HOS_INPUT_SCRIPT, HOS_INPUT_EVDEV; evdev path compiled but untested without a device) |
 | 21 | loader  | Call DT_INIT_ARRAY of library modules when no rtld is present   | done (mod0_init_functions + a one-page ARM64 trampoline that runs them before the entry) |
