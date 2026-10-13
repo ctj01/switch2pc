@@ -88,6 +88,7 @@ typedef struct vertex {
 typedef struct program {
     const uint64_t *code;
     uint32_t words;
+    shader_prog *prog;   /* decoded, released after the draw */
     const uint32_t *sph; /* the 0x50-byte shader program header */
 } program;
 
@@ -397,7 +398,8 @@ static int load_program(const uint32_t *r, int type, program *p) {
             p->code = (const uint64_t *)host;
             p->sph = (const uint32_t *)nv_gpu_va_to_host(base + pipe[1], SPH_SIZE);
             p->words = (uint32_t)(avail / 8 < 65536 ? avail / 8 : 65536);
-            return 1;
+            p->prog = shader_prog_get(p->code, p->words);
+            return p->prog != NULL;
         }
     }
     return 0;
@@ -935,7 +937,7 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
             }
             env->killed = 0;
             uint64_t bad = 0;
-            if (shader_run(fs->code, fs->words, env, &bad) != 0) {
+            if (shader_exec(fs->prog, env, &bad) != 0) {
                 if (!st->shader_errors++) {
                     HOS_LOGW(MOD, "fragment shader stopped at instruction %#018" PRIx64, bad);
                 }
@@ -1027,13 +1029,6 @@ static void frag_worker(void *arg, uint32_t band, uint32_t nbands) {
         return;
     }
     memcpy(env, j->env, sizeof(*env));
-    /* Bands are exclusive while a job runs (pool_run serialises jobs), so each band
-     * keeps its decode cache across draws. */
-    static shader_dcache *dcache[MAX_WORKERS];
-    if (!dcache[band]) {
-        dcache[band] = shader_dcache_new();
-    }
-    env->dcache = dcache[band];
     if (tc) {
         memcpy(tc, j->tc, sizeof(*tc));
         env->tex_user = tc;
@@ -1166,15 +1161,28 @@ void gpu_draw_indexed(const gpu_draw_state *s, uint32_t topology, uint32_t first
     free(idx);
 }
 
+static void draw_programs(const gpu_draw_state *s, uint32_t topology, const uint32_t *indices,
+                          uint32_t first, uint32_t count, uint32_t instance, const program *vsp,
+                          const program *fsp, gpu_draw_stats *st);
+
 static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32_t *indices,
                         uint32_t first, uint32_t count, uint32_t instance, gpu_draw_stats *st) {
-    const uint32_t *r = s->r;
     st->draws++;
-    program vs, fs;
-    if (!load_program(r, 1, &vs) || !load_program(r, 5, &fs)) {
+    program vs = {0}, fs = {0};
+    if (load_program(s->r, 1, &vs) && load_program(s->r, 5, &fs)) {
+        draw_programs(s, topology, indices, first, count, instance, &vs, &fs, st);
+    } else {
         HOS_LOGW(MOD, "draw without a vertex and a fragment program");
-        return;
     }
+    shader_prog_release(vs.prog);
+    shader_prog_release(fs.prog);
+}
+
+static void draw_programs(const gpu_draw_state *s, uint32_t topology, const uint32_t *indices,
+                          uint32_t first, uint32_t count, uint32_t instance, const program *vsp,
+                          const program *fsp, gpu_draw_stats *st) {
+    const uint32_t *r = s->r;
+    const program vs = *vsp, fs = *fsp;
     targets ts;
     ts.n = r[M3D_CT_SELECT] & 0xF ? r[M3D_CT_SELECT] & 0xF : 1;
     ts.n = ts.n > 8 ? 8 : ts.n;
@@ -1226,15 +1234,6 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
     float sx = fbits(r[M3D_VIEWPORT + 0]) * (float)gx, sy = fbits(r[M3D_VIEWPORT + 1]) * (float)gy;
     float sz = fbits(r[M3D_VIEWPORT + 2]), tx = fbits(r[M3D_VIEWPORT + 3]) * (float)gx;
     float ty = fbits(r[M3D_VIEWPORT + 4]) * (float)gy, tz = fbits(r[M3D_VIEWPORT + 5]);
-    /* The vertex stage runs on the submitting thread; its decode cache is shared by
-     * every channel, hence the lock. */
-    static pthread_mutex_t vs_lock = PTHREAD_MUTEX_INITIALIZER;
-    static shader_dcache *vs_dcache;
-    pthread_mutex_lock(&vs_lock);
-    if (!vs_dcache) {
-        vs_dcache = shader_dcache_new();
-    }
-    env->dcache = vs_dcache;
     uint32_t nv = 0;
     for (uint32_t k = 0; k < count; k++) {
         if (reuse && reuse[indices[k] - vmin] >= 0) {
@@ -1250,11 +1249,10 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
             HOS_LOGW(MOD, "vertex %u: attribute data not mapped", vid);
         }
         uint64_t bad = 0;
-        if (shader_run(vs.code, vs.words, env, &bad) != 0) {
+        if (shader_exec(vs.prog, env, &bad) != 0) {
             if (!st->shader_errors++) {
                 HOS_LOGW(MOD, "vertex shader stopped at instruction %#018" PRIx64, bad);
             }
-            pthread_mutex_unlock(&vs_lock);
             free(reuse);
             free(vp);
             free(verts);
@@ -1281,8 +1279,6 @@ static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32
                      fbits(v->out[0x23]));
         }
     }
-    env->dcache = NULL;
-    pthread_mutex_unlock(&vs_lock);
     free(reuse);
 
     /* Primitive assembly. Lines become rectangles of the line width around each
@@ -1568,13 +1564,11 @@ void gpu_compute_launch(const uint32_t *rc, gpu_draw_stats *st) {
         }
     }
     env->mem = compute_mem;
-    static pthread_mutex_t cs_lock = PTHREAD_MUTEX_INITIALIZER;
-    static shader_dcache *cs_dcache;
-    pthread_mutex_lock(&cs_lock);
-    if (!cs_dcache) {
-        cs_dcache = shader_dcache_new();
+    shader_prog *prog = shader_prog_get(code, words);
+    if (!prog) {
+        free(env);
+        return;
     }
-    env->dcache = cs_dcache;
     HOS_LOGD(MOD, "compute: %ux%ux%u groups of %ux%ux%u at %#" PRIx64, grid[0], grid[1], grid[2],
              block[0], block[1], block[2], base + q[8]);
     for (uint32_t c = 0; c < 3; c++) {
@@ -1593,7 +1587,7 @@ void gpu_compute_launch(const uint32_t *rc, gpu_draw_stats *st) {
                     env->tid[1] = t / block[0] % block[1];
                     env->tid[2] = t / (block[0] * block[1]);
                     uint64_t bad = 0;
-                    if (shader_run(code, words, env, &bad) != 0) {
+                    if (shader_exec(prog, env, &bad) != 0) {
                         if (!st->shader_errors++) {
                             HOS_LOGW(MOD, "compute shader stopped at instruction %#018" PRIx64,
                                      bad);
@@ -1605,7 +1599,7 @@ void gpu_compute_launch(const uint32_t *rc, gpu_draw_stats *st) {
             }
         }
     }
-    pthread_mutex_unlock(&cs_lock);
+    shader_prog_release(prog);
     st->dispatches++;
     free(env);
 }

@@ -20,10 +20,8 @@
 
 typedef struct shader_env shader_env;
 
-/* Decode cache (instruction word -> handler). Not thread-safe: one per worker. */
-#define SHADER_DCACHE 1024
-typedef struct shader_dcache shader_dcache;
-shader_dcache *shader_dcache_new(void);
+/* A shader decoded once into handlers and operands (see shader_prog_get). */
+typedef struct shader_prog shader_prog;
 
 /* IPA: mode 0 pass (screen-linear), 1 perspective (attr/w, the shader multiplies by w),
  * 2 constant (provoking vertex). `addr` is the attribute byte address. */
@@ -43,7 +41,6 @@ struct shader_env {
     uint32_t cb_size[SHADER_CBUFS];
     shader_ipa_fn ipa;
     void *user;
-    shader_dcache *dcache; /* optional */
     /* compute: S2R's thread and group ids and counts; global memory for LDG/STG */
     uint32_t tid[3], ctaid[3], ntid[3], nctaid[3];
     uint32_t carry; /* IADD .CC / .X */
@@ -51,13 +48,26 @@ struct shader_env {
     shader_tex_fn tex;
     shader_texel_fn texel; /* shares tex_user */
     void *tex_user;
-    uint32_t r[256]; /* r255 reads as zero */
-    uint8_t p[8];    /* p7 is always true */
+    uint32_t r[260]; /* r255 (RZ) reads as zero; writes to it land in r[256] */
+    uint8_t p[9];    /* p7 (PT) is always true; writes to it land in p[8] */
     int killed;      /* fragment discarded */
 };
 
 /**
- * Run a shader from its first instruction (just after the 0x50-byte header).
+ * The decoded form of the shader at `code`, from a cache keyed by address and
+ * checked against the words, so a program is decoded once and shared, read
+ * only, by every thread that runs it. Release it after the draw. NULL when out
+ * of memory.
+ */
+shader_prog *shader_prog_get(const uint64_t *code, uint32_t code_words);
+void shader_prog_release(shader_prog *prog);
+
+/** Run a decoded shader; results as shader_run. Safe from several threads at once. */
+int shader_exec(const shader_prog *prog, shader_env *env, uint64_t *bad_insn);
+
+/**
+ * Decode and run a shader from its first instruction (just after the 0x50-byte
+ * header): shader_prog_get + shader_exec, for one-off runs.
  *
  * @param code        Instruction words (control words included, every fourth)
  * @param code_words  How many 64-bit words are readable at code

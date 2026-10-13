@@ -10,6 +10,7 @@
 #include "gpu_shader.h"
 
 #include <math.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -42,24 +43,22 @@ static INLINE uint32_t u(float x) {
     return v;
 }
 
+/* RZ and PT are slots that hold 0 and 1 for the whole run; writes to them go to
+ * spare slots, so reads are plain loads. */
 static INLINE uint32_t reg(const shader_env *e, uint32_t n) {
-    return n == RZ ? 0 : e->r[n];
+    return e->r[n];
 }
 
 static INLINE void set_reg(shader_env *e, uint32_t n, uint32_t v) {
-    if (n != RZ) {
-        e->r[n] = v;
-    }
+    e->r[n >= RZ ? 256 : n] = v;
 }
 
 static INLINE int pred(const shader_env *e, uint32_t n) {
-    return n == PT ? 1 : e->p[n & 7];
+    return e->p[n & 7];
 }
 
 static INLINE void set_pred(shader_env *e, uint32_t n, int v) {
-    if (n != PT) {
-        e->p[n & 7] = (uint8_t)(v != 0);
-    }
+    e->p[(n & 7) == PT ? 8 : (n & 7)] = (uint8_t)(v != 0);
 }
 
 static INLINE uint32_t cbuf_word(const shader_env *e, uint32_t idx, uint32_t byte_off) {
@@ -72,7 +71,7 @@ static INLINE uint32_t cbuf_word(const shader_env *e, uint32_t idx, uint32_t byt
 }
 
 /* Operand B of the reg (0x5c..), cbuf (0x4c..) and 20-bit immediate (0x38..) forms. */
-enum { FORM_REG, FORM_CBUF, FORM_IMM };
+enum { BK_REG, BK_CBUF, BK_IMM };
 
 static INLINE uint32_t imm20_int(u64 i) {
     uint32_t v = bits(i, 20, 19);
@@ -81,17 +80,6 @@ static INLINE uint32_t imm20_int(u64 i) {
 
 static INLINE uint32_t imm20_float(u64 i) {
     return (bits(i, 20, 19) | (bits(i, 56, 1) << 19)) << 12;
-}
-
-static INLINE uint32_t operand_b(const shader_env *e, u64 i, int form, int is_float) {
-    switch (form) {
-    case FORM_REG:
-        return reg(e, bits(i, 20, 8));
-    case FORM_CBUF:
-        return cbuf_word(e, bits(i, 34, 5), bits(i, 20, 14) * 4);
-    default:
-        return is_float ? imm20_float(i) : imm20_int(i);
-    }
 }
 
 static INLINE float fmod_neg_abs(float x, int neg, int abs_) {
@@ -164,13 +152,7 @@ static INLINE int combine(uint32_t op, int a, int b) {
     }
 }
 
-/*
- * Decoding: classify() maps an instruction word to the branch of shader_run
- * that executes it (1..n, 0 unknown). It depends only on the word, so each
- * fragment worker keeps a direct-mapped cache of it that never needs flushing
- * (thread-local storage would cost more than it saves in a shared object);
- * without it every instruction of every pixel walked the whole chain.
- */
+/* Decoding: classify() maps an instruction word to its handler (OP_*, 0 unknown). */
 static uint8_t classify(u64 i) {
     if (is(i, 0xe300000000000000ull, 0xfff0000000000000ull)) {
         return 1;
@@ -317,96 +299,326 @@ static uint8_t classify(u64 i) {
     return 0;
 }
 
-/* What every instruction needs before its handler: handler, guard, d and a. */
-typedef struct decoded {
-    uint8_t op;
-    uint8_t guard; /* predicate [2:0], negated [3] */
-    uint8_t d, ra;
-} decoded;
+/*
+ * Decoded programs. A shader is decoded once into one entry per word (control
+ * words become OP_CTRL): its handler, guard, registers and operand B already
+ * resolved to a register, a constant buffer word or an immediate in the form
+ * the instruction wants. The interpreter then dispatches on a dense switch
+ * with no field extraction for the common operands. Programs are cached by
+ * address, checked against a copy of their words, and shared read-only by the
+ * fragment workers; the decoded form is also what a compiler to native code
+ * would start from.
+ */
+enum {
+    OP_UNKNOWN,
+    OP_EXIT,
+    OP_BRA,
+    OP_SSY,
+    OP_SYNC,
+    OP_NOP,
+    OP_ATTR,
+    OP_LDC,
+    OP_IPA,
+    OP_RRO,
+    OP_F2I,
+    OP_I2F,
+    OP_MUFU,
+    OP_MOV32I,
+    OP_MOV,
+    OP_FADD,
+    OP_FMUL,
+    OP_FFMA,
+    OP_FADD32I,
+    OP_FMUL32I,
+    OP_FFMA32I,
+    OP_SHL,
+    OP_SHR,
+    OP_IADD,
+    OP_ISCADD,
+    OP_LOP,
+    OP_SEL,
+    OP_FMNMX,
+    OP_FSETP,
+    OP_ISETP,
+    OP_TEXS,
+    OP_TLDS,
+    OP_TEX,
+    OP_S2R,
+    OP_GMEM,
+    OP_CTRL, /* a scheduling control word */
+};
+_Static_assert(OP_GMEM == 34, "OP_* must follow classify()'s numbering");
 
-struct shader_dcache {
-    struct {
-        u64 insn;
-        decoded k; /* k.op is classify() + 1, 0 empty */
-    } e[SHADER_DCACHE];
+typedef struct pinsn {
+    u64 raw;
+    uint32_t b; /* B immediate, or constant buffer byte offset */
+    uint8_t op;
+    uint8_t guard; /* predicate [2:0], negated [3]; PT (7) runs always */
+    uint8_t d, ra, rc;
+    uint8_t bk, rb, cbi; /* B: kind, register, constant buffer */
+    uint8_t ck;          /* FFMA: C from the constant buffer (B is then register rc) */
+} pinsn;
+
+struct shader_prog {
+    const uint64_t *code; /* cache key, with words */
+    uint64_t *words;      /* copy of the decoded words */
+    pinsn *ins;
+    uint32_t n;
+    uint32_t refs; /* under g_progs_lock */
+    struct shader_prog *next;
 };
 
-shader_dcache *shader_dcache_new(void) {
-    return calloc(1, sizeof(shader_dcache));
+static INLINE uint32_t opnd_b(const shader_env *e, const pinsn *in) {
+    if (in->bk == BK_REG) {
+        return e->r[in->rb];
+    }
+    if (in->bk == BK_CBUF) {
+        return cbuf_word(e, in->cbi, in->b);
+    }
+    return in->b;
 }
 
-/* Indexed by pc: a program's instructions never collide with each other, and the
- * word tag catches another program at the same pc (a hash of the word collided
- * often enough within one shader to miss on 14% of lookups). */
-static INLINE decoded decode_fields(u64 i) {
-    decoded k = {classify(i), (uint8_t)bits(i, 16, 4), (uint8_t)bits(i, 0, 8),
-                 (uint8_t)bits(i, 8, 8)};
-    return k;
+static void predecode(u64 i, pinsn *in) {
+    memset(in, 0, sizeof(*in));
+    in->raw = i;
+    in->op = classify(i);
+    in->guard = (uint8_t)bits(i, 16, 4);
+    in->d = (uint8_t)bits(i, 0, 8);
+    in->ra = (uint8_t)bits(i, 8, 8);
+    in->rc = (uint8_t)bits(i, 39, 8);
+    in->cbi = (uint8_t)bits(i, 34, 5);
+    int has_b = 0, is_float = 0;
+    switch (in->op) {
+    case OP_RRO:
+    case OP_F2I:
+    case OP_FADD:
+    case OP_FMUL:
+    case OP_FMNMX:
+    case OP_FSETP:
+        has_b = is_float = 1;
+        break;
+    case OP_I2F:
+    case OP_MOV:
+    case OP_SHL:
+    case OP_SHR:
+    case OP_IADD:
+    case OP_ISCADD:
+    case OP_SEL:
+    case OP_ISETP:
+        has_b = 1;
+        break;
+    case OP_LOP:
+        if (is(i, 0x0400000000000000ull, 0xfc00000000000000ull)) { /* LOP32I */
+            in->bk = BK_IMM;
+            in->b = bits(i, 20, 32);
+        } else {
+            has_b = 1;
+        }
+        break;
+    case OP_FFMA:
+        if (is(i, 0x5980000000000000ull, 0xff80000000000000ull)) { /* B reg, C reg */
+            in->bk = BK_REG;
+            in->rb = (uint8_t)bits(i, 20, 8);
+        } else if (is(i, 0x4980000000000000ull, 0xff80000000000000ull)) { /* B cbuf */
+            in->bk = BK_CBUF;
+            in->b = bits(i, 20, 14) * 4;
+        } else if (is(i, 0x5180000000000000ull, 0xff80000000000000ull)) { /* B reg C, C cbuf */
+            in->bk = BK_REG;
+            in->rb = in->rc;
+            in->ck = 1;
+            in->b = bits(i, 20, 14) * 4;
+        } else {
+            in->bk = BK_IMM;
+            in->b = imm20_float(i);
+        }
+        break;
+    default:
+        break;
+    }
+    if (has_b) {
+        if ((i >> 60) == 5) {
+            in->bk = BK_REG;
+            in->rb = (uint8_t)bits(i, 20, 8);
+        } else if ((i >> 60) == 4) {
+            in->bk = BK_CBUF;
+            in->b = bits(i, 20, 14) * 4;
+        } else {
+            in->bk = BK_IMM;
+            in->b = is_float ? imm20_float(i) : imm20_int(i);
+        }
+    }
 }
 
-static INLINE decoded decode(shader_dcache *c, uint32_t pc, u64 i) {
-    if (!c) {
-        return decode_fields(i);
+/* Words up to the last instruction execution can reach: an unconditional EXIT or
+ * backward BRA with no branch target beyond it. Everything after is padding. */
+static uint32_t prog_length(const uint64_t *code, uint32_t words) {
+    uint32_t maxt = 0;
+    for (uint32_t pc = 1; pc < words; pc++) {
+        if ((pc & 3) == 0) {
+            continue;
+        }
+        u64 i = code[pc];
+        uint8_t op = classify(i);
+        int always = bits(i, 16, 4) == PT;
+        if (op == OP_BRA || op == OP_SSY) {
+            int64_t t = ((int64_t)pc * 8 + 8 + ((int32_t)(bits(i, 20, 24) << 8) >> 8)) / 8;
+            if (t > (int64_t)maxt) {
+                maxt = t < (int64_t)words ? (uint32_t)t : words;
+            }
+        }
+        if (always && (op == OP_EXIT || op == OP_BRA) && pc >= maxt) {
+            return pc + 1;
+        }
     }
-    uint32_t h = pc & (SHADER_DCACHE - 1);
-    if (c->e[h].k.op && c->e[h].insn == i) {
-        decoded k = c->e[h].k;
-        k.op--;
-        return k;
+    return words;
+}
+
+static shader_prog *prog_build(const uint64_t *code, uint32_t n) {
+    shader_prog *p = calloc(1, sizeof(*p));
+    if (!p) {
+        return NULL;
     }
-    decoded k = decode_fields(i);
-    c->e[h].insn = i;
-    c->e[h].k = k;
-    c->e[h].k.op++;
-    return k;
+    p->words = malloc((size_t)n * sizeof(*p->words));
+    p->ins = malloc((size_t)n * sizeof(*p->ins));
+    if (!p->words || !p->ins) {
+        free(p->words);
+        free(p->ins);
+        free(p);
+        return NULL;
+    }
+    memcpy(p->words, code, (size_t)n * sizeof(*p->words));
+    for (uint32_t pc = 0; pc < n; pc++) {
+        if ((pc & 3) == 0) {
+            memset(&p->ins[pc], 0, sizeof(p->ins[pc]));
+            p->ins[pc].op = OP_CTRL;
+            p->ins[pc].guard = PT;
+        } else {
+            predecode(code[pc], &p->ins[pc]);
+        }
+    }
+    p->code = code;
+    p->n = n;
+    return p;
+}
+
+static void prog_free(shader_prog *p) {
+    free(p->words);
+    free(p->ins);
+    free(p);
+}
+
+#define PROG_CACHE 256 /* programs kept while unused */
+
+static pthread_mutex_t g_progs_lock = PTHREAD_MUTEX_INITIALIZER;
+static shader_prog *g_progs;
+static uint32_t g_nprogs;
+
+shader_prog *shader_prog_get(const uint64_t *code, uint32_t code_words) {
+    uint32_t n = prog_length(code, code_words);
+    pthread_mutex_lock(&g_progs_lock);
+    for (shader_prog *p = g_progs; p; p = p->next) {
+        if (p->code == code && p->n == n && memcmp(p->words, code, (size_t)n * 8) == 0) {
+            p->refs++;
+            pthread_mutex_unlock(&g_progs_lock);
+            return p;
+        }
+    }
+    if (g_nprogs >= PROG_CACHE) { /* drop every program nobody is running */
+        for (shader_prog **pp = &g_progs; *pp;) {
+            if ((*pp)->refs == 0) {
+                shader_prog *dead = *pp;
+                *pp = dead->next;
+                prog_free(dead);
+                g_nprogs--;
+            } else {
+                pp = &(*pp)->next;
+            }
+        }
+    }
+    shader_prog *p = prog_build(code, n);
+    if (p) {
+        p->refs = 1;
+        p->next = g_progs;
+        g_progs = p;
+        g_nprogs++;
+    }
+    pthread_mutex_unlock(&g_progs_lock);
+    return p;
+}
+
+void shader_prog_release(shader_prog *p) {
+    if (!p) {
+        return;
+    }
+    pthread_mutex_lock(&g_progs_lock);
+    p->refs--;
+    pthread_mutex_unlock(&g_progs_lock);
 }
 
 int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_t *bad_insn) {
+    shader_prog *p = shader_prog_get(code, code_words);
+    if (!p) {
+        *bad_insn = 0;
+        return -1;
+    }
+    int rc = shader_exec(p, e, bad_insn);
+    shader_prog_release(p);
+    return rc;
+}
+
+int shader_exec(const shader_prog *prog, shader_env *e, uint64_t *bad_insn) {
+    const pinsn *ins = prog->ins;
+    uint32_t nwords = prog->n;
     uint32_t pc = 1;                                     /* word 0 is the first control word */
     uint32_t stack[3][CF_DEPTH], stack_n[3] = {0, 0, 0}; /* SSY/SYNC, PBK/BRK, PCNT/CONT */
     e->r[RZ] = 0;
+    e->p[PT] = 1;
     for (uint32_t step = 0; step < MAX_STEPS; step++) {
-        if ((pc & 3) == 0) {
-            pc++; /* control word */
-        }
-        if (pc >= code_words) {
+        if (pc >= nwords) {
             *bad_insn = 0;
             return -1;
         }
-        u64 i = code[pc];
-        decoded dk = decode(e->dcache, pc, i);
-        uint32_t opc = dk.op;
+        const pinsn *in = &ins[pc];
         uint32_t next = pc + 1;
-        int guard = pred(e, dk.guard & 7) ^ (dk.guard >> 3);
-        uint32_t d = dk.d;
-        uint32_t a = reg(e, dk.ra);
-
-        if (!guard) {
+        if (in->guard != PT && !(e->p[in->guard & 7] ^ (in->guard >> 3))) {
             pc = next;
             continue;
         }
-
-        if (opc == 1) { /* EXIT */
+        u64 i = in->raw;
+        uint32_t d = in->d;
+        uint32_t a = e->r[in->ra];
+        switch (in->op) {
+        case OP_EXIT: { /* EXIT */
             return 0;
-        } else if (opc == 2) { /* BRA rel */
+            break;
+        }
+        case OP_BRA: { /* BRA rel */
             int32_t off = (int32_t)(bits(i, 20, 24) << 8) >> 8;
             int64_t target = (int64_t)pc * 8 + 8 + off;
             next = (uint32_t)(target / 8);
-        } else if (opc == 3) { /* SSY, PBK, PCNT */
+            break;
+        }
+        case OP_SSY: { /* SSY, PBK, PCNT */
             /* One thread never diverges: these only push where SYNC/BRK/CONT will jump. */
             uint32_t kind = (uint32_t)((i >> 52) & 0xF) - 9;
             int32_t off = (int32_t)(bits(i, 20, 24) << 8) >> 8;
             if (stack_n[kind] < CF_DEPTH) {
                 stack[kind][stack_n[kind]++] = (uint32_t)(((int64_t)pc * 8 + 8 + off) / 8);
             }
-        } else if (opc == 4) { /* SYNC, BRK, CONT */
+            break;
+        }
+        case OP_SYNC: { /* SYNC, BRK, CONT */
             uint32_t kind = (i >> 60) == 0xF ? 0 : (uint32_t)((i >> 52) & 0xF) - 3;
             if (stack_n[kind]) {
                 /* CONT jumps back each iteration, so its target stays pushed. */
                 next = kind == 2 ? stack[kind][stack_n[kind] - 1] : stack[kind][--stack_n[kind]];
             }
-        } else if (opc == 5) { /* NOP */
-        } else if (opc == 6) { /* ALD, AST */
+            break;
+        }
+        case OP_NOP: { /* NOP */
+            break;
+        }
+        case OP_ATTR: { /* ALD, AST */
             int store = is(i, 0xeff0000000000000ull, 0xfff8000000000000ull);
             uint32_t addr = (a + bits(i, 20, 10)) / 4, n = bits(i, 47, 2) + 1;
             for (uint32_t k = 0; k < n && addr + k < SHADER_ATTR_WORDS; k++) {
@@ -417,7 +629,9 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
                             bits(i, 32, 1) ? e->out[addr + k] : e->in[addr + k]);
                 }
             }
-        } else if (opc == 7) { /* LDC */
+            break;
+        }
+        case OP_LDC: { /* LDC */
             int32_t off = (int32_t)(bits(i, 20, 16) << 16) >> 16;
             uint32_t idx = bits(i, 36, 5), byte = a + (uint32_t)off, size = bits(i, 48, 3);
             uint32_t w = cbuf_word(e, idx, byte & ~3u);
@@ -442,21 +656,25 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
                 set_reg(e, d, w);
                 break;
             }
-        } else if (opc == 8) { /* IPA */
+            break;
+        }
+        case OP_IPA: { /* IPA */
             uint32_t mode = bits(i, 54, 2), addr = bits(i, 28, 10) + a;
             float v = e->ipa ? e->ipa(e->user, addr, mode == 1 ? 1 : mode) : 0.0f;
             if (mode == 1) {
                 v *= f(reg(e, bits(i, 20, 8)));
             }
             set_reg(e, d, u(sat(v, bits(i, 51, 1))));
-        } else if (opc == 9) { /* RRO */
+            break;
+        }
+        case OP_RRO: { /* RRO */
             /* Range reduction ahead of MUFU sin/cos/ex2; our MUFU takes the plain value. */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
-            float y = fmod_neg_abs(f(operand_b(e, i, form, 1)), bits(i, 45, 1), bits(i, 49, 1));
+            float y = fmod_neg_abs(f(opnd_b(e, in)), bits(i, 45, 1), bits(i, 49, 1));
             set_reg(e, d, u(y));
-        } else if (opc == 10) { /* F2I (32-bit) */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
-            float y = fmod_neg_abs(f(operand_b(e, i, form, 1)), bits(i, 45, 1), bits(i, 49, 1));
+            break;
+        }
+        case OP_F2I: { /* F2I (32-bit) */
+            float y = fmod_neg_abs(f(opnd_b(e, in)), bits(i, 45, 1), bits(i, 49, 1));
             double v = y != y ? 0.0 : (double)y;
             switch (bits(i, 39, 2)) { /* rounding: nearest even, floor, ceil, trunc */
             case 0:
@@ -481,12 +699,15 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
                 out = (uint32_t)(v < 0.0 ? 0.0 : v > 4294967295.0 ? 4294967295.0 : v);
             }
             set_reg(e, d, out);
-        } else if (opc == 11) { /* I2F (32-bit) */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
-            uint32_t b = operand_b(e, i, form, 0);
+            break;
+        }
+        case OP_I2F: { /* I2F (32-bit) */
+            uint32_t b = opnd_b(e, in);
             float y = bits(i, 13, 1) ? (float)(int32_t)b : (float)b;
             set_reg(e, d, u(fmod_neg_abs(y, bits(i, 45, 1), bits(i, 49, 1))));
-        } else if (opc == 12) { /* MUFU */
+            break;
+        }
+        case OP_MUFU: { /* MUFU */
             float x = fmod_neg_abs(f(a), bits(i, 48, 1), bits(i, 46, 1)), r;
             switch (bits(i, 20, 4)) {
             case 0:
@@ -515,55 +736,58 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
                 return -1;
             }
             set_reg(e, d, u(sat(r, bits(i, 50, 1))));
-        } else if (opc == 13) { /* MOV32I */
+            break;
+        }
+        case OP_MOV32I: { /* MOV32I */
             set_reg(e, d, bits(i, 20, 32));
-        } else if (opc == 14) { /* MOV */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
-            set_reg(e, d, operand_b(e, i, form, 0));
-        } else if (opc == 15) { /* FADD */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
+            break;
+        }
+        case OP_MOV: { /* MOV */
+            set_reg(e, d, opnd_b(e, in));
+            break;
+        }
+        case OP_FADD: { /* FADD */
             float x = fmod_neg_abs(f(a), bits(i, 48, 1), bits(i, 46, 1));
-            float y = fmod_neg_abs(f(operand_b(e, i, form, 1)), bits(i, 45, 1), bits(i, 49, 1));
+            float y = fmod_neg_abs(f(opnd_b(e, in)), bits(i, 45, 1), bits(i, 49, 1));
             set_reg(e, d, u(sat(x + y, bits(i, 50, 1))));
-        } else if (opc == 16) { /* FMUL */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
-            float y = fmod_neg_abs(f(operand_b(e, i, form, 1)), bits(i, 48, 1), 0);
+            break;
+        }
+        case OP_FMUL: { /* FMUL */
+            float y = fmod_neg_abs(f(opnd_b(e, in)), bits(i, 48, 1), 0);
             set_reg(e, d, u(sat(f(a) * y, bits(i, 50, 1))));
-        } else if (opc == 17) { /* FFMA */
-            uint32_t bv, cv;
-            if (is(i, 0x5980000000000000ull, 0xff80000000000000ull)) {
-                bv = reg(e, bits(i, 20, 8));
-                cv = reg(e, bits(i, 39, 8));
-            } else if (is(i, 0x4980000000000000ull, 0xff80000000000000ull)) {
-                bv = operand_b(e, i, FORM_CBUF, 1);
-                cv = reg(e, bits(i, 39, 8));
-            } else if (is(i, 0x5180000000000000ull, 0xff80000000000000ull)) {
-                bv = reg(e, bits(i, 39, 8));
-                cv = operand_b(e, i, FORM_CBUF, 1);
-            } else {
-                bv = imm20_float(i);
-                cv = reg(e, bits(i, 39, 8));
-            }
+            break;
+        }
+        case OP_FFMA: { /* FFMA */
+            uint32_t bv = opnd_b(e, in);
+            uint32_t cv = in->ck ? cbuf_word(e, in->cbi, in->b) : reg(e, in->rc);
             float y = fmod_neg_abs(f(bv), bits(i, 48, 1), 0);
             float z = fmod_neg_abs(f(cv), bits(i, 49, 1), 0);
             set_reg(e, d, u(sat(fmaf(f(a), y, z), bits(i, 50, 1))));
-        } else if (opc == 18) { /* FADD32I */
+            break;
+        }
+        case OP_FADD32I: { /* FADD32I */
             float x = fmod_neg_abs(f(a), bits(i, 56, 1), bits(i, 54, 1));
             float y = fmod_neg_abs(f(bits(i, 20, 32)), bits(i, 53, 1), bits(i, 57, 1));
             set_reg(e, d, u(x + y));
-        } else if (opc == 19) { /* FMUL32I */
+            break;
+        }
+        case OP_FMUL32I: { /* FMUL32I */
             set_reg(e, d, u(sat(f(a) * f(bits(i, 20, 32)), bits(i, 55, 1))));
-        } else if (opc == 20) { /* FFMA32I: d = a*imm + d */
+            break;
+        }
+        case OP_FFMA32I: { /* FFMA32I: d = a*imm + d */
             float x = fmod_neg_abs(f(a), bits(i, 56, 1), 0);
             float z = fmod_neg_abs(f(reg(e, d)), bits(i, 57, 1), 0);
             set_reg(e, d, u(sat(fmaf(x, f(bits(i, 20, 32)), z), bits(i, 55, 1))));
-        } else if (opc == 21) { /* SHL */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
-            uint32_t s = operand_b(e, i, form, 0);
+            break;
+        }
+        case OP_SHL: { /* SHL */
+            uint32_t s = opnd_b(e, in);
             set_reg(e, d, bits(i, 39, 1) ? a << (s & 31) : (s > 31 ? 0 : a << s));
-        } else if (opc == 22) { /* SHR */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
-            uint32_t s = operand_b(e, i, form, 0);
+            break;
+        }
+        case OP_SHR: { /* SHR */
+            uint32_t s = opnd_b(e, in);
             int is_signed = bits(i, 48, 1);
             if (bits(i, 39, 1)) {
                 s &= 31;
@@ -576,10 +800,11 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
                 }
             }
             set_reg(e, d, is_signed ? (uint32_t)((int32_t)a >> s) : a >> s);
-        } else if (opc == 23) { /* IADD */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
+            break;
+        }
+        case OP_IADD: { /* IADD */
             uint32_t x = bits(i, 49, 1) ? 0u - a : a;
-            uint32_t b = operand_b(e, i, form, 0);
+            uint32_t b = opnd_b(e, in);
             b = bits(i, 48, 1) ? 0u - b : b;
             /* .X [43] adds the carry, .CC [47] sets it: 64-bit address arithmetic */
             uint64_t sum = (uint64_t)x + b + (bits(i, 43, 1) ? e->carry : 0);
@@ -587,47 +812,55 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
                 e->carry = (uint32_t)(sum >> 32) & 1;
             }
             set_reg(e, d, (uint32_t)sum);
-        } else if (opc == 24) { /* ISCADD */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
+            break;
+        }
+        case OP_ISCADD: { /* ISCADD */
             uint32_t x = (bits(i, 49, 1) ? 0u - a : a) << bits(i, 39, 5);
-            uint32_t b = operand_b(e, i, form, 0);
+            uint32_t b = opnd_b(e, in);
             set_reg(e, d, x + (bits(i, 48, 1) ? 0u - b : b));
-        } else if (opc == 25) { /* LOP, LOP32I */
+            break;
+        }
+        case OP_LOP: { /* LOP, LOP32I */
             int i32 = is(i, 0x0400000000000000ull, 0xfc00000000000000ull);
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
-            uint32_t b = i32 ? bits(i, 20, 32) : operand_b(e, i, form, 0);
+            uint32_t b = opnd_b(e, in); /* LOP32I: the 32-bit immediate */
             uint32_t x = (i32 ? bits(i, 55, 1) : bits(i, 39, 1)) ? ~a : a;
             b = (i32 ? bits(i, 56, 1) : bits(i, 40, 1)) ? ~b : b;
             uint32_t op = i32 ? bits(i, 53, 2) : bits(i, 41, 2), r;
             r = op == 0 ? x & b : op == 1 ? x | b : op == 2 ? x ^ b : b;
             set_reg(e, d, r);
-        } else if (opc == 26) { /* SEL */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
+            break;
+        }
+        case OP_SEL: { /* SEL */
             int c = pred(e, bits(i, 39, 3)) ^ bits(i, 42, 1);
-            set_reg(e, d, c ? a : operand_b(e, i, form, 0));
-        } else if (opc == 27) { /* FMNMX */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
+            set_reg(e, d, c ? a : opnd_b(e, in));
+            break;
+        }
+        case OP_FMNMX: { /* FMNMX */
             float x = fmod_neg_abs(f(a), bits(i, 48, 1), bits(i, 46, 1));
-            float y = fmod_neg_abs(f(operand_b(e, i, form, 1)), bits(i, 45, 1), bits(i, 49, 1));
+            float y = fmod_neg_abs(f(opnd_b(e, in)), bits(i, 45, 1), bits(i, 49, 1));
             int min = pred(e, bits(i, 39, 3)) ^ bits(i, 42, 1);
             set_reg(e, d, u(min ? fminf(x, y) : fmaxf(x, y)));
-        } else if (opc == 28) { /* FSETP */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
+            break;
+        }
+        case OP_FSETP: { /* FSETP */
             float x = fmod_neg_abs(f(a), bits(i, 43, 1), bits(i, 7, 1));
-            float y = fmod_neg_abs(f(operand_b(e, i, form, 1)), bits(i, 6, 1), bits(i, 44, 1));
+            float y = fmod_neg_abs(f(opnd_b(e, in)), bits(i, 6, 1), bits(i, 44, 1));
             int r = fcmp(bits(i, 48, 4), x, y);
             int c = pred(e, bits(i, 39, 3)) ^ bits(i, 42, 1);
             uint32_t op = bits(i, 45, 2);
             set_pred(e, bits(i, 3, 3), combine(op, r, c));
             set_pred(e, bits(i, 0, 3), combine(op, !r, c));
-        } else if (opc == 29) { /* ISETP */
-            int form = (i >> 60) == 5 ? FORM_REG : (i >> 60) == 4 ? FORM_CBUF : FORM_IMM;
-            int r = icmp(bits(i, 49, 3), a, operand_b(e, i, form, 0), bits(i, 48, 1));
+            break;
+        }
+        case OP_ISETP: { /* ISETP */
+            int r = icmp(bits(i, 49, 3), a, opnd_b(e, in), bits(i, 48, 1));
             int c = pred(e, bits(i, 39, 3)) ^ bits(i, 42, 1);
             uint32_t op = bits(i, 45, 2);
             set_pred(e, bits(i, 3, 3), combine(op, r, c));
             set_pred(e, bits(i, 0, 3), combine(op, !r, c));
-        } else if (opc == 30) { /* TEXS */
+            break;
+        }
+        case OP_TEXS: { /* TEXS */
             /* dst1 [7:0] (+1), dst2 [35:28] (+1), u = A [15:8], v = B [27:20], texture index
              * [48:36], type/lod [56:53] (all 2D forms sample level 0 here), components [52:50]:
              * with dst2 = RZ one of r g b a rg ra ga ba, else rgb rga rba gba rgba. */
@@ -647,7 +880,9 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
             for (int k = 0; k < 4 && comp[k] != 9; k++) {
                 set_reg(e, dst[k], u(texel[comp[k]]));
             }
-        } else if (opc == 31) { /* TLDS */
+            break;
+        }
+        case OP_TLDS: { /* TLDS */
             /* texelFetch, compact: registers and components as TEXS; [56:53] picks the form:
              * 0/1 1D (x = A), 2 2D (x = A, y = B), 4/5/6/12 2D (x = A, y = A+1, B holds an
              * offset, lod or sample we do not use). Level 0 only. */
@@ -673,7 +908,9 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
             for (int k = 0; k < 4 && comp[k] != 9; k++) {
                 set_reg(e, dst[k], u(texel[comp[k]]));
             }
-        } else if (opc == 32) { /* TEX */
+            break;
+        }
+        case OP_TEX: { /* TEX */
             /* dst [7:0].., coordinates A [15:8] (u) and A+1 (v), index [48:36],
              * write mask [34:31] filling consecutive registers. */
             float texel[4] = {0, 0, 0, 0};
@@ -688,7 +925,9 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
                     set_reg(e, d == RZ ? RZ : d + k++, u(texel[c]));
                 }
             }
-        } else if (opc == 33) { /* S2R */
+            break;
+        }
+        case OP_S2R: { /* S2R */
             uint32_t sr = bits(i, 20, 8), v = 0;
             if (sr >= 0x21 && sr <= 0x23) { /* SR_TID.X/Y/Z */
                 v = e->tid[sr - 0x21];
@@ -701,7 +940,9 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
                 return -1;
             }
             set_reg(e, d, v);
-        } else if (opc == 34) { /* LDG, STG */
+            break;
+        }
+        case OP_GMEM: { /* LDG, STG */
             /* data [7:0], address A [15:8] (A, A+1 with .E [45]), offset [43:20] signed,
              * size [50:48]: u8 s8 u16 s16 b32 b64 b128. */
             static const uint8_t bytes[8] = {1, 1, 2, 2, 4, 8, 16, 16};
@@ -737,7 +978,11 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *e, uint64_
                     set_reg(e, d == RZ ? RZ : d + k, v);
                 }
             }
-        } else {
+            break;
+        }
+        case OP_CTRL:
+            break;
+        default:
             *bad_insn = i;
             return -1;
         }
