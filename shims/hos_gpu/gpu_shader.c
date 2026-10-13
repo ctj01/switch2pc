@@ -184,6 +184,18 @@ static uint8_t classify(u64 i) {
         is(i, 0xeed0000000000000ull, 0xfff8000000000000ull)) {
         return 34;
     }
+    if (is(i, 0x5b00000000000000ull, 0xffc0000000000000ull) ||
+        is(i, 0x3600000000000000ull, 0xfec0000000000000ull)) {
+        return 35;
+    }
+    if (is(i, 0x5c00000000000000ull, 0xfff8000000000000ull) ||
+        is(i, 0x4c00000000000000ull, 0xfff8000000000000ull) ||
+        is(i, 0x3800000000000000ull, 0xfef8000000000000ull)) {
+        return 36;
+    }
+    if (is(i, 0xefd0000000000000ull, 0xfff8000000000000ull)) {
+        return 37;
+    }
     return 0;
 }
 
@@ -224,7 +236,17 @@ static void predecode(u64 i, pinsn *in) {
     case OP_ISCADD:
     case OP_SEL:
     case OP_ISETP:
+    case OP_BFE:
         has_b = 1;
+        break;
+    case OP_XMAD:
+        if ((i >> 60) == 5) {
+            in->bk = BK_REG;
+            in->rb = (uint8_t)bits(i, 20, 8);
+        } else { /* a 16-bit immediate */
+            in->bk = BK_IMM;
+            in->b = bits(i, 20, 16);
+        }
         break;
     case OP_LOP:
         if (is(i, 0x0400000000000000ull, 0xfc00000000000000ull)) { /* LOP32I */
@@ -444,14 +466,26 @@ int shader_exec_from(const shader_prog *prog, shader_env *e, uint32_t pc, shader
             break;
         }
         case OP_ATTR: { /* ALD, AST */
+            /* [31] per-patch space, [32] the output space, C [46:39] the input vertex
+             * (tessellation stages), size [48:47] in words; A offsets the address. */
             int store = is(i, 0xeff0000000000000ull, 0xfff8000000000000ull);
             uint32_t addr = (a + bits(i, 20, 10)) / 4, n = bits(i, 47, 2) + 1;
+            uint32_t *dst = e->out;
+            const uint32_t *src = e->in;
+            if (bits(i, 31, 1) && e->patch) {
+                dst = e->patch;
+                src = e->patch;
+            } else if (bits(i, 32, 1)) {
+                src = e->out;
+            } else if (e->in_vertices && e->num_in_vertices) {
+                uint32_t v = reg(e, in->rc);
+                src = e->in_vertices[v < e->num_in_vertices ? v : e->num_in_vertices - 1];
+            }
             for (uint32_t k = 0; k < n && addr + k < SHADER_ATTR_WORDS; k++) {
                 if (store) {
-                    e->out[addr + k] = reg(e, d == RZ ? RZ : d + k);
+                    dst[addr + k] = reg(e, d == RZ ? RZ : d + k);
                 } else {
-                    set_reg(e, d == RZ ? RZ : d + k,
-                            bits(i, 32, 1) ? e->out[addr + k] : e->in[addr + k]);
+                    set_reg(e, d == RZ ? RZ : d + k, src[addr + k]);
                 }
             }
             break;
@@ -760,7 +794,12 @@ int shader_exec_from(const shader_prog *prog, shader_env *e, uint32_t pc, shader
                 v = e->ctaid[sr - 0x25];
             } else if (sr == 0x20) { /* SR_TID packed: x [15:0], y [25:16], z [31:26] */
                 v = e->tid[0] | (e->tid[1] << 16) | (e->tid[2] << 26);
-            } else if (sr != 0x00) { /* SR_LANEID reads 0 */
+            } else if (sr == 0x11) { /* SR_INVOCATION_ID: this TCS invocation */
+                v = e->invocation_id;
+            } else if (sr != 0x00 && sr != 0x1d) {
+                /* SR_LANEID and SR_INVOCATION_INFO read 0: one primitive at a time,
+                 * its vertex slots from 0, so the compiler's slot arithmetic
+                 * ((info >> 16 & 0xff) * (info & 0xff) + vertex) yields the vertex. */
                 *bad_insn = i;
                 return -1;
             }
@@ -803,6 +842,73 @@ int shader_exec_from(const shader_prog *prog, shader_env *e, uint32_t pc, shader
                     set_reg(e, d == RZ ? RZ : d + k, v);
                 }
             }
+            break;
+        }
+        case OP_XMAD: { /* XMAD */
+            /* d = A16 * B16 + C over 16-bit halves: [53] and [35] pick the high half of A
+             * and B ([48], [49] sign them), .PSL [36] shifts the product left 16, the mode
+             * [52:50] takes C whole (0), its low (1, .CLO) or high (2, .CHI) half, or adds
+             * B's low half shifted up (4, .CBCC); .MRG [37] then puts B's low half over the
+             * result's high half. Chained three times this is the compiler's 32-bit multiply. */
+            uint32_t b = opnd_b(e, in), mode = bits(i, 50, 3);
+            uint32_t ah = bits(i, 53, 1) ? a >> 16 : a & 0xFFFF;
+            uint32_t bh = in->bk == BK_REG && bits(i, 35, 1) ? b >> 16 : b & 0xFFFF;
+            if (bits(i, 48, 1)) {
+                ah = (uint32_t)(int32_t)(int16_t)ah;
+            }
+            if (bits(i, 49, 1)) {
+                bh = (uint32_t)(int32_t)(int16_t)bh;
+            }
+            uint32_t prod = ah * bh, c = reg(e, in->rc);
+            if (bits(i, 36, 1)) {
+                prod <<= 16;
+            }
+            if (mode == 1) {
+                c &= 0xFFFF;
+            } else if (mode == 2) {
+                c >>= 16;
+            } else if (mode == 4) {
+                c += b << 16;
+            } else if (mode != 0) {
+                *bad_insn = i; /* .CSFU */
+                return -1;
+            }
+            uint32_t res = prod + c;
+            if (bits(i, 37, 1)) {
+                res = (res & 0xFFFF) | (b << 16);
+            }
+            set_reg(e, d, res);
+            break;
+        }
+        case OP_BFE: { /* BFE */
+            /* B: start [7:0], width [15:8]; [48] set sign-extends the field; .BREV [40]. */
+            uint32_t b = opnd_b(e, in), start = b & 0xFF, width = (b >> 8) & 0xFF;
+            int is_signed = bits(i, 48, 1);
+            uint32_t x = a;
+            if (bits(i, 40, 1)) {
+                x = 0;
+                for (int k = 0; k < 32; k++) {
+                    x |= ((a >> k) & 1) << (31 - k);
+                }
+            }
+            uint32_t res = 0;
+            if (width == 0) {
+                res = 0;
+            } else if (start > 31) {
+                res = is_signed ? (uint32_t)((int32_t)x >> 31) : 0;
+            } else {
+                uint32_t msb = start + width - 1 > 31 ? 31 : start + width - 1;
+                uint32_t n = msb - start + 1, mask = n == 32 ? ~0u : (1u << n) - 1;
+                res = (x >> start) & mask;
+                if (is_signed && n < 32 && ((x >> msb) & 1)) {
+                    res |= ~mask;
+                }
+            }
+            set_reg(e, d, res);
+            break;
+        }
+        case OP_ISBERD: { /* ISBERD: a vertex slot to its address; slots are addresses here */
+            set_reg(e, d, a);
             break;
         }
         case OP_CTRL:

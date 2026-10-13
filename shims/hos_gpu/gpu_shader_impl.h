@@ -176,9 +176,12 @@ enum {
     OP_TEX,
     OP_S2R,
     OP_GMEM,
+    OP_XMAD,
+    OP_BFE,
+    OP_ISBERD,
     OP_CTRL, /* a scheduling control word */
 };
-_Static_assert(OP_GMEM == 34, "OP_* must follow classify()'s numbering");
+_Static_assert(OP_ISBERD == 37, "OP_* must follow classify()'s numbering");
 
 typedef struct pinsn {
     u64 raw;

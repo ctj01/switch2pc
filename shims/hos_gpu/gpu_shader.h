@@ -13,6 +13,12 @@
  * attribute i, 0x2f8 instance id, 0x2fc vertex id. Fragment shaders read
  * their inputs through IPA, which calls back into the rasteriser, and leave
  * colour outputs in r0, r1, ...
+ *
+ * Tessellation stages see a primitive, not a vertex: an attribute load names
+ * the input vertex in a register (`in_vertices`), `ld p`/`st p` address the
+ * per-patch space (`patch`: tessellation levels at 0x0 outer, 0x10 inner),
+ * and the evaluation shader reads its tessellation coordinate from the output
+ * space at 0x2f0 (u) and 0x2f4 (v), where the draw path puts it.
  */
 
 #define SHADER_ATTR_WORDS 256 /* attribute space 0x000-0x3ff */
@@ -48,6 +54,11 @@ struct shader_env {
     shader_tex_fn tex;
     shader_texel_fn texel; /* shares tex_user */
     void *tex_user;
+    /* tessellation: input vertices by index, the patch space, this TCS invocation */
+    const uint32_t *const *in_vertices;
+    uint32_t num_in_vertices;
+    uint32_t *patch;
+    uint32_t invocation_id;
     uint32_t r[260]; /* r255 (RZ) reads as zero; writes to it land in r[256] */
     uint8_t p[9];    /* p7 (PT) is always true; writes to it land in p[8] */
     int killed;      /* fragment discarded */

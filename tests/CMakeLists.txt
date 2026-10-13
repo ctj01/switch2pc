@@ -22,6 +22,9 @@ s2pc_add_test(test_shader s2pc_common m)
 target_sources(test_shader PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader.c
                                    ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader_simd.c)
 target_include_directories(test_shader PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
+s2pc_add_test(test_tess m)
+target_sources(test_tess PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_tess.c)
+target_include_directories(test_tess PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
 # Group interpreter vs scalar, on whatever compiled deko3d shaders exist (devkitPro builds).
 add_executable(test_shader_group test_shader_group.c ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader.c
                                  ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader_simd.c)
@@ -381,6 +384,34 @@ if(S2PC_ARM64)
             set_tests_properties(check_deko3d_texture PROPERTIES
                 DEPENDS smoke_deko3d_texture
                 PASS_REGULAR_EXPRESSION "0 differ by more than 1")
+        endif()
+    endif()
+
+    # GPU milestone M5a: tessellation. deko_examples 05 (devkitPro's own, built by
+    # scripts/build_deko_examples.sh) draws a patch through control and evaluation
+    # shaders in line polygon mode; the frame is checked against the OpenGL rules for
+    # the rings the levels produce.
+    set(deko_examples_nso ${CMAKE_SOURCE_DIR}/build/deko_examples/deko_examples.nso)
+    set(deko_examples_romfs ${CMAKE_SOURCE_DIR}/build/deko_examples/romfs)
+    if(EXISTS ${deko_examples_nso} AND EXISTS ${deko_examples_romfs}/shaders/tess_simple_tesh.dksh)
+        file(MAKE_DIRECTORY ${fixture_dir}/tess/sdmc ${fixture_dir}/tess/frames)
+        file(WRITE ${fixture_dir}/tess/sdmc/deko_example.txt "5\n")
+        file(WRITE ${fixture_dir}/tess/input.txt "3000 exit\n")
+        add_test(NAME smoke_deko3d_tess
+                 COMMAND hosrun --romfs ${deko_examples_romfs} --sdmc ${fixture_dir}/tess/sdmc
+                         ${deko_examples_nso})
+        set_tests_properties(smoke_deko3d_tess PROPERTIES
+            TIMEOUT 300
+            ENVIRONMENT "HOS_FRAMES=${fixture_dir}/tess/frames;HOS_INPUT_SCRIPT=${fixture_dir}/tess/input.txt"
+            PASS_REGULAR_EXPRESSION "frame 2: 1280x720 format 1, [1-9][0-9]* non-black pixels.*frames presented: [1-9]"
+            FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|shader stopped|does not parse|not mapped|not supported|without a tessellation")
+        if(Python3_FOUND)
+            add_test(NAME check_deko3d_tess
+                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/check_tess.py
+                             ${fixture_dir}/tess/frames/frame_0002.ppm)
+            set_tests_properties(check_deko3d_tess PROPERTIES
+                DEPENDS smoke_deko3d_tess
+                PASS_REGULAR_EXPRESSION "0 stray, 0 missing")
         endif()
     endif()
 

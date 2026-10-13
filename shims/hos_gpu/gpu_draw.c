@@ -18,10 +18,14 @@
 #include "common/hos_log.h"
 #include "gpu_internal.h"
 #include "gpu_shader.h"
+#include "gpu_tess.h"
 
 #define MOD "draw"
 
 enum {
+    M3D_TESS_MODE = 0x0C8,  /* [1:0] domain, [5:4] spacing, [8] clockwise */
+    M3D_TESS_OUTER = 0x0C9, /* 4 floats, then 2 inner: the levels without a control shader */
+    M3D_TESS_INNER = 0x0CD,
     M3D_RT_BASE = 0x200,
     M3D_VIEWPORT = 0x280, /* scale x y z, translate x y z */
     M3D_SCISSOR = 0x380,  /* enable, horizontal, vertical */
@@ -44,6 +48,9 @@ enum {
     M3D_DEPTH_TEST = 0x4B3,
     M3D_DEPTH_WRITE = 0x4BA,
     M3D_DEPTH_FUNC = 0x4C3,
+    M3D_POLYGON_MODE_FRONT = 0x36B, /* 0x1B00 point, 0x1B01 line, 0x1B02 fill */
+    M3D_POLYGON_MODE_BACK = 0x36C,
+    M3D_PATCH_SIZE = 0x373,
     M3D_CLEAR_DEPTH = 0x364,
     M3D_CLEAR_STENCIL = 0x368,
     M3D_BLEND_COLOR = 0x4C7,  /* constant colour r g b a */
@@ -65,6 +72,7 @@ enum {
     M3D_PIPELINE = 0x800, /* select, offset, ..., register count */
     SPH_SIZE = 0x50,
     MAX_VERTICES = 65536,
+    TESS_PATCH_MAX = 32, /* vertices per patch, in and out of the control shader */
 };
 
 enum {
@@ -76,6 +84,7 @@ enum {
     TOPO_STRIP = 5,
     TOPO_FAN = 6,
     TOPO_QUADS = 7,
+    TOPO_PATCHES = 14,
 };
 
 typedef struct vertex {
@@ -383,6 +392,22 @@ static uint32_t ubits(float x) {
     uint32_t v;
     memcpy(&v, &x, 4);
     return v;
+}
+
+/* Clip space to window coordinates, as the viewport (in samples) maps them. */
+typedef struct xform {
+    float sx, sy, sz, tx, ty, tz;
+} xform;
+
+static void finish_vertex(vertex *v, const uint32_t *out, const xform *x) {
+    memcpy(v->out, out, sizeof(v->out));
+    for (int c = 0; c < 4; c++) {
+        v->pos[c] = fbits(out[0x70 / 4 + c]);
+    }
+    v->inv_w = v->pos[3] != 0.0f ? 1.0f / v->pos[3] : 0.0f;
+    v->win[0] = v->pos[0] * v->inv_w * x->sx + x->tx;
+    v->win[1] = v->pos[1] * v->inv_w * x->sy + x->ty;
+    v->win[2] = v->pos[2] * v->inv_w * x->sz + x->tz;
 }
 
 static int load_program(const uint32_t *r, int type, program *p) {
@@ -799,6 +824,26 @@ static float edge(const float *a, const float *b, float px, float py) {
     return (b[0] - a[0]) * (py - a[1]) - (b[1] - a[1]) * (px - a[0]);
 }
 
+/* Facing of a window-space triangle: 1 front, 0 back, -1 for no area. */
+static int tri_front(const uint32_t *r, const vertex *v0, const vertex *v1, const vertex *v2) {
+    float area = edge(v0->win, v1->win, v2->win[0], v2->win[1]);
+    if (area == 0.0f) {
+        return -1;
+    }
+    /* Orientation in NDC (y up): the viewport's scale signs fold back in. */
+    float sx = fbits(r[M3D_VIEWPORT + 0]), sy = fbits(r[M3D_VIEWPORT + 1]);
+    int ccw = (area > 0.0f) != ((sx * sy) < 0.0f);  /* area_ndc = area_window / (sx * sy) */
+    return r[M3D_FRONT_FACE] == 0x900 ? !ccw : ccw; /* 0x901 CCW, 0x900 CW */
+}
+
+static int culled(const uint32_t *r, int front) {
+    if (!(r[M3D_CULL_ENABLE] & 1)) {
+        return 0;
+    }
+    uint32_t cull = r[M3D_CULL_FACE];
+    return cull == 0x408 || (cull == 0x404 && front) || (cull == 0x405 && !front);
+}
+
 /* Multisampled targets hold a grid of samples per pixel; we rasterise at sample resolution
  * (one shading per sample), so window coordinates and scissors scale by this grid. */
 void gpu_ms_grid(uint32_t mode, uint32_t *gx, uint32_t *gy) {
@@ -913,20 +958,14 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
         return; /* FIXME(#40): clip against w > 0 instead of dropping */
     }
     float area = edge(v0->win, v1->win, v2->win[0], v2->win[1]);
-    if (area == 0.0f) {
+    int front = tri_front(r, v0, v1, v2);
+    if (front < 0) {
         return;
     }
-    /* Orientation in NDC (y up): the viewport's scale signs fold back in. */
-    float sx = fbits(r[M3D_VIEWPORT + 0]), sy = fbits(r[M3D_VIEWPORT + 1]);
-    int ccw = (area > 0.0f) != ((sx * sy) < 0.0f);       /* area_ndc = area_window / (sx * sy) */
-    int front = r[M3D_FRONT_FACE] == 0x900 ? !ccw : ccw; /* 0x901 CCW, 0x900 CW */
     HOS_LOGT(MOD, "triangle: area %g, %s facing, cull %s face %#x", area, front ? "front" : "back",
              (r[M3D_CULL_ENABLE] & 1) ? "on" : "off", r[M3D_CULL_FACE]);
-    if (may_cull && (r[M3D_CULL_ENABLE] & 1)) {
-        uint32_t cull = r[M3D_CULL_FACE];
-        if (cull == 0x408 || (cull == 0x404 && front) || (cull == 0x405 && !front)) {
-            return;
-        }
+    if (may_cull && culled(r, front)) {
+        return;
     }
     if (band == 0) {
         st->triangles++; /* every band sees every triangle; count it once */
@@ -1234,28 +1273,232 @@ void gpu_draw_indexed(const gpu_draw_state *s, uint32_t topology, uint32_t first
     free(idx);
 }
 
+typedef struct programs {
+    program vs, tcs, tes, fs; /* tcs and tes are optional: prog is NULL when not bound */
+} programs;
+
 static void draw_programs(const gpu_draw_state *s, uint32_t topology, const uint32_t *indices,
-                          uint32_t first, uint32_t count, uint32_t instance, const program *vsp,
-                          const program *fsp, gpu_draw_stats *st);
+                          uint32_t first, uint32_t count, uint32_t instance, const programs *pg,
+                          gpu_draw_stats *st);
 
 static void draw_common(const gpu_draw_state *s, uint32_t topology, const uint32_t *indices,
                         uint32_t first, uint32_t count, uint32_t instance, gpu_draw_stats *st) {
     st->draws++;
-    program vs = {0}, fs = {0};
-    if (load_program(s->r, 1, &vs) && load_program(s->r, 5, &fs)) {
-        draw_programs(s, topology, indices, first, count, instance, &vs, &fs, st);
+    programs pg;
+    memset(&pg, 0, sizeof(pg));
+    if (load_program(s->r, 1, &pg.vs) && load_program(s->r, 5, &pg.fs)) {
+        if (topology == TOPO_PATCHES) {
+            load_program(s->r, 2, &pg.tcs);
+            load_program(s->r, 3, &pg.tes);
+        }
+        draw_programs(s, topology, indices, first, count, instance, &pg, st);
     } else {
         HOS_LOGW(MOD, "draw without a vertex and a fragment program");
     }
-    shader_prog_release(vs.prog);
-    shader_prog_release(fs.prog);
+    shader_prog_release(pg.vs.prog);
+    shader_prog_release(pg.tcs.prog);
+    shader_prog_release(pg.tes.prog);
+    shader_prog_release(pg.fs.prog);
+}
+
+/*
+ * Tessellation (M5). Every `psize` shaded vertices form a patch. The control
+ * shader runs once per output vertex over it, with the invocation id, the
+ * inputs by vertex index and the shared patch space where it leaves the
+ * levels; the primitive generator turns the levels into tessellation
+ * coordinates and primitives; the evaluation shader runs at each coordinate
+ * (0x2f0, 0x2f4) with the control shader's outputs as its input vertices.
+ * Without a control shader the levels come from 0x0c9-0x0ce and the patch's
+ * own vertices feed the evaluation shader. Returns 1 with the generated
+ * vertices and the primitive list (triangles, or line segments for isolines),
+ * 0 when nothing was generated.
+ */
+static int tessellate(const gpu_draw_state *s, const programs *pg, const vertex *const *vp,
+                      uint32_t count, shader_env *env, const xform *xf, vertex **out_verts,
+                      const vertex ***out_prim, uint32_t *out_n, int *out_lines,
+                      gpu_draw_stats *st) {
+    const uint32_t *r = s->r;
+    uint32_t psize = r[M3D_PATCH_SIZE] & 0x3F;
+    psize = psize == 0 ? 1 : psize > TESS_PATCH_MAX ? TESS_PATCH_MAX : psize;
+    uint32_t mode = r[M3D_TESS_MODE], domain = mode & 3, spacing = (mode >> 4) & 3;
+    int cw = (mode >> 8) & 1;
+    uint32_t nout = pg->tcs.prog && pg->tcs.sph ? pg->tcs.sph[2] >> 24 : psize;
+    nout = nout == 0 ? psize : nout > TESS_PATCH_MAX ? TESS_PATCH_MAX : nout;
+    uint32_t *tcs_out = calloc((size_t)nout * SHADER_ATTR_WORDS, sizeof(*tcs_out));
+    uint32_t *patch = calloc(SHADER_ATTR_WORDS, sizeof(*patch));
+    const uint32_t *in_ptrs[TESS_PATCH_MAX], *tcs_ptrs[TESS_PATCH_MAX];
+    vertex *tv = NULL;
+    uint32_t *tidx = NULL, nv = 0, ni = 0, cap_v = 0, cap_i = 0;
+    int lines = 0, ok = tcs_out && patch;
+    for (uint32_t k = 0; k < nout; k++) {
+        tcs_ptrs[k] = tcs_out + (size_t)k * SHADER_ATTR_WORDS;
+    }
+    for (uint32_t p = 0; ok && (uint64_t)(p + 1) * psize <= count; p++) {
+        for (uint32_t k = 0; k < psize; k++) {
+            in_ptrs[k] = vp[p * psize + k]->out;
+        }
+        memset(patch, 0, SHADER_ATTR_WORDS * sizeof(*patch));
+        float outer[4], inner[2];
+        const uint32_t *const *tes_in = in_ptrs;
+        uint32_t tes_n = psize;
+        uint64_t bad = 0;
+        if (pg->tcs.prog) {
+            bind_cbufs(s, 1, env);
+            env->in_vertices = in_ptrs;
+            env->num_in_vertices = psize;
+            env->patch = patch;
+            for (uint32_t inv = 0; inv < nout; inv++) {
+                memset(env->in, 0, sizeof(env->in));
+                memset(env->out, 0, sizeof(env->out));
+                env->invocation_id = inv;
+                if (shader_exec(pg->tcs.prog, env, &bad) != 0) {
+                    if (!st->shader_errors++) {
+                        HOS_LOGW(MOD,
+                                 "tessellation control shader stopped at instruction %#018" PRIx64,
+                                 bad);
+                    }
+                    ok = 0;
+                    break;
+                }
+                memcpy(tcs_out + (size_t)inv * SHADER_ATTR_WORDS, env->out, sizeof(env->out));
+            }
+            if (!ok) {
+                break;
+            }
+            for (int e = 0; e < 4; e++) {
+                outer[e] = fbits(patch[e]);
+            }
+            inner[0] = fbits(patch[4]);
+            inner[1] = fbits(patch[5]);
+            tes_in = tcs_ptrs;
+            tes_n = nout;
+        } else {
+            for (int e = 0; e < 4; e++) {
+                outer[e] = fbits(r[M3D_TESS_OUTER + e]);
+            }
+            inner[0] = fbits(r[M3D_TESS_INNER]);
+            inner[1] = fbits(r[M3D_TESS_INNER + 1]);
+        }
+        tess_output to;
+        if (tess_generate(domain, spacing, cw, outer, inner, &to) != 0) {
+            HOS_LOGW(MOD, "tessellation mode %#x not supported", mode);
+            ok = 0;
+            break;
+        }
+        if (nv + to.ncoords > MAX_VERTICES) {
+            HOS_LOGW(MOD, "tessellation: more than %u vertices in one draw", MAX_VERTICES);
+            tess_free(&to);
+            break;
+        }
+        if (nv + to.ncoords > cap_v) {
+            uint32_t cap = cap_v ? 2 * cap_v : 1024;
+            cap = cap < nv + to.ncoords ? nv + to.ncoords : cap;
+            vertex *grown = realloc(tv, (size_t)cap * sizeof(*tv));
+            if (!grown) {
+                ok = 0;
+                tess_free(&to);
+                break;
+            }
+            tv = grown;
+            cap_v = cap;
+        }
+        if (ni + to.nindices > cap_i) {
+            uint32_t cap = cap_i ? 2 * cap_i : 4096;
+            cap = cap < ni + to.nindices ? ni + to.nindices : cap;
+            uint32_t *grown = realloc(tidx, (size_t)cap * sizeof(*tidx));
+            if (!grown) {
+                ok = 0;
+                tess_free(&to);
+                break;
+            }
+            tidx = grown;
+            cap_i = cap;
+        }
+        bind_cbufs(s, 2, env);
+        env->in_vertices = tes_in;
+        env->num_in_vertices = tes_n;
+        env->patch = patch;
+        env->invocation_id = 0;
+        uint32_t base = nv;
+        for (uint32_t c = 0; c < to.ncoords && ok; c++) {
+            memset(env->in, 0, sizeof(env->in));
+            memset(env->out, 0, sizeof(env->out));
+            env->in[0x2f0 / 4] = env->out[0x2f0 / 4] = ubits(to.coords[c].u);
+            env->in[0x2f4 / 4] = env->out[0x2f4 / 4] = ubits(to.coords[c].v);
+            if (shader_exec(pg->tes.prog, env, &bad) != 0) {
+                if (!st->shader_errors++) {
+                    HOS_LOGW(MOD,
+                             "tessellation evaluation shader stopped at instruction %#018" PRIx64,
+                             bad);
+                }
+                ok = 0;
+                break;
+            }
+            finish_vertex(&tv[nv++], env->out, xf);
+        }
+        for (uint32_t i = 0; i < to.nindices && ok; i++) {
+            tidx[ni++] = base + to.indices[i];
+        }
+        lines = to.lines;
+        tess_free(&to);
+    }
+    env->in_vertices = NULL;
+    env->num_in_vertices = 0;
+    env->patch = NULL;
+    free(tcs_out);
+    free(patch);
+    const vertex **prim = ok && ni ? malloc((size_t)ni * sizeof(*prim)) : NULL;
+    if (!prim) {
+        free(tv);
+        free(tidx);
+        return 0;
+    }
+    for (uint32_t k = 0; k < ni; k++) {
+        prim[k] = &tv[tidx[k]];
+    }
+    free(tidx);
+    *out_verts = tv;
+    *out_prim = prim;
+    *out_n = ni;
+    *out_lines = lines;
+    return 1;
+}
+
+/*
+ * The rectangle of the line width around segment a-b: two triangles over copies
+ * of the segment's ends, so attributes vary along the line only. No smoothing
+ * (coverage alpha) yet. Returns 0 for a segment without length.
+ */
+static int line_rect(const uint32_t *r, const vertex *a, const vertex *b, vertex q[4],
+                     frag_tri t[2]) {
+    uint32_t gx, gy;
+    gpu_ms_grid(r[M3D_MS_MODE], &gx, &gy);
+    float hw = fbits(r[M3D_LINE_WIDTH_ALIASED]) * 0.5f;
+    hw = hw > 0.5f ? hw : 0.5f;
+    float dx = b->win[0] - a->win[0], dy = b->win[1] - a->win[1];
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len == 0.0f) {
+        return 0;
+    }
+    /* the width is in pixels; window coordinates are in samples */
+    float nx = -dy / len * hw * (float)gx, ny = dx / len * hw * (float)gy;
+    const vertex *ends[4] = {a, a, b, b};
+    const float side[4] = {1, -1, -1, 1};
+    for (int c = 0; c < 4; c++) {
+        memcpy(&q[c], ends[c], sizeof(*q));
+        q[c].win[0] += side[c] * nx;
+        q[c].win[1] += side[c] * ny;
+    }
+    t[0] = (frag_tri){{&q[0], &q[1], &q[2]}, 1};
+    t[1] = (frag_tri){{&q[0], &q[2], &q[3]}, 1};
+    return 1;
 }
 
 static void draw_programs(const gpu_draw_state *s, uint32_t topology, const uint32_t *indices,
-                          uint32_t first, uint32_t count, uint32_t instance, const program *vsp,
-                          const program *fsp, gpu_draw_stats *st) {
+                          uint32_t first, uint32_t count, uint32_t instance, const programs *pg,
+                          gpu_draw_stats *st) {
     const uint32_t *r = s->r;
-    const program vs = *vsp, fs = *fsp;
+    const program vs = pg->vs, fs = pg->fs;
     targets ts;
     ts.n = r[M3D_CT_SELECT] & 0xF ? r[M3D_CT_SELECT] & 0xF : 1;
     ts.n = ts.n > 8 ? 8 : ts.n;
@@ -1304,9 +1547,12 @@ static void draw_programs(const gpu_draw_state *s, uint32_t topology, const uint
     bind_cbufs(s, 0, env);
     uint32_t gx, gy;
     gpu_ms_grid(r[M3D_MS_MODE], &gx, &gy);
-    float sx = fbits(r[M3D_VIEWPORT + 0]) * (float)gx, sy = fbits(r[M3D_VIEWPORT + 1]) * (float)gy;
-    float sz = fbits(r[M3D_VIEWPORT + 2]), tx = fbits(r[M3D_VIEWPORT + 3]) * (float)gx;
-    float ty = fbits(r[M3D_VIEWPORT + 4]) * (float)gy, tz = fbits(r[M3D_VIEWPORT + 5]);
+    const xform xf = {.sx = fbits(r[M3D_VIEWPORT + 0]) * (float)gx,
+                      .sy = fbits(r[M3D_VIEWPORT + 1]) * (float)gy,
+                      .sz = fbits(r[M3D_VIEWPORT + 2]),
+                      .tx = fbits(r[M3D_VIEWPORT + 3]) * (float)gx,
+                      .ty = fbits(r[M3D_VIEWPORT + 4]) * (float)gy,
+                      .tz = fbits(r[M3D_VIEWPORT + 5])};
     uint32_t nv = 0;
     for (uint32_t k = 0; k < count; k++) {
         if (reuse && reuse[indices[k] - vmin] >= 0) {
@@ -1337,14 +1583,7 @@ static void draw_programs(const gpu_draw_state *s, uint32_t topology, const uint
         }
         vertex *v = &verts[nv++];
         vp[k] = v;
-        memcpy(v->out, env->out, sizeof(v->out));
-        for (int c = 0; c < 4; c++) {
-            v->pos[c] = fbits(env->out[0x70 / 4 + c]);
-        }
-        v->inv_w = v->pos[3] != 0.0f ? 1.0f / v->pos[3] : 0.0f;
-        v->win[0] = v->pos[0] * v->inv_w * sx + tx;
-        v->win[1] = v->pos[1] * v->inv_w * sy + ty;
-        v->win[2] = v->pos[2] * v->inv_w * sz + tz;
+        finish_vertex(v, env->out, &xf);
         if (st->draws <= 1 && k < 4) {
             HOS_LOGT(MOD, "vertex %u: clip (%g %g %g %g) window (%g %g %g) out[0x80] (%g %g %g %g)",
                      first + k, v->pos[0], v->pos[1], v->pos[2], v->pos[3], v->win[0], v->win[1],
@@ -1354,76 +1593,113 @@ static void draw_programs(const gpu_draw_state *s, uint32_t topology, const uint
     }
     free(reuse);
 
-    /* Primitive assembly. Lines become rectangles of the line width around each
-     * segment, two triangles over copies of the segment's ends: attributes then vary
-     * along the line only. No smoothing (coverage alpha) yet. */
-    int line = topology == TOPO_LINES || topology == TOPO_LINE_LOOP || topology == TOPO_LINE_STRIP;
-    uint32_t nseg = topology == TOPO_LINES        ? count / 2
-                    : topology == TOPO_LINE_STRIP ? (count ? count - 1 : 0)
-                    : topology == TOPO_LINE_LOOP  ? (count > 1 ? count : 0)
-                                                  : 0;
-    uint32_t cap = line ? 2 * nseg : topology == TOPO_QUADS ? count / 4 * 2 : count;
-    frag_tri *tris = calloc(cap ? cap : 1, sizeof(*tris));
-    vertex *lv = line && nseg ? calloc(4 * (size_t)nseg, sizeof(*lv)) : NULL;
-    uint32_t nt = 0;
-    if (line && !lv) {
-        topology = ~0u;
+    /* Tessellation: patches become the generated triangles (or isoline segments). */
+    vertex *tverts = NULL;
+    const vertex **prim = vp;
+    uint32_t nprim = count;
+    if (topology == TOPO_PATCHES) {
+        const vertex **tprim = NULL;
+        int lines = 0;
+        nprim = 0;
+        if (!pg->tes.prog) {
+            HOS_LOGW(MOD, "patches without a tessellation evaluation shader");
+        } else if (tessellate(s, pg, vp, count, env, &xf, &tverts, &tprim, &nprim, &lines, st)) {
+            prim = tprim;
+            topology = lines ? TOPO_LINES : TOPO_TRIANGLES;
+        }
     }
-    switch (tris ? topology : ~0u) {
+
+    /* Primitive assembly: filled triangles into `tris`, line segments (and the
+     * triangles the polygon mode draws as lines, culled as triangles first) as pairs
+     * of ends in `segs`, then rectangles over `lv` for the segments. */
+    int line = topology == TOPO_LINES || topology == TOPO_LINE_LOOP || topology == TOPO_LINE_STRIP;
+    uint32_t nseg = topology == TOPO_LINES        ? nprim / 2
+                    : topology == TOPO_LINE_STRIP ? (nprim ? nprim - 1 : 0)
+                    : topology == TOPO_LINE_LOOP  ? (nprim > 1 ? nprim : 0)
+                                                  : 0;
+    uint32_t cap = line ? 1 : topology == TOPO_QUADS ? nprim / 4 * 2 : nprim;
+    frag_tri *tris = calloc(cap ? cap : 1, sizeof(*tris));
+    const vertex **segs = line && nseg ? calloc(2 * (size_t)nseg, sizeof(*segs)) : NULL;
+    vertex *lv = NULL;
+    uint32_t nt = 0, ns = 0;
+    switch (tris && (!line || !nseg || segs) ? topology : ~0u) {
     case TOPO_LINES:
     case TOPO_LINE_LOOP:
-    case TOPO_LINE_STRIP: {
-        float hw = fbits(r[M3D_LINE_WIDTH_ALIASED]) * 0.5f;
-        hw = hw > 0.5f ? hw : 0.5f;
+    case TOPO_LINE_STRIP:
         for (uint32_t k = 0; k < nseg; k++) {
-            const vertex *a = topology == TOPO_LINES ? vp[2 * k] : vp[k];
-            const vertex *b = topology == TOPO_LINES ? vp[2 * k + 1] : vp[(k + 1) % count];
-            float dx = b->win[0] - a->win[0], dy = b->win[1] - a->win[1];
-            float len = sqrtf(dx * dx + dy * dy);
-            if (len == 0.0f) {
-                continue;
-            }
-            /* the width is in pixels; window coordinates are in samples */
-            float nx = -dy / len * hw * (float)gx, ny = dx / len * hw * (float)gy;
-            vertex *q = &lv[4 * k];
-            const vertex *ends[4] = {a, a, b, b};
-            const float side[4] = {1, -1, -1, 1};
-            for (int c = 0; c < 4; c++) {
-                memcpy(&q[c], ends[c], sizeof(*q));
-                q[c].win[0] += side[c] * nx;
-                q[c].win[1] += side[c] * ny;
-            }
-            tris[nt++] = (frag_tri){{&q[0], &q[1], &q[2]}, 1};
-            tris[nt++] = (frag_tri){{&q[0], &q[2], &q[3]}, 1};
+            segs[2 * k] = topology == TOPO_LINES ? prim[2 * k] : prim[k];
+            segs[2 * k + 1] = topology == TOPO_LINES ? prim[2 * k + 1] : prim[(k + 1) % nprim];
         }
+        ns = nseg;
         break;
-    }
     case TOPO_TRIANGLES:
-        for (uint32_t k = 0; k + 2 < count; k += 3) {
-            tris[nt++] = (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}, 0};
+        for (uint32_t k = 0; k + 2 < nprim; k += 3) {
+            tris[nt++] = (frag_tri){{prim[k], prim[k + 1], prim[k + 2]}, 0};
         }
         break;
     case TOPO_STRIP:
-        for (uint32_t k = 0; k + 2 < count; k++) {
-            tris[nt++] = k & 1 ? (frag_tri){{vp[k + 1], vp[k], vp[k + 2]}, 0}
-                               : (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}, 0};
+        for (uint32_t k = 0; k + 2 < nprim; k++) {
+            tris[nt++] = k & 1 ? (frag_tri){{prim[k + 1], prim[k], prim[k + 2]}, 0}
+                               : (frag_tri){{prim[k], prim[k + 1], prim[k + 2]}, 0};
         }
         break;
     case TOPO_FAN:
-        for (uint32_t k = 1; k + 1 < count; k++) {
-            tris[nt++] = (frag_tri){{vp[0], vp[k], vp[k + 1]}, 0};
+        for (uint32_t k = 1; k + 1 < nprim; k++) {
+            tris[nt++] = (frag_tri){{prim[0], prim[k], prim[k + 1]}, 0};
         }
         break;
     case TOPO_QUADS: /* each quad as two triangles sharing its first vertex */
-        for (uint32_t k = 0; k + 3 < count; k += 4) {
-            tris[nt++] = (frag_tri){{vp[k], vp[k + 1], vp[k + 2]}, 0};
-            tris[nt++] = (frag_tri){{vp[k], vp[k + 2], vp[k + 3]}, 0};
+        for (uint32_t k = 0; k + 3 < nprim; k += 4) {
+            tris[nt++] = (frag_tri){{prim[k], prim[k + 1], prim[k + 2]}, 0};
+            tris[nt++] = (frag_tri){{prim[k], prim[k + 2], prim[k + 3]}, 0};
         }
+        break;
+    case TOPO_PATCHES: /* nothing generated */
         break;
     default:
         HOS_LOGW(MOD, "topology %u not supported yet", topology);
         break;
     }
+    /* Polygon mode line (0x1B01, by facing): a triangle's three edges instead of
+     * its area. Point mode (0x1B00) still fills. */
+    if (nt && (r[M3D_POLYGON_MODE_FRONT] == 0x1B01 || r[M3D_POLYGON_MODE_BACK] == 0x1B01)) {
+        const vertex **esegs = calloc(6 * (size_t)nt, sizeof(*esegs));
+        if (esegs) {
+            uint32_t kept = 0;
+            for (uint32_t k = 0; k < nt; k++) {
+                const vertex *const *v = tris[k].v;
+                int front = tri_front(r, v[0], v[1], v[2]);
+                if (front < 0 || culled(r, front)) {
+                    continue;
+                }
+                if (r[front ? M3D_POLYGON_MODE_FRONT : M3D_POLYGON_MODE_BACK] != 0x1B01) {
+                    tris[kept++] = tris[k];
+                    continue;
+                }
+                for (int e = 0; e < 3; e++) {
+                    esegs[2 * ns] = v[e];
+                    esegs[2 * ns + 1] = v[(e + 1) % 3];
+                    ns++;
+                }
+            }
+            nt = kept;
+            free(segs);
+            segs = esegs;
+        }
+    }
+    if (ns) {
+        lv = calloc(4 * (size_t)ns, sizeof(*lv));
+        frag_tri *grown = realloc(tris, (nt + 2 * (size_t)ns) * sizeof(*tris));
+        if (lv && grown) {
+            tris = grown;
+            for (uint32_t k = 0; k < ns; k++) {
+                nt += 2 * line_rect(r, segs[2 * k], segs[2 * k + 1], &lv[4 * k], &tris[nt]);
+            }
+        } else if (grown) {
+            tris = grown;
+        }
+    }
+    free(segs);
 
     /* The fragment stage. */
     bind_cbufs(s, 4, env);
@@ -1474,6 +1750,10 @@ static void draw_programs(const gpu_draw_state *s, uint32_t topology, const uint
     free(tris);
     free(lv);
     free(tc);
+    if (prim != vp) {
+        free(prim);
+    }
+    free(tverts);
     free(vp);
     free(verts);
     free(env);

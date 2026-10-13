@@ -5,19 +5,23 @@ samples an RGBA8 texture with nearest/clamp and with bilinear/repeat, and a
 BC1-compressed texture, through deko3d's image and sampler descriptors; it
 matches a reference sampler (`check_deko3d_texture`, worst difference 1),
 alongside the triangle, cube and depth/blend scenes. M0, M1, M3 and M4 are
-done, all on the CPU. Next: the Vulkan backend (M2) for speed, and M5 as real
+done, all on the CPU. Tessellation (2026-10-13) completes the deko_examples:
+control and evaluation shaders, the primitive generator for the three domains
+and the line polygon mode, checked against the specification's rings
+(`check_deko3d_tess`). Next: the Vulkan backend (M2) for speed, and M5 as real
 homebrew asks (mipmaps, more formats, compute).
 
-Real homebrew (2026-10-12): devkitPro's `deko_examples`, unmodified apart from
-a test-only selector in `main.cpp`, render 8 of 9 examples: scissored clears,
-the triangle, the cube, the textured cube, 4x multisampling with its 2D-engine
-resolve, the sRGB lit teapot (indexed mesh), deferred shading (three render
-targets, `texelFetch` from the G-buffer) and a compute kernel writing the
-vertices of a wide line strip. Missing: tessellation (05). Line smoothing
-(coverage alpha) is not done; lines are rectangles of the line width. They
-are checked by eye, not by a test, since
-the examples need devkitPro to build. At 1280x720 on the CPU under qemu they
-run at a few frames per second, 4x MSAA well below that: M2 is what fixes it.
+Real homebrew (2026-10-13): devkitPro's `deko_examples`, unmodified apart from
+a test-only selector in `main.cpp`, render all 9 examples: scissored clears,
+the triangle, the cube, the textured cube, the tessellated triangle in line
+polygon mode, 4x multisampling with its 2D-engine resolve, the sRGB lit teapot
+(indexed mesh), deferred shading (three render targets, `texelFetch` from the
+G-buffer) and a compute kernel writing the vertices of a wide line strip. Line
+and polygon smoothing (coverage alpha) are not done; lines are rectangles of
+the line width. Apart from the tessellation example, whose rings a test checks,
+they are checked by eye, since the examples need devkitPro to build. At
+1280x720 on the CPU under qemu they run at a few frames per second, 4x MSAA
+well below that: M2 is what fixes it.
 
 M2 only pays off on native ARM64 with a GPU: under qemu-user (WSL2) the
 process cannot load the host's x86-64 Vulkan driver, and lavapipe would be
@@ -270,6 +274,34 @@ Each point below cost a failed run and is now in `nvgpu.c`:
   used: `SSY`/`SYNC` (and `PBK`/`BRK`, `PCNT`/`CONT`), `RRO` ahead of `MUFU`,
   `F2I`/`I2F`, and `TLDS` for `texelFetch`. envydis decodes none of `SYNC`
   or `TLDS`; their fields match the TEXS layout.
+
+## What tessellation taught
+
+- A patch draw is topology 14 with the patch size at 0x373; deko3d binds the
+  control and evaluation shaders as pipeline types 2 and 3 and writes the
+  evaluation shader's layout (domain, spacing, winding, from its `.dksh`
+  header) to 0x0c8. Without a control shader the levels sit at 0x0c9-0x0ce.
+- The stages see primitives, not vertices: an attribute load names its input
+  vertex in a register (`ld b128 r0 a[0x70] r4`), `st p` writes the per-patch
+  space where the levels live (outer at 0x0, inner at 0x10), and the
+  evaluation shader reads its coordinate with `ld o` at 0x2f0. The compiler
+  turns `gl_in[i]` into `(info >> 16 & 0xff) * (info & 0xff) + i` over
+  `$invocation_info` and `ISBERD`; with one primitive at a time, slot 0, the
+  system register reads 0 and `ISBERD` is the identity, and the index is `i`.
+- That arithmetic brought `XMAD` (the compiler's 32-bit multiply is three of
+  them over 16-bit halves, `.MRG` and `.PSL.CBCC` stitching the partial
+  products) and `BFE`. The `XMAD` test checks the three-instruction sequence
+  computes a * b + c; the modes beyond those the sequence uses follow the same
+  reading of the opcode and are less certain.
+- The primitive generator follows the OpenGL rules: for triangles, concentric
+  rings with parallel edges and every segment one n-th of an edge long, the
+  outer ring cut by the outer levels, rings stitched by walking both edges;
+  quads as an outer ring around an inner grid; isolines as line segments.
+  Fractional spacing rounds the segment count up but places segments evenly,
+  where the hardware shrinks two of them.
+- Line polygon mode (0x36B/0x36C = 0x1B01) draws a triangle's three edges
+  through the line path, after culling the triangle itself; the example's
+  polygon smoothing (0x36D) is not done, so its lines are aliased rectangles.
 
 ## What compute taught
 
