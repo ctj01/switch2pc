@@ -16,7 +16,7 @@
 #define MOD "ns"
 
 /* ns results: the apps only need a failure to fall back on. */
-#define NS_RESULT_NOT_FOUND HOS_RESULT_MAKE(16, 8)
+#define NS_RESULT_NOT_FOUND HOS_RESULT_MAKE(16, 8) /* ns module; the description is a guess */
 
 static const hos_ipc_buffer *out_buffer(const hos_ipc_ctx *ctx) {
     for (uint32_t i = 0; i < ctx->num_b; i++) {
@@ -50,9 +50,9 @@ static int64_t space_size(int free_space) {
 static hos_result app_manager_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
     switch (ctx->cmd) {
     case 0: /* ListApplicationRecord(s32 offset, out buffer) -> s32 count */
-    case 1: /* GenerateApplicationRecordCount -> s32 */ {
-        int32_t n = 0;
-        hos_ipc_out_write(ctx, &n, 4);
+    case 1: /* GenerateApplicationRecordCount -> s64 (8 zero bytes read as s32 too) */ {
+        int64_t n = 0;
+        hos_ipc_out_write(ctx, &n, 8);
         return HOS_RESULT_SUCCESS;
     }
     case 47:   /* GetTotalSpaceSize(u8 storage) -> s64 */

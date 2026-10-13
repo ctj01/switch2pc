@@ -161,11 +161,11 @@ TEST(ipc_account_ns_pdm) {
     uint64_t id = 0x0100000000010000ull;
     req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 4, .data = &id, .data_size = 8};
     ASSERT_EQ(ipc_call(pdm, &req, &resp), 0); /* QueryPlayStatisticsByApplicationId */
-    ASSERT_EQ(resp.data_words, 0x48 / 4);
+    ASSERT_EQ(resp.data_words, 0x28 / 4);
     uint64_t echoed;
     memcpy(&echoed, resp.data, 8);
     ASSERT_EQ(echoed, id);
-    ASSERT_EQ(resp.data[2 * 8 + 2], 0); /* total_launches */
+    ASSERT_EQ(resp.data[0x24 / 4], 0); /* total_launches, the last word */
     ASSERT_EQ(call(0x16, pdm, 0, 0, 0).x[0], 0);
     ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
 }

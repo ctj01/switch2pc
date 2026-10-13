@@ -11,7 +11,9 @@
 
 #define MOD "pdm"
 
-#define PLAY_STATISTICS_SIZE 0x48 /* PdmPlayStatistics, [10.0.0+] layout */
+/* PdmPlayStatisticsV1, the layout up to 15.0.1; we report 11.0.1 (set:sys), so libnx
+ * reads this one and converts it: u64 program_id, then eight u32 (total_launches last). */
+#define PLAY_STATISTICS_SIZE 0x28
 
 static hos_result pdm_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
     switch (ctx->cmd) {
