@@ -106,6 +106,61 @@ TEST(ipc_sm_get_service_cmif_and_tipc) {
     ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
 }
 
+static uint32_t get_service(uint32_t sm, const char *name) {
+    ipc_response resp;
+    uint64_t n = service_name(name);
+    ipc_request req = {.type = IPC_TYPE_REQUEST, .cmd = 1, .data = &n, .data_size = 8};
+    if (ipc_call(sm, &req, &resp) != 0 || resp.num_move != 1) {
+        return 0;
+    }
+    return resp.move_handles[0];
+}
+
+/* The shared font: a shared memory handle, a loaded state and one font per type
+ * (its size depends on whether the host has a TrueType font to serve). */
+TEST(ipc_pl_shared_font) {
+    init_once();
+    uint32_t sm = connect_sm();
+    uint32_t pl = get_service(sm, "pl:u");
+    ASSERT_TRUE(pl != 0);
+    ipc_response resp;
+    ipc_request req = {.type = IPC_TYPE_REQUEST, .cmd = 4}; /* GetSharedMemoryNativeHandle */
+    ASSERT_EQ(ipc_call(pl, &req, &resp), 0);
+    ASSERT_EQ(resp.num_copy, 1);
+    ASSERT_TRUE(resp.copy_handles[0] != 0);
+    uint32_t type = 0;
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 0, .data = &type, .data_size = 4};
+    ASSERT_EQ(ipc_call(pl, &req, &resp), 0); /* RequestLoad */
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 1, .data = &type, .data_size = 4};
+    ASSERT_EQ(ipc_call(pl, &req, &resp), 0); /* GetLoadState */
+    ASSERT_EQ(resp.data[0], 1);
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 2, .data = &type, .data_size = 4};
+    ASSERT_EQ(ipc_call(pl, &req, &resp), 0); /* GetSize */
+    uint32_t size = resp.data[0];
+    ASSERT_TRUE(size < 0x1100000);
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 3, .data = &type, .data_size = 4};
+    ASSERT_EQ(ipc_call(pl, &req, &resp), 0); /* GetSharedMemoryAddressOffset */
+    ASSERT_EQ(resp.data[0], 0);
+    hos_svc_regs hr = call(0x01, 0, 0x200000, 0, 0);
+    ASSERT_EQ(hr.x[0], 0);
+    uint32_t *types = (uint32_t *)hr.x[1];
+    uint64_t lang = 0;
+    req = (ipc_request){.type = IPC_TYPE_REQUEST,
+                        .cmd = 5, /* GetSharedFontInOrderOfPriority */
+                        .data = &lang,
+                        .data_size = 8,
+                        .b_buf = types,
+                        .b_size = 6 * 4};
+    ASSERT_EQ(ipc_call(pl, &req, &resp), 0);
+    ASSERT_EQ(resp.data[0] & 0xFF, 1);
+    ASSERT_EQ(resp.data[1], size ? 6u : 0u);
+    if (size) {
+        ASSERT_EQ(types[5], 5);
+    }
+    ASSERT_EQ(call(0x16, pl, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
+}
+
 static size_t make_log_packet(uint8_t *out, const char *text) {
     size_t n = strlen(text);
     memset(out, 0, 0x18);
