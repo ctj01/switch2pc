@@ -7,6 +7,7 @@
  * implementation over the host's TLS library goes behind the same objects.
  */
 
+#include <pthread.h>
 #include <string.h>
 
 #include "common/hos_log.h"
@@ -26,9 +27,13 @@ typedef struct ssl_connection {
     uint32_t verify_option;
     uint32_t io_mode;
     uint32_t session_cache_mode;
+    uint32_t renegotiation_mode;
     char hostname[HOSTNAME_MAX];
 } ssl_connection;
 
+/* The table and the count are shared by the IPC thread and the destroy calls,
+ * which hos_ipc_object_unref makes outside the IPC lock. */
+static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static ssl_connection g_connections[MAX_CONNECTIONS];
 static uint32_t g_context_count;
 
@@ -115,8 +120,14 @@ static hos_result connection_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
         hos_ipc_out_write(ctx, &c->session_cache_mode, 4);
         return HOS_RESULT_SUCCESS;
     case 19: /* FlushSessionCache */
+        return HOS_RESULT_SUCCESS;
     case 20: /* SetRenegotiationMode(u32) */
-    case 22: /* GetRenegotiationMode? */
+        hos_ipc_in_read(ctx, 0, &c->renegotiation_mode, 4);
+        return HOS_RESULT_SUCCESS;
+    case 21: /* GetRenegotiationMode -> u32 */
+        hos_ipc_out_write(ctx, &c->renegotiation_mode, 4);
+        return HOS_RESULT_SUCCESS;
+    case 22: /* SetOption(u32 option, bool value) */
         return HOS_RESULT_SUCCESS;
     default:
         return hos_ipc_unimplemented(obj, ctx);
@@ -125,7 +136,9 @@ static hos_result connection_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
 
 static void connection_destroy(hos_object *obj) {
     ssl_connection *c = obj->ctx;
+    pthread_mutex_lock(&g_lock);
     c->used = 0;
+    pthread_mutex_unlock(&g_lock);
 }
 
 static const hos_service_class g_connection_class = {
@@ -149,30 +162,33 @@ static hos_result context_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
     }
     case 2: /* CreateConnection -> ISslConnection */ {
         ssl_connection *c = NULL;
+        hos_object *o = NULL;
+        pthread_mutex_lock(&g_lock);
         for (int i = 0; i < MAX_CONNECTIONS; i++) {
             if (!g_connections[i].used) {
                 c = &g_connections[i];
-                memset(c, 0, sizeof(*c));
-                c->used = 1;
-                c->sockfd = -1;
                 break;
             }
         }
-        if (!c) {
-            return HOS_KERNEL_OUT_OF_RESOURCE;
+        if (c) {
+            memset(c, 0, sizeof(*c));
+            c->sockfd = -1;
+            o = hos_ipc_object_new(&g_connection_class, c);
+            c->used = o != NULL;
         }
-        hos_object *o = hos_ipc_object_new(&g_connection_class, c);
+        pthread_mutex_unlock(&g_lock);
         if (!o) {
-            c->used = 0;
             return HOS_KERNEL_OUT_OF_RESOURCE;
         }
         return hos_ipc_return_object(ctx, o);
     }
     case 3: /* GetConnectionCount -> u32 */ {
         uint32_t n = 0;
+        pthread_mutex_lock(&g_lock);
         for (int i = 0; i < MAX_CONNECTIONS; i++) {
             n += g_connections[i].used ? 1 : 0;
         }
+        pthread_mutex_unlock(&g_lock);
         hos_ipc_out_write(ctx, &n, 4);
         return HOS_RESULT_SUCCESS;
     }
@@ -190,9 +206,11 @@ static hos_result context_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
 
 static void context_destroy(hos_object *obj) {
     (void)obj;
+    pthread_mutex_lock(&g_lock);
     if (g_context_count) {
         g_context_count--;
     }
+    pthread_mutex_unlock(&g_lock);
 }
 
 static const hos_service_class g_context_class = {
@@ -205,13 +223,24 @@ static const hos_service_class g_context_class = {
 
 static hos_result ssl_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
     switch (ctx->cmd) {
-    case 0:   /* CreateContext(u32 version, u64 pid, pid) -> ISslContext */
-    case 100: /* CreateContextForSystem */
+    case 0: /* CreateContext(u32 version, u64 pid, pid) -> ISslContext */
+    case 100: /* CreateContextForSystem */ {
+        hos_object *o = hos_ipc_object_new(&g_context_class, NULL);
+        if (!o) {
+            return HOS_KERNEL_OUT_OF_RESOURCE;
+        }
+        pthread_mutex_lock(&g_lock);
         g_context_count++;
-        return hos_ipc_return_object(ctx, hos_ipc_object_new(&g_context_class, NULL));
-    case 1: /* GetContextCount -> u32 */
-        hos_ipc_out_write(ctx, &g_context_count, 4);
+        pthread_mutex_unlock(&g_lock);
+        return hos_ipc_return_object(ctx, o);
+    }
+    case 1: /* GetContextCount -> u32 */ {
+        pthread_mutex_lock(&g_lock);
+        uint32_t n = g_context_count;
+        pthread_mutex_unlock(&g_lock);
+        hos_ipc_out_write(ctx, &n, 4);
         return HOS_RESULT_SUCCESS;
+    }
     case 2: /* GetCertificates(ids buffer; out buffer) -> u32 count */
     case 3: /* GetCertificateBufSize(ids buffer) -> u32 */ {
         uint32_t zero = 0;
