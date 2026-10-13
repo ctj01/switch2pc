@@ -431,42 +431,6 @@
    "build_seconds": 34
   },
   {
-   "name": "jksv",
-   "title": "JKSV",
-   "repo": "J-D-K/JKSV",
-   "ref": "d39fd80a208b7c802d12edb12f362506a0addb47",
-   "licence": "GPL-3.0",
-   "category": "utility",
-   "notes": "Save backup manager (its own SDL2-based UI, acc, ns, pdm); ref is the 12/02/2025 release, pinned by sha because the tag name contains slashes.",
-   "level": "boots",
-   "frames": 0,
-   "seconds": 0.0,
-   "exit_status": 0,
-   "blockers": [
-    {
-     "key": "service:acc:su",
-     "line": "[s2pc sm   ] W: GetService(acc:su): not registered"
-    }
-   ],
-   "crash": null,
-   "log_tail": [
-    "[s2pc hosrun] I: jksv.nro: JKSV by JK",
-    "[s2pc hosrun] I: romfs: 237772 bytes in the NRO's assets",
-    "[s2pc hosrun] I: jksv.nro at 0x8000000 (0x994000 bytes)",
-    "[s2pc hosrun] I: 1 module, 403 patches (30 svc, 17 counter), 0 relocations (0 unresolved, 0 relr applied, 21333 relr left to the module)",
-    "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.MYywQbOxpo/input.txt: 1 steps",
-    "[s2pc sm   ] W: GetService(acc:su): not registered",
-    "[s2pc sync ] W: WaitSynchronization: handle 0 is not waitable",
-    "[s2pc svc  ] W: UnmapMemory(0 -> 0, 0x1000): Invalid argument",
-    "[s2pc sync ] W: WaitSynchronization: handle 0 is not waitable",
-    "[s2pc svc  ] W: UnmapMemory(0 -> 0, 0x1000): Invalid argument",
-    "[s2pc applet] I: ISelfController::Exit"
-   ],
-   "thumbnail": null,
-   "build_seconds": 233
-  },
-  {
    "name": "switchident",
    "title": "SwitchIdent",
    "repo": "joel16/SwitchIdent",
@@ -638,39 +602,6 @@
    "thumbnail": "docs/compat/mgba.png",
    "build_seconds": 75,
    "frame": "frame_0090.ppm"
-  },
-  {
-   "name": "open-supaplex",
-   "title": "OpenSupaplex",
-   "repo": "sergiou87/open-supaplex",
-   "ref": "v7.2.2",
-   "licence": "GPL-3.0 (reimplementation); game resources are the freeware Supaplex release",
-   "category": "game",
-   "notes": "Supaplex reimplemented in C over SDL2 (stock Switch SDL2); its data (released as freeware by its authors) ships in the repository and is copied to sdmc:/switch/OpenSupaplex. A presses through the title screens.",
-   "level": "boots",
-   "frames": 1,
-   "seconds": 0.2,
-   "exit_status": 0,
-   "blockers": [
-    {
-     "key": "service:audren:u",
-     "line": "[s2pc sm   ] W: GetService(audren:u): not registered"
-    }
-   ],
-   "crash": null,
-   "log_tail": [
-    "[s2pc hosrun] I: open-supaplex.nro: OpenSupaplex by sergiou87",
-    "[s2pc hosrun] I: open-supaplex.nro at 0x8000000 (0x913000 bytes)",
-    "[s2pc hosrun] I: 1 module, 259 patches (30 svc, 17 counter), 0 relocations (0 unresolved, 0 relr applied, 18533 relr left to the module)",
-    "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.DdNcrPcPPU/input.txt: 5 steps",
-    "[s2pc sm   ] W: GetService(audren:u): not registered",
-    "[s2pc draw ] I: fragment stage on 4 threads",
-    "[s2pc applet] I: ISelfController::Exit",
-    "[s2pc vi   ] I: frames presented: 1"
-   ],
-   "thumbnail": null,
-   "build_seconds": 9
   },
   {
    "name": "spacenx",

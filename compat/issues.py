@@ -13,6 +13,13 @@ implemented and how to check a fix. Issues are found again by the hidden marker
 `<!-- compat:<key> -->` in their body: an existing one is updated, not
 duplicated, and closed with a comment once no app hits its blocker any more.
 
+Blockers in system services that hold keys or manage installed content
+(DENIED below: spl, set:cal, es, fsp-pr, ...) never get an issue: implementing
+them is out of the project's scope. An issue is closed only after a complete
+run in which every app that hit its blocker last time ran again and got past a
+crash; a partial or broken run closes nothing. Issues closed as "not planned"
+stay closed, and labels a maintainer added are kept.
+
 The dry run makes no change and writes the issues it would create, update or
 close to a markdown file. GITHUB_TOKEN and GITHUB_REPOSITORY (owner/repo) come
 from the environment, as in Actions. Standard library only.
@@ -22,6 +29,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -29,6 +37,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MARKER = "<!-- compat:{} -->"
 LABEL = "compat"
 EASY_LABEL = "good first issue"
+MAX_CREATE = 30  # per run: a first run on a long list would otherwise hit GitHub's rate limits
+
+# Out of scope: services that hold or use the console's keys, certificates or
+# tickets, or that manage installed content and processes.
+DENIED = re.compile(r"^service:(spl(:\w*)?|set:cal|es|fsp-(pr|ldr|srv-pr)|pm:\w+|ldr:\w+|ncm|lr|"
+                    r"csrng:s|manu)$")
 
 # Which shim library a missing service most likely belongs in.
 SERVICE_HOME = {
@@ -40,7 +54,7 @@ SERVICE_HOME = {
     "audren:u": "hos_audio", "hwopus": "hos_audio", "audin:u": "hos_audio",
     "irs": "hos_input", "nfp:user": "hos_input", "hid:sys": "hos_input", "ahid:hdr": "hos_input",
     "nvdrv:a": "hos_gpu", "nvdrv:s": "hos_gpu", "vi:m": "hos_gpu", "vi:s": "hos_gpu",
-    "fsp-ldr": "hos_fs", "fsp-pr": "hos_fs", "usb:hs": "hos_os", "spl:": "hos_os",
+    "usb:hs": "hos_os",
 }
 
 
@@ -144,12 +158,31 @@ def describe(key, classes):
 # ---- issue text ------------------------------------------------------------------------
 
 def collect(results):
-    """key -> [(app result, log line)], first-in-time blockers first within an app."""
+    """key -> [(app result, log line)], first-in-time blockers first within an app.
+    Out-of-scope blockers are left out."""
     by_key = {}
     for app in results["apps"]:
         for i, b in enumerate(app.get("blockers", [])):
+            if DENIED.match(b["key"]):
+                continue
             by_key.setdefault(b["key"], []).append((app, b["line"], i == 0))
     return by_key
+
+
+def all_app_names():
+    try:
+        return {a["name"] for a in json.load(open(os.path.join(ROOT, "compat/apps.json")))["apps"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return set()
+
+
+def safe_to_close(key, old_state, levels, complete):
+    """A blocker that disappeared is fixed only if the run was complete and every app that
+    hit it before ran again without failing to build or crashing."""
+    prev = (old_state.get(key) or {}).get("apps")
+    if not complete or not prev:
+        return False
+    return all(levels.get(name) not in (None, "build-failed", "crash") for name in prev)
 
 
 def title_of(key, hits):
@@ -161,10 +194,11 @@ def title_of(key, hits):
 def body_of(key, hits, results, classes):
     kind, what, where, _ = describe(key, classes)
     first = sum(1 for _, _, f in hits if f)
+    # nothing that changes from night to night (dates, commits): the body is only
+    # rewritten when the apps or log lines change
     lines = [f"**Blocker** `{key}`, hit by {len(hits)} app{'s' if len(hits) != 1 else ''} in the "
-             f"nightly compatibility run of {results.get('generated_at', '')} "
-             f"(switch2pc {results.get('switch2pc_commit', '')}); the first blocker in "
-             f"{first} of them.", "", "### What it is", "", what, "", "### Apps that stop at it", ""]
+             f"nightly compatibility run; the first blocker in {first} of them.", "",
+             "### What it is", "", what, "", "### Apps that stop at it", ""]
     for app, line, is_first in hits:
         repo = app.get("repo", "")
         link = f"https://github.com/{repo}/tree/{app.get('ref', '')}" if repo and "://" not in repo else repo
@@ -250,6 +284,17 @@ def main():
     results = json.load(open(args.results))
     classes = ipc_classes()
     by_key = collect(results)
+    old_state = {}
+    if args.state and os.path.exists(args.state):
+        try:
+            old_state = json.load(open(args.state))
+        except ValueError:
+            old_state = {}
+    levels = {a["name"]: a.get("level") for a in results["apps"]}
+    expected = all_app_names()
+    complete = bool(expected) and expected <= set(levels)
+    if not complete:
+        log(f"partial run ({len(levels)} of {len(expected)} apps): nothing will be closed")
     ranked = sorted(by_key.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     gh = GitHub(args.repo, token) if token else None
@@ -269,6 +314,8 @@ def main():
         issue = existing.get(key)
         if not issue:
             plan.append(("create", key, title, body, labels, None))
+        elif issue["state"] != "open" and issue.get("state_reason") == "not_planned":
+            plan.append(("keep", key, title, body, labels, issue))  # a maintainer decided
         elif issue["state"] != "open":
             plan.append(("reopen", key, title, body, labels, issue))
         elif issue["title"] != title or (issue.get("body") or "").strip() != body.strip():
@@ -277,7 +324,12 @@ def main():
             plan.append(("keep", key, title, body, labels, issue))
     for key, issue in existing.items():
         if key not in by_key and issue["state"] == "open":
-            plan.append(("close", key, issue["title"], "", [], issue))
+            if DENIED.match(key):
+                continue
+            if safe_to_close(key, old_state, levels, complete):
+                plan.append(("close", key, issue["title"], "", [], issue))
+            else:
+                plan.append(("keep", key, issue["title"], "", [], issue))
 
     if args.dry_run:
         out = [f"# Compatibility issues: dry run", "",
@@ -304,13 +356,22 @@ def main():
         sys.exit("GITHUB_TOKEN is not set (use --dry-run to preview)")
     gh.ensure_labels()
     state = {}
+    created = 0
     for action, key, title, body, labels, issue in plan:
         if action == "create":
+            if created >= MAX_CREATE:
+                log(f"create limit reached; {key} waits for the next run")
+                continue
             issue = gh.call("POST", "/issues", {"title": title, "body": body, "labels": labels})
+            created += 1
+            time.sleep(2)  # GitHub's secondary rate limit on content creation
             log(f"created #{issue['number']} {title}")
         elif action in ("update", "reopen"):
+            kept = {lb["name"] for lb in issue.get("labels", [])}  # keep what maintainers added
             issue = gh.call("PATCH", f"/issues/{issue['number']}",
-                            {"title": title, "body": body, "labels": labels, "state": "open"})
+                            {"title": title, "body": body, "labels": sorted(kept | set(labels)),
+                             "state": "open"})
+            time.sleep(1)
             log(f"{action}d #{issue['number']} {title}")
         elif action == "close":
             gh.call("POST", f"/issues/{issue['number']}/comments",
@@ -320,7 +381,10 @@ def main():
             issue = gh.call("PATCH", f"/issues/{issue['number']}", {"state": "closed", "state_reason": "completed"})
             log(f"closed #{issue['number']} {title}")
         if key in by_key:
-            state[key] = {"number": issue["number"], "url": issue["html_url"], "state": issue["state"]}
+            state[key] = {"number": issue["number"], "url": issue["html_url"], "state": issue["state"],
+                          "apps": sorted({a["name"] for a, _, _ in by_key[key]})}
+        elif action == "keep" and key in old_state:
+            state[key] = old_state[key]  # not seen this run and not safely closable: remember it
     if args.state:
         with open(args.state, "w") as f:
             json.dump(state, f, indent=1, sort_keys=True)

@@ -33,10 +33,18 @@ command or kernel call).
    `compat/history.json` (one point per day), one frame per app becomes a PNG
    thumbnail in `docs/compat/`, and `scripts/gen_status.py` regenerates
    `docs/status.html`.
-4. On `main` the results, thumbnails and page are committed (so GitHub Pages
-   updates) and `compat/issues.py` creates, updates or closes the issues. On any
-   other ref the results are only uploaded as the `compat-results` artifact and
-   the issue script writes `compat/issues_preview.md` instead.
+   That job runs third-party code natively, so it has a read-only token and no
+   credentials on disk; everything leaves as the `compat-results` artifact,
+   with `build/compat/issues_preview.md` (what the issue script would do).
+4. On `main`, for a complete scheduled run whose builds all completed, a
+   separate `publish` job with write access takes the artifact in as data
+   (`compat/publish.py` checks the JSON, the app names and the thumbnails,
+   and nothing else is copied), regenerates the page with the repository's
+   own `scripts/gen_status.py`, keeps the issues with `compat/issues.py` and
+   commits. A `workflow_dispatch` run of a few apps publishes nothing.
+   Blockers in key-holding or content-management services (`spl`, `set:cal`,
+   `es`, `fsp-pr`, ...) never get an issue, and an issue is closed only when
+   every app that hit it ran again and got past a crash.
 
 Every app has a timeout: hosrun is killed 60 s after the exit request was due,
 and the whole run is bounded by the job's `timeout-minutes`.
@@ -167,3 +175,5 @@ compat/issues.py --results /tmp/results.json --dry-run /tmp/issues.md
 | pplay | needs its own FFmpeg build (ffmpeg.sh) and libsmb2 from source, like NXMP |
 | NoiES v1.2 | written against the pre-4.0 libnx hid API (KEY_A ...), does not build with current libnx |
 | NX-Activity-Log v1.4.0 | its SimpleIniParser submodule points at a repository that no longer exists |
+| JKSV | save manager that also injects save data into other titles; kept out to stay clear of rule 4 |
+| OpenSupaplex | no licence in the repository, and its game resources are "freeware of their original authors" with no grant to redistribute, which CI caching and thumbnails would do |

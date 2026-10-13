@@ -5,8 +5,6 @@
 name: compat
 
 on:
-  push:
-    branches: [compat-nightly]   # temporary: exercise the pipeline while it is developed on this branch
   schedule:
     - cron: '0 3 * * *'
   workflow_dispatch:
@@ -31,7 +29,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: gen
-        run: echo "apps=$(python3 compat/matrix.py ${{ inputs.apps }})" >> "$GITHUB_OUTPUT"
+        env:
+          APPS: ${{ inputs.apps }}   # through the environment, never into the script text
+        run: |
+          read -r -a names <<< "$APPS"
+          echo "apps=$(python3 compat/matrix.py "${names[@]}")" >> "$GITHUB_OUTPUT"
 
   # One job per app in the devkitPro container. A build failure is a result
   # (build.json says so), never a failed job; the cache is saved only for a
@@ -72,21 +74,21 @@ jobs:
           path: build/compat/${{ matrix.app.name }}
           retention-days: 3
 
-  # Build switch2pc natively, run every app, write the results. On main the
-  # results, thumbnails and the regenerated status page are committed so GitHub
-  # Pages updates and one issue per blocker is kept; elsewhere they are artifacts.
+  # Build switch2pc natively and run every app. The apps are third-party code
+  # running natively on this runner, so this job can write nothing: read-only
+  # token, no credentials left in .git/config. Results leave as an artifact.
   run:
     needs: build
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 150
     permissions:
-      contents: write
-      issues: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # the status page's history walks every commit
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           path: build/compat
@@ -100,15 +102,8 @@ jobs:
             --results compat/results.json --history compat/history.json --thumbs docs/compat \
             --markdown build/compat/summary.md
           cat build/compat/summary.md >> "$GITHUB_STEP_SUMMARY"
-      - name: Issues (one per blocker; dry run off main)
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          if [ "${{ github.ref }}" = refs/heads/main ]; then
-            python3 compat/issues.py --results compat/results.json --state compat/issues.json
-          else
-            python3 compat/issues.py --results compat/results.json --dry-run compat/issues_preview.md
-          fi
+      - name: Issues preview
+        run: python3 compat/issues.py --results compat/results.json --dry-run build/compat/issues_preview.md
       - name: Status page
         run: python3 scripts/gen_status.py
       - uses: actions/upload-artifact@v4
@@ -117,22 +112,55 @@ jobs:
           path: |
             compat/results.json
             compat/history.json
-            compat/issues_preview.md
-            compat/issues.json
             docs/compat
             docs/status.html
             build/compat/summary.md
+            build/compat/issues_preview.md
             build/compat/runs/*/hosrun.log
           retention-days: 30
           if-no-files-found: ignore
-      - name: Commit results
-        if: github.ref == 'refs/heads/main'
+
+  # Publish a complete nightly run on main: results and thumbnails are checked
+  # as data, the page is regenerated here from them, and one issue per blocker
+  # is kept. A partial run (workflow_dispatch with apps) or one whose builds did
+  # not all complete publishes nothing.
+  publish:
+    needs: [build, run]
+    if: ${{ github.ref == 'refs/heads/main' && inputs.apps == '' && needs.build.result == 'success' && needs.run.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: compat-results
+          path: ${{ runner.temp }}/results
+      - name: Take the results in as data
+        run: python3 compat/publish.py --from "$RUNNER_TEMP/results"
+      - name: Issues (one per blocker)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 compat/issues.py --results compat/results.json --state compat/issues.json
+          cp compat/issues.json "$RUNNER_TEMP/issues.json"
+      - name: Commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add compat/results.json compat/history.json docs/compat docs/status.html
-          [ -f compat/issues.json ] && git add compat/issues.json
-          if git diff --cached --quiet; then echo "nothing changed"; exit 0; fi
-          git commit -m "compat: nightly results $(date -u +%Y-%m-%d)"
-          git pull --rebase origin main
-          git push origin HEAD:main
+          for attempt in 1 2 3; do
+            python3 scripts/gen_status.py
+            git add compat/results.json compat/history.json compat/issues.json docs/compat docs/status.html
+            if git diff --cached --quiet; then echo "nothing changed"; exit 0; fi
+            git commit -q -m "compat: nightly results $(date -u +%Y-%m-%d)"
+            if git push origin HEAD:main; then exit 0; fi
+            # main moved meanwhile: start again from it with the same data
+            git reset -q --hard origin/main
+            git pull -q --ff-only origin main
+            python3 compat/publish.py --from "$RUNNER_TEMP/results"
+            cp "$RUNNER_TEMP/issues.json" compat/issues.json
+          done
+          exit 1
