@@ -394,7 +394,7 @@ static uint32_t be32_at(const uint8_t *p) {
 }
 
 /* Name resolution over the host resolver: localhost packs as one IPv4 result in
- * nnSdk's big-endian addrinfo format; a name that cannot exist fails with EAI_NONAME. */
+ * nnSdk's big-endian addrinfo format; an empty lookup fails with EAI_NONAME. */
 TEST(ipc_sfdnsres_getaddrinfo) {
     init_once();
     uint32_t sm = connect_sm();
@@ -435,8 +435,10 @@ TEST(ipc_sfdnsres_getaddrinfo) {
     ASSERT_EQ(out[31], 127);
     ASSERT_EQ(be32_at(out + size - 4), 0); /* terminator */
 
-    strcpy(host, "no-such-host.invalid");
-    req.a_size = strlen(host) + 1;
+    /* No host and no service: the resolver fails at once with EAI_NONAME, whatever
+     * the DNS situation of the machine running the tests. */
+    host[0] = '\0';
+    req.a_size = 1;
     ASSERT_EQ(ipc_call(dns, &req, &resp), 0);
     ASSERT_EQ((int32_t)resp.data[1], 8); /* EAI_NONAME */
     ASSERT_EQ(call(0x16, dns, 0, 0, 0).x[0], 0);

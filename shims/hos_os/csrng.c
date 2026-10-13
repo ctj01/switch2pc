@@ -1,5 +1,8 @@
 /* csrng: random bytes from the host's getrandom; libnx seeds its generator from it. */
 
+#include <errno.h>
+#include <inttypes.h>
+#include <string.h>
 #include <sys/random.h>
 
 #include "common/hos_log.h"
@@ -20,7 +23,12 @@ static hos_result csrng_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
         uint64_t left = b->size;
         while (left) {
             ssize_t n = getrandom(p, left, 0);
+            if (n < 0 && errno == EINTR) {
+                continue;
+            }
             if (n <= 0) {
+                HOS_LOGE(MOD, "getrandom(%" PRIu64 "): %s", left,
+                         n < 0 ? strerror(errno) : "no bytes");
                 return HOS_KERNEL_OUT_OF_RESOURCE;
             }
             p += n;
