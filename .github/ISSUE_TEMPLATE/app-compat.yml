@@ -1,0 +1,51 @@
+name: App compatibility report
+description: You ran a homebrew under switch2pc; tell us how far it got.
+labels: [compat-report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing. Homebrew only: reports about commercial games, dumps or
+        keys are closed. If the app is open source, consider adding it to the nightly
+        list instead (docs/first-contribution.md, section 2).
+  - type: input
+    id: app
+    attributes:
+      label: App
+      description: Name and link to its source, with the version or commit you built.
+      placeholder: "nx-hbmenu, https://github.com/switchbrew/nx-hbmenu, v3.6.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: level
+    attributes:
+      label: How far did it get?
+      options:
+        - Did not start (crash or error before anything happened)
+        - Started but showed nothing
+        - Showed something, but not usable
+        - Usable with problems
+        - Works
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: How you ran it
+      description: The command line, and Linux ARM64 / WSL2 / Codespaces / other.
+      placeholder: "scripts/action_run.sh myapp.nro --sdmc sd --frames out --duration 15000 (Codespaces)"
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        The warnings near the end matter most: lines with "not registered",
+        "not implemented", "unimplemented svc" or "fatal". Run with HOS_LOG_LEVEL=info.
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Screenshots (a frame from --frames), what you expected, what you tried.

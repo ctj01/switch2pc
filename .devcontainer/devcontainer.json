@@ -1,0 +1,18 @@
+{
+  "name": "switch2pc",
+  "build": { "dockerfile": "Dockerfile" },
+  "postCreateCommand": "scripts/dev_setup.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools",
+        "ms-python.python"
+      ],
+      "settings": {
+        "cmake.configureOnOpen": false
+      }
+    }
+  },
+  "hostRequirements": { "cpus": 4 }
+}

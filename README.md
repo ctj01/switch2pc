@@ -58,7 +58,7 @@ from the sources by `scripts/gen_status.py`.
 
 Contributions are welcome: grey squares on the status page are unimplemented
 kernel calls and shader instructions, and [docs/ISSUES.md](docs/ISSUES.md)
-lists open work. See [CONTRIBUTING.md](CONTRIBUTING.md).
+lists open work. Start with [docs/first-contribution.md](docs/first-contribution.md).
 
 ## Homebrew compatibility
 
@@ -382,12 +382,21 @@ function documented in its header, `hos_result` for every fallible call, no
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Good first targets, each self-contained
-with a test to write: #41 (DNS lookups for `sfdnsres` over the host resolver),
-#26 (vsync pacing), #11 (a libFuzzer harness for the NSO, MOD0 and HIPC
-parsers), #15 (priority-ordered wake-ups), and any grey square on the
-[status page](https://ctj01.github.io/switch2pc/status.html) under shader instructions: the interpreter's
-tests show how one is added and checked.
+New here? [docs/first-contribution.md](docs/first-contribution.md) has three
+paths, from adding a homebrew to the nightly list (no code) to a missing IPC
+command (an evening) to the GPU. The environment is one click away:
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/ctj01/switch2pc)
+
+It is also a Dev Container (`.devcontainer/`) for VS Code with Docker. Issues
+labelled [`good first issue`](https://github.com/ctj01/switch2pc/labels/good%20first%20issue)
+come with the app that needs them and the file where the fix goes; questions go
+to [Discussions](https://github.com/ctj01/switch2pc/discussions).
+[CONTRIBUTING.md](CONTRIBUTING.md) has the rules for services, kernel calls and
+style. Self-contained larger targets: #26 (vsync pacing), #11 (a libFuzzer
+harness for the NSO, MOD0 and HIPC parsers), #15 (priority-ordered wake-ups),
+and any grey square on the [status page](https://ctj01.github.io/switch2pc/status.html)
+under shader instructions.
 
 ## Legal
 

@@ -1,0 +1,31 @@
+name: Bug in switch2pc
+description: Something in switch2pc itself is wrong (build, tests, a service answering incorrectly).
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Commands from a fresh checkout, if you can.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: Commit, and Linux ARM64 / WSL2 / Codespaces / other.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or test output
+      render: text

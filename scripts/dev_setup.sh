@@ -7,7 +7,8 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 echo "== building the test homebrew (libnx and deko3d examples)"
-DEVKITPRO=${DEVKITPRO:-/opt/devkitpro} mkdir -p build && scripts/ci_homebrew.sh > build/homebrew.log 2>&1 \
+mkdir -p build
+DEVKITPRO=${DEVKITPRO:-/opt/devkitpro} scripts/ci_homebrew.sh > build/homebrew.log 2>&1 \
     || { tail -30 build/homebrew.log; echo "homebrew build failed; see build/homebrew.log"; exit 1; }
 echo "== building switch2pc and running the tests"
 scripts/build.sh

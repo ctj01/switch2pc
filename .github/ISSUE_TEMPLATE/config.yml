@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions, ideas, "where do I start?"
+    url: https://github.com/ctj01/switch2pc/discussions
+    about: Ask in Discussions; no question is too small.
+  - name: Your first contribution
+    url: https://github.com/ctj01/switch2pc/blob/main/docs/first-contribution.md
+    about: A guide with three paths, from no code to the GPU.

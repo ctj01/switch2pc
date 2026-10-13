@@ -1,5 +1,9 @@
 # Contributing
 
+First time? Read [docs/first-contribution.md](docs/first-contribution.md):
+it sets up an environment in one click (Codespaces or the Dev Container) and
+walks through a first change. This file is the reference.
+
 ## Build and test
 
 `scripts/build.sh` does the full cycle on Ubuntu 24.04 (x86-64 with the ARM64
