@@ -26,6 +26,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import struct
 import subprocess
 import sys
@@ -40,8 +41,10 @@ LEVELS = ["build-failed", "crash", "boots", "renders", "runs"]
 #   shims/hos_cpu/ipc_sm.c, ipc.c, svc_table.c, svc_misc.c
 #   shims/hos_gpu/gpu_draw.c, gpu_engines.c, nvdrv.c, vi.c, macro.c
 #   shims/hos_net/bsd.c
+# switch2pc's own warnings and errors; the game's text is always logged under "game"
+SHIM_LINE = re.compile(r"^\[s2pc (?!game\s*\])[\w ]+\] [WE]: ")
 BLOCKER_RULES = [
-    (r"GetService\(([^)]+)\): not registered", "service:{0}"),
+    (r"GetService\(([\w:.-]{1,16})\): not registered", "service:{0}"),
     (r"\] W: (\S+): command (\d+) not implemented", "ipc:{0}:{1}"),
     (r"IGraphicBufferProducer transaction (\d+) not implemented", "ipc:IGraphicBufferProducer:{0}"),
     (r"bsd command (\d+) is not supported", "ipc:bsd:u:{0}"),
@@ -68,7 +71,6 @@ BLOCKER_RULES = [
 CRASH_RULES = [
     r"\] E: fatal SIG\w+",
     r"\] E: svcBreak ",
-    r"\] E: .*unresolved",
 ]
 # Log lines worth keeping as the excerpt: warnings, errors, the game's own output
 # and the run's milestones, but not the per-frame and per-submit chatter.
@@ -82,6 +84,8 @@ def log(msg):
 def blockers_of(lines):
     found = []
     for line in lines:
+        if not SHIM_LINE.match(line):
+            continue  # only switch2pc's warnings and errors, never the guest's own output
         for pattern, key in BLOCKER_RULES:
             m = re.search(pattern, line)
             if not m:
@@ -100,9 +104,13 @@ def blockers_of(lines):
 
 def crash_of(lines, status):
     for line in lines:
+        if not SHIM_LINE.match(line):
+            continue
         for pattern in CRASH_RULES:
             if re.search(pattern, line):
                 return line.split("] E: ", 1)[-1].strip()[:200]
+    if status == -1:
+        return None  # the wrapper itself timed out: reported as a note, not a crash
     if status not in (0, 124):
         return f"hosrun exited with status {status}"
     return None
@@ -217,8 +225,14 @@ def run_app(app, args):
     if os.path.isdir(packed):  # files build_app.sh took from the repository ("sdmc" entries)
         shutil.copytree(packed, sdmc, dirs_exist_ok=True)
     if app.get("sdmc_setup"):
-        subprocess.run(["bash", "-euo", "pipefail", "-c", app["sdmc_setup"]], cwd=sdmc, check=True,
-                       env=dict(os.environ, NRO=os.path.abspath(nro)))
+        setup = subprocess.run(["bash", "-euo", "pipefail", "-c", app["sdmc_setup"]], cwd=sdmc,
+                               env=dict(os.environ, NRO=os.path.abspath(nro)),
+                               capture_output=True, text=True)
+        if setup.returncode != 0:  # one broken entry must not stop the whole run
+            result["log_tail"] = ["sdmc_setup failed:"] + (setup.stderr or "").splitlines()[-10:]
+            result["note"] = "sdmc_setup failed"
+            log(f"{name}: sdmc_setup failed; skipped")
+            return result
     input_path = os.path.join(work, "input.txt")
     with open(input_path, "w") as f:
         f.write("\n".join(app.get("input", [])) + "\n")
@@ -232,12 +246,17 @@ def run_app(app, args):
     env.setdefault("HOS_INPUT_LOG", "0")
     log(f"{name}: running for {duration} ms")
     t0 = time.time()
+    # its own process group, so a timeout kills hosrun and everything it started
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+                            start_new_session=True)
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, env=env,
-                              timeout=duration / 1000 + args.grace)
-        wrapper_out = proc.stdout
-    except subprocess.TimeoutExpired as e:
-        wrapper_out = (e.stdout or "") + "\naction_run.sh itself timed out"
+        out, _ = proc.communicate(timeout=duration / 1000 + args.grace)
+        wrapper_out = out.decode(errors="replace")
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        out, _ = proc.communicate()
+        wrapper_out = (out or b"").decode(errors="replace") + "\naction_run.sh itself timed out"
+        result["note"] = "the run itself timed out"
     result["seconds"] = round(time.time() - t0, 1)
 
     lines = open(logfile, errors="replace").read().splitlines() if os.path.isfile(logfile) else []

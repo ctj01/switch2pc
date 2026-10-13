@@ -188,19 +188,6 @@
       "notes": "File manager: Dear ImGui over GLFW and Mesa, lists sdmc:/. Build fixes for GCC 15: a missing <ctime> include, and a freetype-config shim over pkg-config since freetype 2.13 no longer ships it."
     },
     {
-      "name": "jksv",
-      "title": "JKSV",
-      "repo": "J-D-K/JKSV",
-      "ref": "d39fd80a208b7c802d12edb12f362506a0addb47",
-      "licence": "GPL-3.0",
-      "category": "utility",
-      "dkp_packages": [],
-      "build": "make -j4",
-      "nro": "JKSV.nro",
-      "duration_ms": 10000,
-      "notes": "Save backup manager (its own SDL2-based UI, acc, ns, pdm); ref is the 12/02/2025 release, pinned by sha because the tag name contains slashes."
-    },
-    {
       "name": "switchident",
       "title": "SwitchIdent",
       "repo": "joel16/SwitchIdent",
@@ -238,28 +225,6 @@
       "nro": "build/switch/mgba.nro",
       "duration_ms": 15000,
       "notes": "GBA emulator: libnx + EGL/Mesa GUI, file browser without a ROM."
-    },
-    {
-      "name": "open-supaplex",
-      "title": "OpenSupaplex",
-      "repo": "sergiou87/open-supaplex",
-      "ref": "v7.2.2",
-      "licence": "GPL-3.0 (reimplementation); game resources are the freeware Supaplex release",
-      "category": "game",
-      "dkp_packages": [],
-      "build": "make -C switch -j4",
-      "nro": "switch/OpenSupaplex.nro",
-      "duration_ms": 15000,
-      "sdmc": [
-        "resources:switch/OpenSupaplex"
-      ],
-      "input": [
-        "6000 1",
-        "6200 0",
-        "9000 1",
-        "9200 0"
-      ],
-      "notes": "Supaplex reimplemented in C over SDL2 (stock Switch SDL2); its data (released as freeware by its authors) ships in the repository and is copied to sdmc:/switch/OpenSupaplex. A presses through the title screens."
     },
     {
       "name": "spacenx",
