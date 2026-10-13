@@ -3,6 +3,7 @@
  *
  *   HOS_SDMC   directory served as the SD card (OpenSdCardFileSystem)
  *   HOS_SAVE   directory served as save data (OpenSaveDataFileSystem)
+ *   HOS_BIS    directory served as every built-in storage partition (default: an empty one)
  *   HOS_ROMFS  file served as the data storage (OpenDataStorageByCurrentProcess),
  *              a romfs image as hactool or build_romfs produce it, or a directory;
  *              HOS_ROMFS_OFFSET/HOS_ROMFS_SIZE select the image inside a larger
@@ -586,17 +587,8 @@ static const hos_service_class g_filesystem_class = {
     .destroy = filesystem_destroy,
 };
 
-static hos_result open_mount(hos_ipc_ctx *ctx, const char *env, int read_only, hos_result missing) {
-    const char *root = getenv(env);
-    if (!root || !*root) {
-        HOS_LOGW(MOD, "%s is not set; mount unavailable", env);
-        return missing;
-    }
-    struct stat st;
-    if (stat(root, &st) != 0 || !S_ISDIR(st.st_mode)) {
-        HOS_LOGW(MOD, "%s=%s is not a directory", env, root);
-        return missing;
-    }
+/* An IFileSystem over a host directory. */
+static hos_result open_root(hos_ipc_ctx *ctx, const char *root, int read_only, const char *what) {
     fs_mount *m;
     POOL_TAKE(g_mounts, POOL_FS, m);
     if (!m) {
@@ -613,9 +605,80 @@ static hos_result open_mount(hos_ipc_ctx *ctx, const char *env, int read_only, h
         m->used = 0;
         return HOS_KERNEL_OUT_OF_RESOURCE;
     }
-    HOS_LOGD(MOD, "mounted %s at %s", env, m->root);
+    HOS_LOGD(MOD, "mounted %s at %s", what, m->root);
     return hos_ipc_return_object(ctx, o);
 }
+
+static hos_result open_mount(hos_ipc_ctx *ctx, const char *env, int read_only, hos_result missing) {
+    const char *root = getenv(env);
+    if (!root || !*root) {
+        HOS_LOGW(MOD, "%s is not set; mount unavailable", env);
+        return missing;
+    }
+    struct stat st;
+    if (stat(root, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        HOS_LOGW(MOD, "%s=%s is not a directory", env, root);
+        return missing;
+    }
+    return open_root(ctx, root, read_only, env);
+}
+
+/*
+ * The built-in storage (BIS: system, user, safe mode partitions). There is no
+ * system to show, so every partition is one empty read-only directory, created
+ * on first use; HOS_BIS names a directory to serve instead. Apps that browse
+ * the console (file managers) see an empty partition rather than an error.
+ */
+static char g_bis_empty[PATH_MAX];
+
+static void remove_bis_empty(void) {
+    rmdir(g_bis_empty); /* empty and read-only through the mount, so rmdir is enough */
+}
+
+static hos_result open_bis(hos_ipc_ctx *ctx) {
+    const char *root = getenv("HOS_BIS");
+    if (root && *root) {
+        return open_mount(ctx, "HOS_BIS", 1, FS_TARGET_NOT_FOUND);
+    }
+    pthread_mutex_lock(&g_lock);
+    if (!g_bis_empty[0]) {
+        const char *tmp = getenv("TMPDIR");
+        char path[PATH_MAX];
+        /* a fresh template each try: mkdtemp leaves it undefined when it fails */
+        snprintf(path, sizeof(path), "%s/s2pc-bis-XXXXXX", tmp && *tmp ? tmp : "/tmp");
+        if (!mkdtemp(path)) {
+            int err = errno;
+            pthread_mutex_unlock(&g_lock);
+            HOS_LOGW(MOD, "cannot create the empty BIS directory: %s", strerror(err));
+            return FS_TARGET_NOT_FOUND;
+        }
+        memcpy(g_bis_empty, path, sizeof(g_bis_empty));
+        atexit(remove_bis_empty);
+    }
+    pthread_mutex_unlock(&g_lock);
+    return open_root(ctx, g_bis_empty, 1, "bis");
+}
+
+/* ---- ISaveDataInfoReader -------------------------------------------------------------- */
+
+/* No save data to list: the reader is always at its end. (OpenSaveDataFileSystem still
+ * serves HOS_SAVE for any id, so a save manager can open a save it was not shown.) */
+static hos_result save_info_reader_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
+    switch (ctx->cmd) {
+    case 0: /* ReadSaveDataInfo(out buffer of SaveDataInfo) -> s64 count */ {
+        int64_t n = 0;
+        hos_ipc_out_write(ctx, &n, 8);
+        return HOS_RESULT_SUCCESS;
+    }
+    default:
+        return hos_ipc_unimplemented(obj, ctx);
+    }
+}
+
+static const hos_service_class g_save_info_reader_class = {
+    .name = "fs:ISaveDataInfoReader",
+    .dispatch = save_info_reader_dispatch,
+};
 
 /* ---- IStorage ----------------------------------------------------------------------- */
 
@@ -813,8 +876,13 @@ static hos_result fsp_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
     switch (ctx->cmd) {
     case 1: /* SetCurrentProcess */
         return HOS_RESULT_SUCCESS;
+    case 11: /* OpenBisFileSystem(u32 partition id, path) -> IFileSystem */
+        return open_bis(ctx);
     case 18: /* OpenSdCardFileSystem */
         return open_mount(ctx, "HOS_SDMC", 0, FS_SD_CARD_NOT_PRESENT);
+    case 60: /* OpenSaveDataInfoReader -> ISaveDataInfoReader */
+    case 61: /* OpenSaveDataInfoReaderBySaveDataSpaceId(u8 space id) */
+        return hos_ipc_return_object(ctx, hos_ipc_object_new(&g_save_info_reader_class, NULL));
     case 51: /* OpenSaveDataFileSystem(u8 space id, SaveDataAttribute) */
     case 52: /* OpenSaveDataFileSystemBySystemSaveDataId */
     case 53: /* OpenReadOnlySaveDataFileSystem */
