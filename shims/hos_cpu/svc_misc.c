@@ -114,7 +114,8 @@ void svc_set_thread_priority(hos_svc_regs *r) {
         r->x[0] = HOS_KERNEL_INVALID_HANDLE;
         return;
     }
-    t->priority = (int32_t)r->x[1];
+    /* sync.c reads it when choosing which waiter to wake. */
+    __atomic_store_n(&t->priority, (int32_t)r->x[1], __ATOMIC_RELAXED);
     r->x[0] = HOS_RESULT_SUCCESS;
 }
 

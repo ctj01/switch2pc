@@ -116,6 +116,10 @@ game is found writing there, move them.
 `sync.c` is one lock and one wait list. A blocked thread sits in a `waiter`
 on its own host stack with a per-waiter condition variable; whoever wakes it
 removes it from the list first, so a timeout and a wake cannot both claim it.
+The list is in arrival order and a wake picks the highest-priority waiter on
+the key (lowest number, as the kernel does), the earliest arrival among equals,
+reading the thread's priority at that moment rather than at park time, so a
+`SetThreadPriority` on a parked thread moves it at once.
 Mutexes follow the kernel contract exactly: the user word holds the owner
 handle, bit 30 means "someone is parked", `ArbitrateUnlock` hands the word to
 the next waiter. `WaitProcessWideKeyAtomic` releases the mutex, parks on the
