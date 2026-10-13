@@ -1,0 +1,107 @@
+{
+ "generated_at": "2026-10-13T02:06:31Z",
+ "switch2pc_commit": "a2110fc",
+ "counts": {
+  "build-failed": 0,
+  "crash": 0,
+  "boots": 0,
+  "renders": 1,
+  "runs": 2
+ },
+ "apps": [
+  {
+   "name": "libnx-application",
+   "title": "switch-examples: templates/application",
+   "repo": "switchbrew/switch-examples",
+   "ref": "v20260201",
+   "licence": "Public Domain (CC0)",
+   "category": "demo",
+   "notes": "libnx console template: prints to the console and exits on Plus.",
+   "level": "runs",
+   "frames": 229,
+   "seconds": 5.1,
+   "exit_status": 0,
+   "blockers": [],
+   "crash": null,
+   "log_tail": [
+    "[s2pc hosrun] I: libnx-application.nro: application by Unspecified Author",
+    "[s2pc hosrun] I: libnx-application.nro at 0x8000000 (0x27000 bytes)",
+    "[s2pc hosrun] I: 1 module, 206 patches (23 svc, 11 counter), 0 relocations (0 unresolved, 0 relr applied, 368 relr left to the module)",
+    "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
+    "[s2pc input] I: input script /tmp/tmp.uXDW2EHDUj/input.txt: 1 steps",
+    "[s2pc input] I: script: exit at 5015 ms",
+    "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
+    "[s2pc applet] I: ISelfController::Exit",
+    "[s2pc vi   ] I: frames presented: 229"
+   ],
+   "thumbnail": "docs/compat/libnx-application.png",
+   "build_seconds": 2,
+   "frame": "frame_0220.ppm"
+  },
+  {
+   "name": "sdl2-simple",
+   "title": "switch-examples: graphics/sdl2/sdl2-simple",
+   "repo": "switchbrew/switch-examples",
+   "ref": "v20260201",
+   "licence": "Public Domain (CC0)",
+   "category": "demo",
+   "notes": "SDL2 renderer (devkitPro's Switch SDL2, GL-backed) drawing a moving rectangle.",
+   "level": "renders",
+   "frames": 10,
+   "seconds": 68.1,
+   "exit_status": 124,
+   "blockers": [],
+   "crash": null,
+   "log_tail": [
+    "[s2pc hosrun] I: sdl2-simple.nro: sdl2-simple by Unspecified Author",
+    "[s2pc hosrun] I: sdl2-simple.nro at 0x8000000 (0x67e000 bytes)",
+    "[s2pc hosrun] I: 1 module, 256 patches (29 svc, 17 counter), 0 relocations (0 unresolved, 0 relr applied, 17163 relr left to the module)",
+    "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
+    "[s2pc input] I: input script /tmp/tmp.NjafsBPOwu/input.txt: 1 steps",
+    "[s2pc draw ] I: fragment stage on 4 threads",
+    "[s2pc input] I: script: exit at 8004 ms",
+    "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest"
+   ],
+   "thumbnail": "docs/compat/sdl2-simple.png",
+   "build_seconds": 4,
+   "frame": "frame_0060.ppm",
+   "note": "did not exit on the exit request"
+  },
+  {
+   "name": "hbmenu",
+   "title": "nx-hbmenu",
+   "repo": "switchbrew/nx-hbmenu",
+   "ref": "v3.6.1",
+   "licence": "ISC",
+   "category": "utility",
+   "notes": "The homebrew menu: software-rendered framebuffer, lists sdmc:/switch, nxlink listener.",
+   "level": "runs",
+   "frames": 380,
+   "seconds": 8.2,
+   "exit_status": 0,
+   "blockers": [
+    {
+     "key": "service:ts",
+     "line": "[s2pc sm   ] W: GetService(ts): not registered"
+    }
+   ],
+   "crash": null,
+   "log_tail": [
+    "[s2pc hosrun] I: hbmenu.nro: nx-hbmenu by switchbrew",
+    "[s2pc hosrun] I: romfs: 24360 bytes in the NRO's assets",
+    "[s2pc hosrun] I: hbmenu.nro at 0x8000000 (0x25f000 bytes)",
+    "[s2pc hosrun] I: 1 module, 290 patches (29 svc, 17 counter), 0 relocations (0 unresolved, 0 relr applied, 3083 relr left to the module)",
+    "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
+    "[s2pc input] I: input script /tmp/tmp.SVpTgtFQny/input.txt: 1 steps",
+    "[s2pc sm   ] W: GetService(ts): not registered",
+    "[s2pc input] I: script: exit at 8016 ms",
+    "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
+    "[s2pc applet] I: ISelfController::Exit",
+    "[s2pc vi   ] I: frames presented: 380"
+   ],
+   "thumbnail": "docs/compat/hbmenu.png",
+   "build_seconds": 9,
+   "frame": "frame_0380.ppm"
+  }
+ ]
+}

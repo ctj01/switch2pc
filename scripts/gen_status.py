@@ -12,6 +12,9 @@ What it measures:
   - IPC: commands handled by each service interface (case labels in its
     dispatch function), with no total, since HOS defines thousands.
   - Homebrew: docs/data/compat.json, kept by hand.
+  - Homebrew compatibility (nightly): compat/results.json and compat/history.json,
+    written by compat/run.py from the apps in compat/apps.json; issue links from
+    compat/issues.json when compat/issues.py has run.
   - History: kernel-call and shader coverage at every commit, from git.
 """
 import collections
@@ -295,6 +298,131 @@ def history_svg(points, width=900, height=220):
     return "\n".join(parts)
 
 
+# ---- homebrew compatibility (nightly) ---------------------------------------------------
+
+COMPAT_LEVELS = [("runs", GREEN), ("renders", "#9bba22"), ("boots", YELLOW), ("crash", RED),
+                 ("build-failed", GRAY)]
+COMPAT_LEVEL_HELP = {
+    "runs": "renders and exits cleanly when asked to",
+    "renders": "presents frames with something on them",
+    "boots": "runs without crashing but presents no frame",
+    "crash": "fatal signal, fatal svcBreak or an error exit",
+    "build-failed": "did not build with devkitPro from the pinned ref",
+}
+
+
+def compat_history_svg(hist, width=900, height=160):
+    """Stacked bars, one per nightly run, apps per level."""
+    if not hist:
+        return ""
+    pad_l, pad_r, pad_t, pad_b = 44, 150, 8, 26
+    pw, ph = width - pad_l - pad_r, height - pad_t - pad_b
+    total = max(h.get("total", 0) for h in hist) or 1
+    n = len(hist)
+    slot = pw / n
+    bw = max(2, min(24, slot * 0.7))
+    parts = [f'<svg viewBox="0 0 {width} {height}" class="history" role="img">']
+    for v in range(0, total + 1, max(1, total // 4)):
+        y = pad_t + ph * (1 - v / total)
+        parts.append(f'<line x1="{pad_l}" x2="{pad_l + pw}" y1="{y:.1f}" y2="{y:.1f}" '
+                     f'class="gridline"/><text x="{pad_l - 6}" y="{y + 4:.1f}" class="axis" '
+                     f'text-anchor="end">{v}</text>')
+    for i, h in enumerate(hist):
+        x = pad_l + slot * i + (slot - bw) / 2
+        y = pad_t + ph
+        for level, color in reversed(COMPAT_LEVELS):
+            c = h.get("counts", {}).get(level, 0)
+            if not c:
+                continue
+            bh = ph * c / total
+            y -= bh
+            parts.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{bh:.1f}" '
+                         f'fill="{color}"><title>{html.escape(h.get("date", ""))}: {c} {level}'
+                         f'</title></rect>')
+    last = hist[-1].get("counts", {})
+    ly = pad_t + 4
+    for level, color in COMPAT_LEVELS:
+        parts.append(f'<rect x="{pad_l + pw + 10}" y="{ly}" width="10" height="10" fill="{color}"/>'
+                     f'<text x="{pad_l + pw + 24}" y="{ly + 9}" class="legend" fill="{color}">'
+                     f'{level} {last.get(level, 0)}</text>')
+        ly += 16
+    parts.append(f'<text x="{pad_l}" y="{height - 6}" class="axis">{html.escape(hist[0].get("date", ""))}'
+                 f'</text><text x="{pad_l + pw}" y="{height - 6}" class="axis" text-anchor="end">'
+                 f'{html.escape(hist[-1].get("date", ""))} ({n} runs)</text></svg>')
+    return "\n".join(parts)
+
+
+def compat_section():
+    """The nightly table, or an empty string before the first run."""
+    raw = read("compat/results.json")
+    if not raw:
+        return "", 0, 0
+    results = json.loads(raw)
+    hist = json.loads(read("compat/history.json") or "[]")
+    issues = json.loads(read("compat/issues.json") or "{}")
+    apps = results.get("apps", [])
+    counts = results.get("counts") or {}
+    colors = dict(COMPAT_LEVELS)
+
+    rows = []
+    for a in apps:
+        level = a.get("level", "")
+        color = colors.get(level, GRAY)
+        repo, ref = a.get("repo", ""), a.get("ref", "")
+        link = f'https://github.com/{repo}/tree/{ref}' if repo and "/" in repo and "://" not in repo \
+            else repo
+        app = (f'<a href="{html.escape(link)}">{html.escape(a.get("title") or a["name"])}</a>'
+               if link else html.escape(a.get("title") or a["name"]))
+        top = ""
+        if a.get("blockers"):
+            key = a["blockers"][0]["key"]
+            issue = issues.get(key) or {}
+            label = html.escape(key)
+            title = html.escape(a["blockers"][0].get("line", ""))
+            if issue.get("url"):
+                top = f'<a href="{html.escape(issue["url"])}" title="{title}"><code>{label}</code></a>'
+            else:
+                top = f'<code title="{title}">{label}</code>'
+            if len(a["blockers"]) > 1:
+                top += f' <span class="muted">+{len(a["blockers"]) - 1}</span>'
+        elif a.get("crash"):
+            top = f'<span class="muted">{html.escape(a["crash"][:80])}</span>'
+        thumb = ""
+        if a.get("thumbnail"):
+            src = os.path.relpath(os.path.join(ROOT, a["thumbnail"]), os.path.join(ROOT, "docs"))
+            thumb = f'<img class="thumb" src="{html.escape(src)}" alt="" loading="lazy">'
+        note = html.escape(a.get("note") or "")
+        rows.append(f'<tr><td>{app}<div class="muted">{html.escape(a.get("notes") or "")}</div></td>'
+                    f'<td>{html.escape(a.get("category", ""))}</td>'
+                    f'<td><span class="st" style="background:{color}">{html.escape(level)}</span>'
+                    f'{"<div class=muted>" + note + "</div>" if note else ""}</td>'
+                    f'<td>{a.get("frames", 0)}</td><td>{top}</td><td>{thumb}</td></tr>')
+    badges = "\n".join(badge(level, str(counts.get(level, 0)), 100 if level == "runs" else None)
+                       .replace(GREEN, color) for level, color in COMPAT_LEVELS)
+    legend = ", ".join(f"<b>{l}</b>: {COMPAT_LEVEL_HELP[l]}" for l, _ in COMPAT_LEVELS)
+    page = f"""
+<h2 id="compat">Homebrew compatibility (nightly)</h2>
+<p class="sub">{len(apps)} open-source homebrew built from source and run under switch2pc
+every night (compat/apps.json, compat/run.py); last run {html.escape(results.get("generated_at", ""))}
+at {html.escape(results.get("switch2pc_commit", ""))}. Each blocker is a ready-made task:
+see <a href="https://github.com/ctj01/switch2pc/blob/main/compat/README.md">compat/README.md</a>
+and the <code>compat</code> issues.</p>
+<div class="badges">
+{badges}
+</div>
+<p class="legendrow">{legend}.</p>
+<table><thead><tr><th>App</th><th>Category</th><th>Level</th><th>Frames</th><th>Top blocker</th>
+<th>Frame</th></tr></thead>
+<tbody>
+{chr(10).join(rows)}
+</tbody></table>
+<h3 class="subh">Nightly history</h3>
+{compat_history_svg(hist)}
+"""
+    good = counts.get("runs", 0) + counts.get("renders", 0)
+    return page, good, len(apps)
+
+
 CSS = """
 :root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --text:#e6edf3; --muted:#8b949e; }
 * { box-sizing: border-box; }
@@ -321,6 +449,10 @@ th { color:var(--muted); font-weight:600; }
 .st { display:inline-block; padding:0 8px; border-radius:10px; font-size:12px; font-weight:600; }
 .legendrow { color:var(--muted); font-size:13px; margin-top:6px; }
 .sq { display:inline-block; width:10px; height:10px; margin:0 4px 0 10px; vertical-align:middle; }
+.thumb { width:96px; height:auto; display:block; border:1px solid var(--line); }
+.muted { color:var(--muted); font-size:12px; }
+td code { font-size:12px; }
+.subh { font-size:14px; font-weight:600; margin:18px 0 6px; }
 footer { color:var(--muted); font-size:12px; margin-top:32px; }
 """
 
@@ -366,6 +498,10 @@ def main():
                     f'{html.escape(c["status"])}</span></td>'
                     f'<td>{html.escape(c.get("notes", ""))}</td></tr>')
 
+    compat_html, compat_good, compat_total = compat_section()
+    compat_badge = badge("nightly homebrew", f"{compat_good}/{compat_total} render",
+                         100 * compat_good / compat_total) if compat_total else ""
+
     commit = subprocess.run(["git", "-C", ROOT, "log", "-1", "--format=%h %cs"],
                             capture_output=True, text=True).stdout.strip()
     page = f"""<!doctype html>
@@ -382,6 +518,7 @@ from the sources by scripts/gen_status.py at {html.escape(commit)}.</p>
 {badge("IPC commands", str(commands))}
 {badge("homebrew working", f"{working}/{len(compat)}", 100 * working / len(compat))}
 {badge("tests", str(test_count()))}
+{compat_badge}
 </div>
 <div class="maps">
 <section><h3>Kernel calls: {svc_pct:.2f}% ({svc_ok}/{len(s)})</h3>
@@ -408,8 +545,10 @@ here are those homebrew has asked for so far.</p>
 <tbody>
 {chr(10).join(rows)}
 </tbody></table>
+{compat_html}
 <footer>Kernel-call names follow switchbrew; shader encodings come from envytools
-(MIT). Homebrew status is kept by hand in docs/data/compat.json.</footer>
+(MIT). Homebrew status is kept by hand in docs/data/compat.json; the nightly table comes
+from compat/results.json.</footer>
 </main></body></html>
 """
     out = os.path.join(ROOT, "docs/status.html")
@@ -418,7 +557,8 @@ here are those homebrew has asked for so far.</p>
     print(f"kernel calls {svc_ok}/{len(s)} ({svc_pct:.1f}%), shader encodings {isa_ok}/"
           f"{len(isa_rows)} ({isa_pct:.1f}%, {mn_ok}/{len(mnemonics)} mnemonics), "
           f"IPC {commands} commands in {interfaces} interfaces, homebrew {working}/"
-          f"{len(compat)}, {len(hist)} commits of history -> docs/status.html")
+          f"{len(compat)}, nightly {compat_good}/{compat_total}, {len(hist)} commits of "
+          f"history -> docs/status.html")
 
 
 if __name__ == "__main__":
