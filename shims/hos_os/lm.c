@@ -107,7 +107,8 @@ static void log_packet(const uint8_t *p, size_t n) {
         left -= used + len;
     }
     if (text[0]) {
-        hos_log(severity_level(h.severity), module[0] ? module : "game", "%s", text);
+        /* under "game" whatever module the game names: tools trust the module tag */
+        hos_log_guest(severity_level(h.severity), module, text, strlen(text));
     }
 }
 
