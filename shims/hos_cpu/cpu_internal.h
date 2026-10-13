@@ -86,8 +86,8 @@ extern HOS_HIDDEN uint64_t hos_main_stack_size;
 extern HOS_HIDDEN __thread hos_thread *hos_current_thread;
 
 /* trap_aarch64.S */
-HOS_HIDDEN void hos_enter(uint64_t entry, uint64_t x0, uint64_t x1, uint64_t sp, uint64_t tls)
-    __attribute__((noreturn));
+HOS_HIDDEN void hos_enter(uint64_t entry, uint64_t x0, uint64_t x1, uint64_t sp, uint64_t tls,
+                          uint64_t lr) __attribute__((noreturn));
 HOS_HIDDEN void hos_trap_entry(int sig, siginfo_t *si, void *uc);
 
 /* trap.c */

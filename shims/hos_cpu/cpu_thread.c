@@ -163,7 +163,7 @@ static void *thread_main(void *arg) {
     HOS_LOGD(MOD, "thread %#x (tid %u) entering %#" PRIx64 " sp %#" PRIx64, t->handle, t->tid,
              t->entry, t->stack_top);
     if (sigsetjmp(t->exit_jb, 1) == 0) {
-        hos_enter(t->entry, t->arg, 0, t->stack_top, t->tls);
+        hos_enter(t->entry, t->arg, 0, t->stack_top, t->tls, 0);
     }
     HOS_LOGD(MOD, "thread %#x (tid %u) exited", t->handle, t->tid);
     unbind_current(t);
@@ -269,6 +269,12 @@ uint32_t hos_cpu_adopt_current_thread(void) {
 }
 
 void hos_cpu_run_main(uint64_t entry, uint64_t stack_size) {
+    hos_cpu_run_main_with(entry, stack_size, NULL, NULL);
+}
+
+void hos_cpu_run_main_with(uint64_t entry, uint64_t stack_size,
+                           void (*prepare)(uint32_t main_thread, hos_entry_args *args, void *user),
+                           void *user) {
     stack_size = (stack_size + 0xFFF) & ~0xFFFull;
     /*
      * The stack must live inside the 39-bit HOS address space: the game passes
@@ -299,8 +305,12 @@ void hos_cpu_run_main(uint64_t entry, uint64_t stack_size) {
     HOS_LOGI(MOD,
              "main thread %#x: entry %#" PRIx64 " stack [%#" PRIx64 ", %#" PRIx64 ") tls %#" PRIx64,
              t->handle, entry, hos_main_stack_base, t->stack_top, t->tls);
+    hos_entry_args args = {0, t->handle, 0};
+    if (prepare) {
+        prepare(t->handle, &args, user);
+    }
     if (sigsetjmp(t->exit_jb, 1) == 0) {
-        hos_enter(entry, 0, t->handle, t->stack_top, t->tls);
+        hos_enter(entry, args.x0, args.x1, t->stack_top, t->tls, args.lr);
     }
     /* svcExitThread on the main thread: other game threads may still run. */
     HOS_LOGD(MOD, "main thread exited; waiting for remaining threads");

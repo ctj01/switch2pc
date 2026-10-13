@@ -20,7 +20,7 @@
     .hidden hos_enter
     .type hos_enter, %function
 hos_enter:
-    /* x0 = entry, x1 = game x0, x2 = game x1, x3 = sp, x4 = tls */
+    /* x0 = entry, x1 = game x0, x2 = game x1, x3 = sp, x4 = tls, x5 = lr */
     msr tpidr_el0, x4
     mov sp, x3
     mov x16, x0
@@ -30,7 +30,7 @@ hos_enter:
     mov x3, xzr
     mov x4, xzr
     mov x29, xzr
-    mov x30, xzr
+    mov x30, x5
     br x16
     .size hos_enter, . - hos_enter
 

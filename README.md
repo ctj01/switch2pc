@@ -289,6 +289,17 @@ to resume after a fatal `svcBreak`, `HOS_ROMFS`/`HOS_SDMC`/`HOS_SAVE` as the
 options above, `HOS_FONT=<file.ttf>` for the shared font (`pl:u`; default: DejaVu,
 Liberation or Noto Sans from the host).
 
+An `.nro` is entered the way nx-hbloader enters it, under the homebrew ABI:
+libnx finds the config entries in `x0` (its main thread handle, an argv string,
+the applet type, the HOS version, a random seed, the user id storage, and the
+buffers for the next load path) and a return address in `lr`. `argv[0]` is
+where the app sits on the SD card (`sdmc:/<path>` when the file is inside the
+`--sdmc` directory, else `sdmc:/switch/<name>.nro`, served from the real file
+through `HOS_SDMC_ALIAS`), which is where libnx reads the app's own RomFS from.
+`HOS_ARGV` overrides the whole argv string. When a launcher such as nx-hbmenu
+writes a next load path before leaving, hosrun runs that app with the same
+options, as hbloader would. `HOS_NO_HBABI=1` enters an `.nro` the NSO way.
+
 Debugging: `qemu-aarch64 -g 1234 hosrun game.nso` then
 `gdb-multiarch -ex 'target remote :1234' hosrun`. Game code shows up at
 `0x8000000` plus the offset `switch2pc scan` prints. `strace -f` on a native
