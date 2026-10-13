@@ -21,3 +21,6 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 if(NOT DEFINED CMAKE_CROSSCOMPILING_EMULATOR)
     set(CMAKE_CROSSCOMPILING_EMULATOR "qemu-aarch64;-L;/usr/aarch64-linux-gnu")
 endif()
+# A test that execs hosrun again (a chain load) goes through binfmt_misc, where
+# qemu finds the guest libc through this variable rather than -L.
+set(S2PC_QEMU_LD_PREFIX /usr/aarch64-linux-gnu)

@@ -298,7 +298,11 @@ where the app sits on the SD card (`sdmc:/<path>` when the file is inside the
 through `HOS_SDMC_ALIAS`), which is where libnx reads the app's own RomFS from.
 `HOS_ARGV` overrides the whole argv string. When a launcher such as nx-hbmenu
 writes a next load path before leaving, hosrun runs that app with the same
-options, as hbloader would. `HOS_NO_HBABI=1` enters an `.nro` the NSO way.
+options, as hbloader would: only an `sdmc:/` path that resolves to a file inside
+the `--sdmc` directory, at most 8 hops, and not after an exit with an error.
+`HOS_NO_HBABI=1` enters an `.nro` the NSO way; so does a run without `--sdmc` or
+with `--romfs`, since libnx would otherwise look for the RomFS in `argv[0]` and
+find none.
 
 Debugging: `qemu-aarch64 -g 1234 hosrun game.nso` then
 `gdb-multiarch -ex 'target remote :1234' hosrun`. Game code shows up at

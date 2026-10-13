@@ -4,11 +4,14 @@
     tools/nso2nro.py <in.nso> <out.nro> [--name NAME]
 
 As in a real NRO the header is the first 0x80 bytes of the text segment and the
-first word is a branch over it, so the NSO's text goes at 0x80 and the other
-segments keep their memory offsets shifted by the same amount, which must stay
-page-aligned (true for a text-only module such as examples/hello). An ASET
-block carries a NACP naming the module, no icon and no RomFS. Compressed NSOs
-are refused: this is a fixture builder, not a packer. Standard library only.
+first word is a branch over it. A module whose text leaves that room (a branch,
+the MOD0 offset, then zeros up to 0x80, as libnx's crt0 and examples/hbabi_test
+do) gets the header written in place and keeps every segment where it is. Any
+other text goes at 0x80 and the other segments keep their memory offsets
+shifted by the same amount, which must stay page-aligned (true for a text-only
+module such as examples/hello). An ASET block carries a NACP naming the module,
+no icon and no RomFS. Compressed NSOs are refused: this is a fixture builder,
+not a packer. Standard library only.
 """
 import struct
 import sys
@@ -29,9 +32,12 @@ def main(argv):
     text_file, text_mem, text_size = segs[0]
     if text_mem != 0:
         sys.exit(f"{argv[1]}: text must start at memory offset 0")
-    placed = [(0, (0x80 + text_size + 0xFFF) & ~0xFFF)]  # text: header + code, page-rounded
+    text = nso[text_file:text_file + text_size]
+    in_place = text_size >= 0x80 and not any(text[0x10:0x80])
+    shift = 0 if in_place else 0x80
+    placed = [(0, (shift + text_size + 0xFFF) & ~0xFFF)]  # text: header + code, page-rounded
     for file_off, mem, size in segs[1:]:
-        off = 0x80 + mem if size else placed[-1][0] + placed[-1][1]  # empty: right after
+        off = shift + mem if size else placed[-1][0] + placed[-1][1]  # empty: right after
         if off & 0xFFF:
             sys.exit(f"{argv[1]}: a segment at {mem:#x} would not be page-aligned in the NRO")
         placed.append((off, size))
@@ -39,9 +45,10 @@ def main(argv):
     image_size = (image_size + 0xFFF) & ~0xFFF
     image = bytearray(image_size)
     for (file_off, mem, size), (off, _) in zip(segs, placed):
-        dst = off if mem else 0x80
+        dst = off if mem else shift
         image[dst:dst + size] = nso[file_off:file_off + size]
-    struct.pack_into("<II", image, 0, 0x14000020, 0)  # b +0x80 over the header; no MOD0
+    if not in_place:
+        struct.pack_into("<II", image, 0, 0x14000020, 0)  # b +0x80 over the header; no MOD0
     image[0x10:0x14] = b"NRO0"
     struct.pack_into("<III", image, 0x14, 0, image_size, 0)  # version, size, flags
     for i, (off, size) in enumerate(placed):
