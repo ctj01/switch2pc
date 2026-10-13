@@ -47,10 +47,14 @@ if ! grep -q "switch2pc test harness" "$main"; then
 fi
 
 case "$(uname -s)" in
-MINGW* | MSYS*) out_m=$(cygpath -m "$out") ;;
-*) out_m=$out ;;
+MINGW* | MSYS*)
+    # devkitPro's Makefiles expect its MSYS2 environment (make, DEVKITPRO=/opt/devkitpro).
+    out_m=$(cygpath -m "$out")
+    "$dkp/msys2/usr/bin/bash.exe" -lc "export DEVKITPRO=/opt/devkitpro; cd \"\$(cygpath -u '$out_m')\" && make"
+    ;;
+*)
+    DEVKITPRO=$dkp make -C "$out"
+    ;;
 esac
-# devkitPro's Makefiles expect its MSYS2 environment (make, DEVKITPRO=/opt/devkitpro).
-"$dkp/msys2/usr/bin/bash.exe" -lc "export DEVKITPRO=/opt/devkitpro; cd \"\$(cygpath -u '$out_m')\" && make"
 "$dkp/tools/bin/elf2nso" "$out/deko_examples.elf" "$out/deko_examples.nso"
 echo "built $out/deko_examples.nso"
