@@ -3,7 +3,8 @@
  * protocol the runtime uses to hand frames to the compositor. There is no
  * screen: a queued buffer is consumed on the spot (the "null compositor"),
  * and when HOS_FRAMES names a directory each frame is deswizzled from the
- * game's memory and written there as a PPM image.
+ * game's memory and written there as a PPM image. The presenting thread is
+ * then held until the next 60 Hz refresh (vsync.h), unless HOS_VSYNC=0.
  */
 
 #include <inttypes.h>
@@ -20,6 +21,7 @@
 #include "gpu_internal.h"
 #include "parcel.h"
 #include "swizzle.h"
+#include "vsync.h"
 
 #define MOD "vi"
 
@@ -379,6 +381,17 @@ static int32_t bq_transact(vi_layer *layer, uint32_t code, parcel_reader *in, pa
         }
         /* QueueBufferInput follows (timestamp, crop, scaling, transform, fence); consumed now */
         dump_frame(layer, layer->slots[slot].buffer);
+        if (vsync_enabled()) {
+            /* Hold the presenter until the refresh that shows this frame, with
+             * neither our lock nor the IPC request lock held: other threads keep
+             * talking to vi and to every other service meanwhile. The slot stays
+             * DEQUEUED, so nothing else hands it out. */
+            pthread_mutex_unlock(&g_lock);
+            hos_ipc_blocking_begin();
+            vsync_wait_next();
+            hos_ipc_blocking_end();
+            pthread_mutex_lock(&g_lock);
+        }
         layer->slots[slot].state = SLOT_FREE;
         signal_buffer_event(layer);
         uint32_t output[4] = {DISPLAY_WIDTH, DISPLAY_HEIGHT, 0, 0};
@@ -565,11 +578,11 @@ static hos_result write_native_window(hos_ipc_ctx *ctx, const vi_layer *layer) {
     return HOS_RESULT_SUCCESS;
 }
 
+/* The vsync event fires on the same 60 Hz grid the presenter is paced on. */
 static void *vsync_thread(void *arg) {
     (void)arg;
     for (;;) {
-        struct timespec ts = {.tv_sec = 0, .tv_nsec = 16666667};
-        nanosleep(&ts, NULL);
+        vsync_sleep_until(vsync_next_boundary(vsync_now_ns()));
         hos_ipc_event_signal(g_vsync_event);
     }
     return NULL;

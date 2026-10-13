@@ -28,7 +28,7 @@ numbers.
 | 23 | patch   | Counter reads trap on every `mrs cntvct_el0`; an inline scaled read needs a per-site stub (no free registers, LR is live) | deferred (same measurement as #5: ~10k reads/s in the busiest game, ~2% of a core) |
 | 24 | hos_gpu | nvhost-gpu / nvhost-as-gpu / nvhost-ctrl-gpu | done for M0 (see #40); drawing is M1+ |
 | 25 | hos_gpu | A window: present queued frames in real time | done (display_x11.c, HOS_WINDOW=1: scaled X11 window via WSLg, keyboard as player 1 through hos_pad_external_set, close = applet exit request) |
-| 26 | hos_gpu | Vsync pacing: QueueBuffer returns immediately; hold the buffer until the next vsync so games run at 60 Hz | open |
+| 26 | hos_gpu | Vsync pacing: QueueBuffer returns immediately; hold the buffer until the next vsync so games run at 60 Hz | done (vsync.c: QueueBuffer holds the presenter until the next refresh on an absolute 60 Hz grid, the vsync event fires on the same grid; HOS_VSYNC=0 for the tests, action_run.sh and the benchmarks; test_vsync, smoke_deko3d_vsync) |
 | 27 | hos_audio | Real-time audio output | done (audio_sink.c: PulseAudio or ALSA via dlopen, HOS_AUDIO=auto/pulse/alsa; a sink thread per stream releases buffers at the device clock; timer pacing when off; verified by recording the WSLg sink monitor) |
 | 28 | examples | DOOM (doomgeneric) runs end to end; fetch of third_party/doomgeneric and the IWAD is manual, document it in scripts/build_doom.sh | done |
 | 29 | hos_gpu  | HOS_FRAMES_EVERY=N to dump every Nth frame; a 640x400 PPM per frame is heavy on slow filesystems | done |

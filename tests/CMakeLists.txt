@@ -15,6 +15,9 @@ s2pc_add_test(test_sha256 s2pc_common)
 s2pc_add_test(test_mme s2pc_common)
 target_sources(test_mme PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_mme.c)
 target_include_directories(test_mme PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
+s2pc_add_test(test_vsync s2pc_common pthread)
+target_sources(test_vsync PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/vsync.c)
+target_include_directories(test_vsync PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
 s2pc_add_test(test_shader s2pc_common m)
 target_sources(test_shader PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader.c
                                    ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader_simd.c)
@@ -268,6 +271,17 @@ if(S2PC_ARM64)
             TIMEOUT 120
             PASS_REGULAR_EXPRESSION "deko3d: device created.*swapchain created.*queue created.*clears.*frame 40 presented.*push data ok.*copy buffer ok.*image round trip ok.*deko3d: done"
             FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|does not parse|not mapped|deko3d: .*: result [1-9]")
+        # Vsync pacing (#26): the same 60 frames, paced, cannot finish within a second.
+        # Every other test runs with HOS_VSYNC=0 (set below).
+        add_test(NAME smoke_deko3d_vsync
+                 COMMAND sh ${CMAKE_SOURCE_DIR}/tests/min_duration.sh 950
+                         ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:hosrun>
+                         --sdmc ${fixture_dir}/sdmc ${libnx_deko3d_nso})
+        set_tests_properties(smoke_deko3d_vsync PROPERTIES
+            TIMEOUT 120
+            ENVIRONMENT "HOS_VSYNC=1"
+            PASS_REGULAR_EXPRESSION "frame 40 presented.*deko3d: done.*min_duration: elapsed [0-9]+ ms"
+            FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|too fast|deko3d: .*: result [1-9]")
     endif()
 
     # GPU milestone M3a: deko_basic's triangle (shaders compiled by uam, vertex shader
@@ -435,3 +449,12 @@ if(S2PC_ARM64)
     set_tests_properties(smoke_kernel_test_info PROPERTIES
         PASS_REGULAR_EXPRESSION "MOD0          at.*relocations   [1-9][0-9]* applied, 0 unresolved, 0 unsupported")
 endif()
+
+# Frames are presented unpaced in the tests (#26): HOS_VSYNC=0 for every test
+# but the pacing checks themselves.
+get_property(s2pc_all_tests DIRECTORY PROPERTY TESTS)
+foreach(s2pc_test IN LISTS s2pc_all_tests)
+    if(NOT s2pc_test MATCHES "vsync")
+        set_property(TEST ${s2pc_test} APPEND PROPERTY ENVIRONMENT HOS_VSYNC=0)
+    endif()
+endforeach()
