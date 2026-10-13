@@ -183,6 +183,85 @@ enum {
 };
 _Static_assert(OP_ISBERD == 37, "OP_* must follow classify()'s numbering");
 
+/*
+ * Texture instruction forms. TEXS [56:53] (envydis tabd000): which registers
+ * hold the coordinates and where the lod comes from; TLDS [56:53] (tabd200)
+ * likewise with an integer lod; TEX [39:37] (tabdeb8): 0 implicit, 1 lz,
+ * 2 lb, 3 ll, 6 lba, 7 lla, coordinates always A and A+1, lod or bias in B.
+ * Array (a2d) forms sample the layer's 2D image with the layer ignored; 3D
+ * and cube forms are unsupported and stop the shader.
+ */
+enum tex_coords {
+    TEXC_A = 0,    /* 1D: u = A */
+    TEXC_A_B = 1,  /* u = A, v = B */
+    TEXC_A_A1 = 2, /* u = A, v = A+1 (lod, offset or sample in B) */
+    TEXC_A1_B = 3, /* array: layer = A, u = A+1, v = B */
+    TEXC_UNSUPPORTED = 4,
+};
+
+typedef struct tex_form {
+    uint8_t coords; /* enum tex_coords */
+    uint8_t lod;    /* SHADER_LOD_* */
+} tex_form;
+
+static inline tex_form texs_form(uint32_t f) {
+    static const tex_form t[16] = {
+        [0] = {TEXC_A, SHADER_LOD_ZERO},       [1] = {TEXC_A_B, SHADER_LOD_IMPLICIT},
+        [2] = {TEXC_A_B, SHADER_LOD_ZERO},     [3] = {TEXC_A_A1, SHADER_LOD_EXPLICIT},
+        [4] = {TEXC_A_B, SHADER_LOD_IMPLICIT}, [5] = {TEXC_A_A1, SHADER_LOD_EXPLICIT},
+        [6] = {TEXC_A_B, SHADER_LOD_ZERO},     [7] = {TEXC_A1_B, SHADER_LOD_IMPLICIT},
+        [8] = {TEXC_A1_B, SHADER_LOD_ZERO},    [9] = {TEXC_A1_B, SHADER_LOD_ZERO},
+        [10] = {TEXC_UNSUPPORTED, 0},          [11] = {TEXC_UNSUPPORTED, 0},
+        [12] = {TEXC_UNSUPPORTED, 0},          [13] = {TEXC_UNSUPPORTED, 0},
+        [14] = {TEXC_UNSUPPORTED, 0},          [15] = {TEXC_UNSUPPORTED, 0},
+    };
+    return t[f & 15];
+}
+
+static inline tex_form tlds_form(uint32_t f) {
+    static const tex_form t[16] = {
+        [0] = {TEXC_A, SHADER_LOD_ZERO},
+        [1] = {TEXC_A, SHADER_LOD_EXPLICIT},
+        [2] = {TEXC_A_B, SHADER_LOD_ZERO},
+        [3] = {TEXC_UNSUPPORTED, 0},
+        [4] = {TEXC_A_A1, SHADER_LOD_ZERO},
+        [5] = {TEXC_A_A1, SHADER_LOD_EXPLICIT},
+        [6] = {TEXC_A_A1, SHADER_LOD_ZERO},
+        [7] = {TEXC_UNSUPPORTED, 0},
+        [8] = {TEXC_UNSUPPORTED, 0},
+        [9] = {TEXC_UNSUPPORTED, 0},
+        [10] = {TEXC_UNSUPPORTED, 0},
+        [11] = {TEXC_UNSUPPORTED, 0},
+        [12] = {TEXC_A_A1, SHADER_LOD_EXPLICIT},
+        [13] = {TEXC_UNSUPPORTED, 0},
+        [14] = {TEXC_UNSUPPORTED, 0},
+        [15] = {TEXC_UNSUPPORTED, 0},
+    };
+    return t[f & 15];
+}
+
+static inline uint32_t tex_lod_mode(uint32_t f) {
+    switch (f & 7) {
+    case 1:
+        return SHADER_LOD_ZERO;
+    case 2:
+    case 6:
+        return SHADER_LOD_BIAS;
+    case 3:
+    case 7:
+        return SHADER_LOD_EXPLICIT;
+    default:
+        return SHADER_LOD_IMPLICIT;
+    }
+}
+
+/* Component selection shared by TEXS and TLDS: with dst2 = RZ one of r g b a rg ra ga
+ * ba, else rgb rga rba gba rgba; 9 ends the list. */
+static const uint8_t tex_one[8][2] = {{0, 9}, {1, 9}, {2, 9}, {3, 9},
+                                      {0, 1}, {0, 3}, {1, 3}, {2, 3}};
+static const uint8_t tex_two[5][4] = {
+    {0, 1, 2, 9}, {0, 1, 3, 9}, {0, 2, 3, 9}, {1, 2, 3, 9}, {0, 1, 2, 3}};
+
 typedef struct pinsn {
     u64 raw;
     uint32_t b; /* B immediate, or constant buffer byte offset */

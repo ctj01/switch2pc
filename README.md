@@ -244,10 +244,12 @@ deko3d's toolchain and run by an interpreter in `hos_gpu`: deko3d's
 triangle, its rotating cube (vertex buffer, uniform matrices), a scene
 with depth testing and alpha blending, and textured quads (RGBA8 and BC1,
 nearest and bilinear, clamp and repeat) match independent references pixel
-for pixel. The GPU runs on the CPU for now; a Vulkan backend is next.
+for pixel. Textures have mipmaps (level of detail from the pixel quad's
+derivatives, nearest and linear mip filters) and BC1 to BC5. The GPU runs
+on the CPU for now; a Vulkan backend is next.
 
-Not implemented yet: the GPU's Vulkan backend and mipmaps, TLS behind `ssl`,
-`pctl`, config files. Track progress in
+Not implemented yet: the GPU's Vulkan backend, TLS behind `ssl`, `pctl`,
+config files. Track progress in
 [docs/ISSUES.md](docs/ISSUES.md).
 
 ## Quick start

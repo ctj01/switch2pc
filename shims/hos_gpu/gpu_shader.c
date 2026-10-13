@@ -720,21 +720,29 @@ int shader_exec_from(const shader_prog *prog, shader_env *e, uint32_t pc, shader
             break;
         }
         case OP_TEXS: { /* TEXS */
-            /* dst1 [7:0] (+1), dst2 [35:28] (+1), u = A [15:8], v = B [27:20], texture index
-             * [48:36], type/lod [56:53] (all 2D forms sample level 0 here), components [52:50]:
-             * with dst2 = RZ one of r g b a rg ra ga ba, else rgb rga rba gba rgba. */
-            static const uint8_t one[8][2] = {{0, 9}, {1, 9}, {2, 9}, {3, 9},
-                                              {0, 1}, {0, 3}, {1, 3}, {2, 3}};
-            static const uint8_t two[5][4] = {
-                {0, 1, 2, 9}, {0, 1, 3, 9}, {0, 2, 3, 9}, {1, 2, 3, 9}, {0, 1, 2, 3}};
-            uint32_t d2 = bits(i, 28, 8), sel = bits(i, 50, 3);
-            int is_1d = bits(i, 53, 4) == 0;
+            /* dst1 [7:0] (+1), dst2 [35:28] (+1), A [15:8], B [27:20], texture index
+             * [48:36], form [56:53] (texs_form), components [52:50]. */
+            uint32_t d2 = bits(i, 28, 8), sel = bits(i, 50, 3), ra = bits(i, 8, 8),
+                     rb = bits(i, 20, 8);
+            tex_form form = texs_form(bits(i, 53, 4));
+            if (form.coords == TEXC_UNSUPPORTED) {
+                *bad_insn = i;
+                return -1;
+            }
+            shader_tex_coord tc = {.lod_mode = form.lod};
+            uint32_t ra1 = ra == RZ ? RZ : ra + 1;
+            tc.u = f(form.coords == TEXC_A1_B ? reg(e, ra1) : a);
+            tc.v = form.coords == TEXC_A      ? 0.0f
+                   : form.coords == TEXC_A_A1 ? f(reg(e, ra1))
+                                              : f(reg(e, rb));
+            if (form.lod == SHADER_LOD_EXPLICIT) {
+                tc.lod = f(reg(e, rb));
+            }
             float texel[4] = {0, 0, 0, 0};
             if (e->tex) {
-                e->tex(e->tex_user, bits(i, 36, 13), f(a), is_1d ? 0.0f : f(reg(e, bits(i, 20, 8))),
-                       texel);
+                e->tex(e->tex_user, bits(i, 36, 13), &tc, texel);
             }
-            const uint8_t *comp = d2 == RZ ? one[sel] : (sel < 5 ? two[sel] : two[4]);
+            const uint8_t *comp = d2 == RZ ? tex_one[sel] : (sel < 5 ? tex_two[sel] : tex_two[4]);
             uint32_t dst[4] = {d, d == RZ ? RZ : d + 1, d2, d2 == RZ ? RZ : d2 + 1};
             for (int k = 0; k < 4 && comp[k] != 9; k++) {
                 set_reg(e, dst[k], u(texel[comp[k]]));
@@ -742,27 +750,25 @@ int shader_exec_from(const shader_prog *prog, shader_env *e, uint32_t pc, shader
             break;
         }
         case OP_TLDS: { /* TLDS */
-            /* texelFetch, compact: registers and components as TEXS; [56:53] picks the form:
-             * 0/1 1D (x = A), 2 2D (x = A, y = B), 4/5/6/12 2D (x = A, y = A+1, B holds an
-             * offset, lod or sample we do not use). Level 0 only. */
-            static const uint8_t one[8][2] = {{0, 9}, {1, 9}, {2, 9}, {3, 9},
-                                              {0, 1}, {0, 3}, {1, 3}, {2, 3}};
-            static const uint8_t two[5][4] = {
-                {0, 1, 2, 9}, {0, 1, 3, 9}, {0, 2, 3, 9}, {1, 2, 3, 9}, {0, 1, 2, 3}};
-            uint32_t d2 = bits(i, 28, 8), sel = bits(i, 50, 3), form = bits(i, 53, 4);
-            uint32_t ra = bits(i, 8, 8);
-            int32_t y = form <= 1   ? 0
-                        : form == 2 ? (int32_t)reg(e, bits(i, 20, 8))
-                                    : (int32_t)reg(e, ra == RZ ? RZ : ra + 1);
-            float texel[4] = {0, 0, 0, 0};
-            if (form != 2 && form != 4 && form != 5 && form != 6 && form != 12 && form > 1) {
-                *bad_insn = i; /* 3D and array forms */
+            /* texelFetch, compact: registers and components as TEXS; form [56:53]
+             * (tlds_form) says where y and the level come from. */
+            uint32_t d2 = bits(i, 28, 8), sel = bits(i, 50, 3), ra = bits(i, 8, 8),
+                     rb = bits(i, 20, 8);
+            tex_form form = tlds_form(bits(i, 53, 4));
+            if (form.coords == TEXC_UNSUPPORTED) {
+                *bad_insn = i;
                 return -1;
             }
+            uint32_t ra1 = ra == RZ ? RZ : ra + 1;
+            int32_t y = form.coords == TEXC_A     ? 0
+                        : form.coords == TEXC_A_B ? (int32_t)reg(e, rb)
+                                                  : (int32_t)reg(e, ra1);
+            uint32_t level = form.lod == SHADER_LOD_EXPLICIT ? reg(e, rb) : 0;
+            float texel[4] = {0, 0, 0, 0};
             if (e->texel) {
-                e->texel(e->tex_user, bits(i, 36, 13), (int32_t)a, y, texel);
+                e->texel(e->tex_user, bits(i, 36, 13), (int32_t)a, y, level, texel);
             }
-            const uint8_t *comp = d2 == RZ ? one[sel] : (sel < 5 ? two[sel] : two[4]);
+            const uint8_t *comp = d2 == RZ ? tex_one[sel] : (sel < 5 ? tex_two[sel] : tex_two[4]);
             uint32_t dst[4] = {d, d == RZ ? RZ : d + 1, d2, d2 == RZ ? RZ : d2 + 1};
             for (int k = 0; k < 4 && comp[k] != 9; k++) {
                 set_reg(e, dst[k], u(texel[comp[k]]));
@@ -770,13 +776,19 @@ int shader_exec_from(const shader_prog *prog, shader_env *e, uint32_t pc, shader
             break;
         }
         case OP_TEX: { /* TEX */
-            /* dst [7:0].., coordinates A [15:8] (u) and A+1 (v), index [48:36],
-             * write mask [34:31] filling consecutive registers. */
+            /* dst [7:0].., coordinates A [15:8] (u) and A+1 (v), lod or bias in B [27:20]
+             * for the .LL/.LB forms ([39:37]), index [48:36], write mask [34:31] filling
+             * consecutive registers. */
+            uint32_t ra = bits(i, 8, 8), rb = bits(i, 20, 8);
+            shader_tex_coord tc = {.lod_mode = (int)tex_lod_mode(bits(i, 37, 3))};
+            tc.u = f(a);
+            tc.v = f(reg(e, ra == RZ ? RZ : ra + 1));
+            if (tc.lod_mode == SHADER_LOD_EXPLICIT || tc.lod_mode == SHADER_LOD_BIAS) {
+                tc.lod = f(reg(e, rb));
+            }
             float texel[4] = {0, 0, 0, 0};
-            uint32_t ra = bits(i, 8, 8);
             if (e->tex) {
-                e->tex(e->tex_user, bits(i, 36, 13), f(a), f(reg(e, ra == RZ ? RZ : ra + 1)),
-                       texel);
+                e->tex(e->tex_user, bits(i, 36, 13), &tc, texel);
             }
             uint32_t mask = bits(i, 31, 4), k = 0;
             for (int c = 0; c < 4; c++) {

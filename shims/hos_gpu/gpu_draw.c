@@ -19,6 +19,7 @@
 #include "gpu_internal.h"
 #include "gpu_shader.h"
 #include "gpu_tess.h"
+#include "gpu_texture.h"
 
 #define MOD "draw"
 
@@ -104,25 +105,16 @@ typedef struct program {
 /*
  * Textures. A handle (image id [19:0], sampler id [31:20]) is read from the
  * texture constant buffer; the image descriptor (TIC, 32 bytes) and sampler
- * descriptor (TSC, 32 bytes) come from the pools at 0x55D and 0x557. Field
- * layouts follow the public Maxwell texture header documentation (as used by
- * nouveau): TIC word 0 format [6:0], component types [18:7], swizzle [30:19];
- * words 1-2 address; word 2 [23:21] layout (2 pitch, 3 block-linear); word 3
- * block height [5:3] or pitch; words 4-5 width and height minus one. TSC word 0
- * wrap modes [2:0] [5:3]; word 1 filters (mag [1:0], min [5:4]).
+ * descriptor (TSC, 32 bytes) come from the pools at 0x55D and 0x557 and are
+ * decoded by gpu_texture.c. Each fragment worker keeps a small cache keyed by
+ * the instruction's texture index.
  */
 #define TEX_CACHE 8
 
 typedef struct texture {
     uint32_t index; /* texture index in the instruction, cache key */
     uint32_t handle;
-    int valid;
-    const uint8_t *base;
-    uint64_t size;
-    uint32_t format, width, height, bpp, row_bytes, bh, swizzle;
-    int pitch_layout;
-    uint32_t wrap_u, wrap_v, mag_filter;
-    float border[4];
+    gpu_texture t;
 } texture;
 
 typedef struct tex_ctx {
@@ -134,29 +126,9 @@ typedef struct tex_ctx {
     uint32_t warned;
 } tex_ctx;
 
-static uint32_t tex_bpp(uint32_t format) {
-    switch (format) {
-    case 0x01:
-        return 16; /* R32G32B32A32 */
-    case 0x03:
-        return 8; /* R16G16B16A16 (read as half floats) */
-    case 0x04:
-        return 8; /* R32G32 */
-    case 0x08:
-        return 4; /* A8B8G8R8 */
-    case 0x0F:
-        return 4; /* R32 */
-    case 0x15:
-        return 2; /* B5G6R5 */
-    case 0x18:
-        return 2; /* G8R8 */
-    case 0x1D:
-        return 1; /* R8 */
-    case 0x24:
-        return 8; /* BC1: bytes per 4x4 block */
-    default:
-        return 0;
-    }
+static const void *tex_map(void *user, uint64_t va, uint64_t size) {
+    (void)user;
+    return nv_gpu_va_to_host(va, size);
 }
 
 static void tex_resolve(tex_ctx *t, texture *x, uint32_t index) {
@@ -179,36 +151,11 @@ static void tex_resolve(tex_ctx *t, texture *x, uint32_t index) {
     if (!tic || !tsc) {
         return;
     }
-    x->format = tic[0] & 0x7F;
-    x->swizzle = (tic[0] >> 19) & 0xFFF;
-    x->bpp = tex_bpp(x->format);
-    uint32_t layout = (tic[2] >> 21) & 7;
-    x->pitch_layout = layout == 2;
-    x->width = (tic[4] & 0xFFFF) + 1;
-    x->height = (tic[5] & 0xFFFF) + 1;
-    x->bh = (tic[3] >> 3) & 7;
-    uint64_t va = ((uint64_t)(tic[2] & 0xFFFF) << 32) | tic[1];
-    x->wrap_u = tsc[0] & 7;
-    x->wrap_v = (tsc[0] >> 3) & 7;
-    x->mag_filter = tsc[1] & 3;
-    for (int c = 0; c < 4; c++) {
-        memcpy(&x->border[c], &tsc[4 + c], 4);
+    if (!gpu_tex_init(&x->t, tic, tsc, tex_map, NULL) && !(t->warned & 1)) {
+        t->warned |= 1;
+        HOS_LOGW(MOD, "texture format %#x layout %u (%ux%u, %u levels) not supported", x->t.format,
+                 (tic[2] >> 21) & 7, x->t.width, x->t.height, x->t.levels);
     }
-    if (!x->bpp || (layout != 2 && layout != 3)) {
-        if (!(t->warned & 1)) {
-            t->warned |= 1;
-            HOS_LOGW(MOD, "texture format %#x layout %u not supported", x->format, layout);
-        }
-        return;
-    }
-    /* Block-compressed formats are laid out in 4x4 blocks: one "texel" per block. */
-    uint32_t units_w = x->format == 0x24 ? (x->width + 3) / 4 : x->width;
-    uint32_t units_h = x->format == 0x24 ? (x->height + 3) / 4 : x->height;
-    x->row_bytes = x->pitch_layout ? (tic[3] & 0xFFFF) << 5 : units_w * x->bpp;
-    x->size = x->pitch_layout ? (uint64_t)x->row_bytes * units_h
-                              : gpu_bl_size(x->row_bytes, units_h, x->bh);
-    x->base = nv_gpu_va_to_host(va, x->size);
-    x->valid = x->base != NULL;
 }
 
 static texture *tex_lookup(tex_ctx *t, uint32_t index) {
@@ -222,158 +169,25 @@ static texture *tex_lookup(tex_ctx *t, uint32_t index) {
     return x;
 }
 
-/* Texel coordinate after the wrap mode; -1 selects the border colour. */
-static int32_t tex_wrap(int32_t i, int32_t n, uint32_t mode) {
-    switch (mode) {
-    case 0: /* repeat */
-        i %= n;
-        return i < 0 ? i + n : i;
-    case 1: { /* mirrored repeat */
-        int32_t p = 2 * n, m = i % p;
-        m = m < 0 ? m + p : m;
-        return m < n ? m : p - 1 - m;
-    }
-    case 3: /* border */
-    case 6:
-        return i < 0 || i >= n ? -1 : i;
-    default: /* clamp to edge and the clamp variants */
-        return i < 0 ? 0 : i >= n ? n - 1 : i;
-    }
-}
-
-static void rgb565_to_float(uint16_t v, float c[3]) {
-    uint32_t r = (v >> 11) & 0x1F, g = (v >> 5) & 0x3F, b = v & 0x1F;
-    c[0] = (float)((r << 3) | (r >> 2)) / 255.0f; /* bit replication to 8 bits */
-    c[1] = (float)((g << 2) | (g >> 4)) / 255.0f;
-    c[2] = (float)((b << 3) | (b >> 2)) / 255.0f;
-}
-
-/* One texel of a BC1 block: two RGB565 endpoints, 2-bit indices (row-major, LSB first);
- * c0 > c1 selects four colours, otherwise three and transparent black. */
-static void bc1_texel(const uint8_t *b, uint32_t tx, uint32_t ty, float c[4]) {
-    uint16_t c0 = (uint16_t)(b[0] | b[1] << 8), c1 = (uint16_t)(b[2] | b[3] << 8);
-    uint32_t idx = (b[4 + ty] >> (2 * tx)) & 3;
-    float e0[3], e1[3];
-    rgb565_to_float(c0, e0);
-    rgb565_to_float(c1, e1);
-    c[3] = 1.0f;
-    for (int k = 0; k < 3; k++) {
-        float v;
-        if (idx == 0) {
-            v = e0[k];
-        } else if (idx == 1) {
-            v = e1[k];
-        } else if (c0 > c1) {
-            v = idx == 2 ? (2.0f * e0[k] + e1[k]) / 3.0f : (e0[k] + 2.0f * e1[k]) / 3.0f;
-        } else {
-            v = idx == 2 ? (e0[k] + e1[k]) / 2.0f : 0.0f;
-        }
-        c[k] = v;
-    }
-    if (c0 <= c1 && idx == 3) {
-        c[3] = 0.0f;
-    }
-}
-
-static void tex_fetch(const texture *x, int32_t ix, int32_t iy, float out[4]) {
-    ix = tex_wrap(ix, (int32_t)x->width, x->wrap_u);
-    iy = tex_wrap(iy, (int32_t)x->height, x->wrap_v);
-    if (ix < 0 || iy < 0) {
-        memcpy(out, x->border, 16);
-        return;
-    }
-    int block = x->format == 0x24;
-    uint32_t ux = block ? (uint32_t)ix / 4 : (uint32_t)ix,
-             uy = block ? (uint32_t)iy / 4 : (uint32_t)iy;
-    uint64_t off = x->pitch_layout ? (uint64_t)uy * x->row_bytes + (uint64_t)ux * x->bpp
-                                   : gpu_bl_offset(ux * x->bpp, uy, x->row_bytes, x->bh);
-    float c[4] = {0, 0, 0, 1};
-    if (off + x->bpp <= x->size) {
-        const uint8_t *p = x->base + off;
-        switch (x->format) {
-        case 0x08:
-            for (int k = 0; k < 4; k++) {
-                c[k] = p[k] / 255.0f;
-            }
-            break;
-        case 0x15: {
-            uint16_t v = (uint16_t)(p[0] | p[1] << 8);
-            c[0] = (v & 0x1F) / 31.0f; /* B5G6R5: R in the low bits */
-            c[1] = ((v >> 5) & 0x3F) / 63.0f;
-            c[2] = ((v >> 11) & 0x1F) / 31.0f;
-            break;
-        }
-        case 0x18:
-            c[0] = p[0] / 255.0f;
-            c[1] = p[1] / 255.0f;
-            break;
-        case 0x1D:
-            c[0] = p[0] / 255.0f;
-            break;
-        case 0x0F:
-            memcpy(&c[0], p, 4);
-            break;
-        case 0x04:
-            memcpy(c, p, 8);
-            break;
-        case 0x01:
-            memcpy(c, p, 16);
-            break;
-        case 0x03:
-            for (int k = 0; k < 4; k++) {
-                c[k] = gpu_half_to_float((uint16_t)(p[2 * k] | p[2 * k + 1] << 8));
-            }
-            break;
-        case 0x24:
-            bc1_texel(p, (uint32_t)ix & 3, (uint32_t)iy & 3, c);
-            break;
-        default:
-            break;
-        }
-    }
-    /* Swizzle: per destination component, 0 zero, 2-5 R G B A, 6/7 one. */
-    for (int k = 0; k < 4; k++) {
-        uint32_t src = (x->swizzle >> (3 * k)) & 7;
-        out[k] = src >= 2 && src <= 5 ? c[src - 2] : src >= 6 ? 1.0f : 0.0f;
-    }
-}
-
-static void tex_sample(void *user, uint32_t index, float u, float v, float out[4]) {
-    tex_ctx *t = user;
-    texture *x = tex_lookup(t, index);
-    if (!x->valid) {
-        out[0] = out[1] = out[2] = 0.0f;
-        out[3] = 1.0f;
-        return;
-    }
-    float fx = u * (float)x->width, fy = v * (float)x->height;
-    if (x->mag_filter != 2) { /* nearest (the magnification filter; no mipmaps yet) */
-        tex_fetch(x, (int32_t)floorf(fx), (int32_t)floorf(fy), out);
-        return;
-    }
-    fx -= 0.5f;
-    fy -= 0.5f;
-    int32_t x0 = (int32_t)floorf(fx), y0 = (int32_t)floorf(fy);
-    float ax = fx - (float)x0, ay = fy - (float)y0;
-    float t00[4], t10[4], t01[4], t11[4];
-    tex_fetch(x, x0, y0, t00);
-    tex_fetch(x, x0 + 1, y0, t10);
-    tex_fetch(x, x0, y0 + 1, t01);
-    tex_fetch(x, x0 + 1, y0 + 1, t11);
-    for (int k = 0; k < 4; k++) {
-        float top = t00[k] + (t10[k] - t00[k]) * ax, bottom = t01[k] + (t11[k] - t01[k]) * ax;
-        out[k] = top + (bottom - top) * ay;
-    }
-}
-
-static void tex_texel(void *user, uint32_t index, int32_t ix, int32_t iy, float out[4]) {
+static void tex_sample(void *user, uint32_t index, const shader_tex_coord *c, float out[4]) {
     texture *x = tex_lookup(user, index);
-    if (!x->valid) {
+    if (!x->t.valid) {
         out[0] = out[1] = out[2] = 0.0f;
         out[3] = 1.0f;
         return;
     }
-    tex_fetch(x, ix, iy, out);
+    gpu_tex_sample(&x->t, c, out);
+}
+
+static void tex_texel(void *user, uint32_t index, int32_t ix, int32_t iy, uint32_t level,
+                      float out[4]) {
+    texture *x = tex_lookup(user, index);
+    if (!x->t.valid) {
+        out[0] = out[1] = out[2] = 0.0f;
+        out[3] = 1.0f;
+        return;
+    }
+    gpu_tex_fetch(&x->t, level, ix, iy, out);
 }
 
 typedef struct raster_ctx {
@@ -856,11 +670,14 @@ void gpu_ms_grid(uint32_t mode, uint32_t *gx, uint32_t *gy) {
 #define BAND_ROWS 8 /* rows per fragment-worker band */
 
 /*
- * Covered pixels are shaded in groups of SHADER_LANES: each one waits with its
- * coverage, depth and interpolation state until the group is full or the
- * triangle ends, then the group runs and its colours and depths are written in
- * the order the pixels were found. Pixels of one triangle never overlap, so
- * deferring their writes changes nothing.
+ * Pixels are shaded in 2x2 quads, two quads per group of SHADER_LANES, as the
+ * hardware does: a quad with any covered pixel runs all four lanes, so the
+ * texture units get the coordinate derivatives across the quad, and the
+ * uncovered lanes (helpers) write nothing. Each quad waits with its coverage,
+ * depth and interpolation state until the group is full or the triangle ends,
+ * then the group runs and its colours and depths are written in the order the
+ * pixels were found. Pixels of one triangle never overlap, so deferring their
+ * writes changes nothing.
  */
 typedef struct pending_frag {
     int32_t bx, by;
@@ -1029,67 +846,69 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
     fb->ns = ns;
     fb->depth_write_on = depth_write_on;
     fb->n = 0;
-    int32_t bx0 = x0 - x0 % (int32_t)gx, by0 = y0 - y0 % (int32_t)gy;
-    for (int32_t by = by0; by < y1; by += (int32_t)gy) {
-        if (((uint32_t)by / BAND_ROWS) % nbands != band) {
-            continue; /* another worker's rows (blocks never straddle bands) */
+    /* A quad is 2x2 pixels, 2gx x 2gy samples; BAND_ROWS is a multiple of 2gy, so a
+     * quad never straddles two workers' bands. */
+    int32_t qw = 2 * (int32_t)gx, qh = 2 * (int32_t)gy;
+    int32_t qx0 = x0 - x0 % qw, qy0 = y0 - y0 % qh;
+    for (int32_t qy = qy0; qy < y1; qy += qh) {
+        if (((uint32_t)qy / BAND_ROWS) % nbands != band) {
+            continue; /* another worker's rows */
         }
-        for (int32_t bx = bx0; bx < x1; bx += (int32_t)gx) {
-            pending_frag *fr = &fb->frag[fb->n];
-            uint32_t cover = 0;
-            float l1[3] = {0, 0, 0};
-            for (uint32_t k = 0; k < ns; k++) {
-                int32_t x = bx + (int32_t)(k % gx), y = by + (int32_t)(k / gx);
-                if (x < x0 || x >= x1 || y < y0 || y >= y1) {
-                    continue;
-                }
-                float px = (float)x + 0.5f, py = (float)y + 0.5f;
-                float w0 = edge(v1->win, v2->win, px, py) * inv_area;
-                float w1 = edge(v2->win, v0->win, px, py) * inv_area;
-                float w2 = edge(v0->win, v1->win, px, py) * inv_area;
-                if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
-                    continue;
-                }
-                fr->zp[k] = NULL;
-                fr->zq[k] = 0;
-                if (depth_test || depth_write_on) {
-                    fr->zp[k] = depth_ptr(dt, (uint32_t)x, (uint32_t)y);
-                    float z = w0 * v0->win[2] + w1 * v1->win[2] + w2 * v2->win[2];
-                    fr->zq[k] = depth_quantize(dt, z);
-                    if (fr->zp[k] && depth_test &&
-                        !depth_compare(depth_func, fr->zq[k], depth_read(dt, fr->zp[k]),
-                                       dt->format == 0x0A)) {
+        for (int32_t qx = qx0; qx < x1; qx += qw) {
+            uint32_t any = 0;
+            for (uint32_t lane = 0; lane < 4; lane++) {
+                int32_t bx = qx + (int32_t)(lane & 1) * (int32_t)gx;
+                int32_t by = qy + (int32_t)(lane >> 1) * (int32_t)gy;
+                pending_frag *fr = &fb->frag[fb->n + lane];
+                uint32_t cover = 0;
+                for (uint32_t k = 0; k < ns; k++) {
+                    int32_t x = bx + (int32_t)(k % gx), y = by + (int32_t)(k / gx);
+                    if (x < x0 || x >= x1 || y < y0 || y >= y1) {
                         continue;
                     }
+                    float px = (float)x + 0.5f, py = (float)y + 0.5f;
+                    float w0 = edge(v1->win, v2->win, px, py) * inv_area;
+                    float w1 = edge(v2->win, v0->win, px, py) * inv_area;
+                    float w2 = edge(v0->win, v1->win, px, py) * inv_area;
+                    if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
+                        continue;
+                    }
+                    fr->zp[k] = NULL;
+                    fr->zq[k] = 0;
+                    if (depth_test || depth_write_on) {
+                        fr->zp[k] = depth_ptr(dt, (uint32_t)x, (uint32_t)y);
+                        float z = w0 * v0->win[2] + w1 * v1->win[2] + w2 * v2->win[2];
+                        fr->zq[k] = depth_quantize(dt, z);
+                        if (fr->zp[k] && depth_test &&
+                            !depth_compare(depth_func, fr->zq[k], depth_read(dt, fr->zp[k]),
+                                           dt->format == 0x0A)) {
+                            continue;
+                        }
+                    }
+                    cover |= 1u << k;
                 }
-                l1[0] = w0;
-                l1[1] = w1;
-                l1[2] = w2;
-                cover |= 1u << k;
-            }
-            if (!cover) {
-                continue;
-            }
-            raster_ctx *c = &fb->ctx[fb->n];
-            c->v[0] = v0;
-            c->v[1] = v1;
-            c->v[2] = v2;
-            if (ns == 1) {
-                memcpy(c->l, l1, sizeof(c->l));
-                c->px = (float)bx + 0.5f;
-                c->py = (float)by + 0.5f;
-            } else { /* attributes at the pixel centre; gl_FragCoord in pixels */
+                /* Attributes at the pixel centre, covered or not: a helper lane only
+                 * feeds derivatives. gl_FragCoord is in pixels. */
+                raster_ctx *c = &fb->ctx[fb->n + lane];
+                c->v[0] = v0;
+                c->v[1] = v1;
+                c->v[2] = v2;
                 float cx = (float)bx + 0.5f * (float)gx, cy = (float)by + 0.5f * (float)gy;
                 c->l[0] = edge(v1->win, v2->win, cx, cy) * inv_area;
                 c->l[1] = edge(v2->win, v0->win, cx, cy) * inv_area;
                 c->l[2] = edge(v0->win, v1->win, cx, cy) * inv_area;
                 c->px = cx / (float)gx;
                 c->py = cy / (float)gy;
+                fr->bx = bx;
+                fr->by = by;
+                fr->cover = cover;
+                any |= cover;
             }
-            fr->bx = bx;
-            fr->by = by;
-            fr->cover = cover;
-            if (++fb->n == SHADER_LANES && flush_batch(fb) != 0) {
+            if (!any) {
+                continue;
+            }
+            fb->n += 4;
+            if (fb->n == SHADER_LANES && flush_batch(fb) != 0) {
                 free(fb);
                 return;
             }

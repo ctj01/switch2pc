@@ -18,6 +18,11 @@ target_include_directories(test_mme PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
 s2pc_add_test(test_vsync s2pc_common pthread)
 target_sources(test_vsync PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/vsync.c)
 target_include_directories(test_vsync PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
+s2pc_add_test(test_texture m)
+target_sources(test_texture PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_texture.c
+                                    ${CMAKE_SOURCE_DIR}/shims/hos_gpu/swizzle.c)
+target_include_directories(test_texture PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu
+                                                ${CMAKE_SOURCE_DIR}/src)
 s2pc_add_test(test_shader s2pc_common m)
 target_sources(test_shader PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader.c
                                    ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader_simd.c)

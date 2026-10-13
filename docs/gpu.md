@@ -149,11 +149,15 @@ other feature in this repository.
    eight compare functions, per-target blend factors and operations in
    deko3d's D3D-style numbering and OpenGL's).
 5. **M4, textures. Done.** TIC/TSC decoding, handles from the texture
-   constant buffer, RGBA8/RGB565/R8/RG8/float formats and BC1, swizzles,
-   wrap modes, nearest and bilinear filtering (magnification filter; no
-   mipmaps yet), `TEXS` and `TEX`. Exit met: textured quads match a
-   reference. Still open: mipmaps and the minification filter, BC2-BC7,
-   SDL2 through Mesa.
+   constant buffer, RGBA8/RGB565/R8/RG8/float formats and BC1 to BC5,
+   swizzles, wrap modes, nearest and bilinear filtering, mipmaps (level of
+   detail from the quad's coordinate derivatives, the TIC's level count and
+   view range, the TSC's bias and clamps, nearest and linear mip filters,
+   the minification filter once minified; `.LZ`, `.LL` and `.LB` forms of
+   `TEX`, `TEXS` and `TLDS`), block-linear layout per level as deko3d lays
+   it out. Exit met: textured quads match a reference, and `test_texture`
+   checks the decoders and the level selection against hand-worked values.
+   Still open: BC6/BC7, 3D and cube textures, SDL2 through Mesa.
 6. **M5, the rest (open-ended).** Compute, queries, transform feedback,
    tessellation and geometry stages, as real homebrew needs them.
 
@@ -257,6 +261,17 @@ Each point below cost a failed run and is now in `nvgpu.c`:
   its result across two register pairs selected by a 3-bit component code.
 - BC1 is addressed in 4x4 blocks of 8 bytes, block-linear like any other
   surface with one "texel" per block; the test covers both of its modes.
+  BC2 and BC3 put their alpha block first and decode the colour block in
+  four-colour mode whatever the endpoint order; BC4 and BC5 are one and two
+  of BC3's alpha blocks.
+- Mipmaps need the screen derivatives of the texture coordinates, which
+  only exist across a 2x2 pixel quad, so the rasteriser shades quads: a
+  quad with any covered pixel runs all four lanes, the uncovered ones as
+  helpers that write nothing. A lane that leaves its group on a divergent
+  branch has no quad and samples the base level. Mip levels follow level 0
+  in memory, each a block-linear surface whose block height shrinks while
+  half a block still covers it, which is deko3d's `calcLevelOffset` and
+  what the hardware addresses.
 
 ## What deko_examples taught
 
