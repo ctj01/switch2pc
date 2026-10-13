@@ -308,6 +308,9 @@ TEST(ipc_audren_silent_renderer) {
                         .send_pid = 1,
                         .data = &open,
                         .data_size = sizeof(open)};
+    open.param[4] = 1024; /* more voices than the renderer has: refused, not truncated */
+    ASSERT_TRUE(ipc_call(mgr, &req, &resp) != 0);
+    open.param[4] = 1;
     ASSERT_EQ(ipc_call(mgr, &req, &resp), 0);
     ASSERT_EQ(resp.num_move, 1);
     uint32_t ren = resp.move_handles[0];

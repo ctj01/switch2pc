@@ -20,10 +20,11 @@
 
 #define MOD "audren"
 
-#define FRAME_NS      5000000ull /* 200 Hz, AUDREN_TIMER_PERIOD_MS */
-#define MAX_RENDERERS 4
-#define MAX_VOICES    64
-#define MAX_POOLS     (4 * MAX_VOICES + 16)
+#define FRAME_NS        5000000ull /* 200 Hz, AUDREN_TIMER_PERIOD_MS */
+#define MAX_RENDERERS   4
+#define MAX_VOICES      256
+#define MAX_POOLS       (4 * MAX_VOICES + 16)
+#define MAX_SAMPLE_RATE 192000u
 
 /* Wire sizes of the update request and response (switchbrew, libnx audren.h). */
 #define HDR_SIZE       0x40
@@ -160,10 +161,21 @@ static void voice_advance(voice_state *v, const uint8_t *in, uint64_t now) {
         v->budget = 0;
         return;
     }
-    uint64_t elapsed = (now - v->last_ns) * sample_rate / 1000000000ull;
+    /* Both factors are bounded before the product: a stall of over a second is
+     * not caught up, and the rate is the guest's word, so cap it well above any
+     * real one (the console's renderer takes at most 192 kHz). */
+    uint64_t gap = now - v->last_ns;
+    if (gap > 1000000000ull) {
+        gap = 1000000000ull;
+        v->last_ns = now - gap;
+    }
+    if (sample_rate > MAX_SAMPLE_RATE) {
+        sample_rate = MAX_SAMPLE_RATE;
+    }
+    uint64_t elapsed = gap * sample_rate / 1000000000ull;
     v->last_ns += elapsed * 1000000000ull / sample_rate;
     v->budget += elapsed;
-    if (v->budget > sample_rate) { /* a stall of over a second is not caught up */
+    if (v->budget > sample_rate) {
         v->budget = sample_rate;
     }
     const uint8_t *wb = in + 0x60 + (head & 3) * WAVEBUF_SIZE;
@@ -277,13 +289,22 @@ static hos_result renderer_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
         pthread_mutex_unlock(&g_lock);
         return HOS_RESULT_SUCCESS;
     case 7: /* QuerySystemEvent -> event */ {
+        /* The timer reads r->event under g_lock; create it there too. */
+        pthread_mutex_lock(&g_lock);
         if (!r->event_handle) {
-            r->event_handle = hos_ipc_event_create(&r->event);
-            if (!r->event_handle) {
-                return HOS_KERNEL_OUT_OF_RESOURCE;
+            void *ev = NULL;
+            uint32_t eh = hos_ipc_event_create(&ev);
+            if (eh) {
+                r->event = ev;
+                r->event_handle = eh;
             }
         }
-        uint32_t h = hos_ipc_copy_handle(r->event_handle);
+        uint32_t event_handle = r->event_handle;
+        pthread_mutex_unlock(&g_lock);
+        if (!event_handle) {
+            return HOS_KERNEL_OUT_OF_RESOURCE;
+        }
+        uint32_t h = hos_ipc_copy_handle(event_handle);
         if (!h) {
             return HOS_KERNEL_OUT_OF_HANDLES;
         }
@@ -343,17 +364,14 @@ static hos_result device_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
     case 4:  /* QueryAudioDeviceSystemEvent -> event */
     case 11: /* QueryAudioDeviceInputEvent */
     case 12: /* QueryAudioDeviceOutputEvent */ {
-        /* Never signalled: the output device never changes. */
+        /* Never signalled: the output device never changes. The event's own
+         * handle goes to the game, as hid's out_event does. */
         void *ev = NULL;
         uint32_t h = hos_ipc_event_create(&ev);
         if (!h) {
             return HOS_KERNEL_OUT_OF_RESOURCE;
         }
-        uint32_t copy = hos_ipc_copy_handle(h);
-        if (!copy) {
-            return HOS_KERNEL_OUT_OF_HANDLES;
-        }
-        ctx->copy_handles[ctx->num_copy++] = copy;
+        ctx->copy_handles[ctx->num_copy++] = h;
         return HOS_RESULT_SUCCESS;
     }
     case 5: /* GetActiveChannelCount -> u32 */ {
@@ -378,17 +396,34 @@ static hos_result open_renderer(hos_ipc_ctx *ctx) {
      * submix_count, voice_count, sink_count, effect_count, ... */
     uint32_t p[7] = {0};
     hos_ipc_in_read(ctx, 0, p, sizeof(p));
-    pthread_mutex_lock(&g_lock);
+    if (p[4] > MAX_VOICES) {
+        HOS_LOGE(MOD, "renderer asks for %u voices, this renderer has %u", p[4], MAX_VOICES);
+        return HOS_KERNEL_OUT_OF_RESOURCE;
+    }
+    hos_object *o = NULL;
     renderer *r = NULL;
+    /* The frame timer walks the table under g_lock and reads state and event:
+     * a slot is taken and filled in completely before the lock is released. */
+    pthread_mutex_lock(&g_lock);
     for (int i = 0; i < MAX_RENDERERS; i++) {
         if (!g_renderers[i].used) {
             r = &g_renderers[i];
-            memset(r, 0, sizeof(*r));
-            r->used = 1;
             break;
         }
     }
-    if (r && !g_timer_running) {
+    if (r) {
+        memset(r, 0, sizeof(*r));
+        r->sample_rate = p[0] ? p[0] : 48000;
+        r->sample_count = p[1] ? p[1] : 240;
+        r->mix_buffer_count = p[2];
+        r->voice_count = p[4];
+        r->sink_count = p[5];
+        r->state = RENDERER_STOPPED;
+        r->time_limit = 100;
+        o = hos_ipc_object_new(&g_renderer_class, r);
+        r->used = o != NULL;
+    }
+    if (o && !g_timer_running) {
         if (pthread_create(&g_timer, NULL, timer_main, NULL) == 0) {
             pthread_detach(g_timer);
             g_timer_running = 1;
@@ -397,23 +432,11 @@ static hos_result open_renderer(hos_ipc_ctx *ctx) {
         }
     }
     pthread_mutex_unlock(&g_lock);
-    if (!r) {
+    if (!o) {
         return HOS_KERNEL_OUT_OF_RESOURCE;
     }
-    r->sample_rate = p[0] ? p[0] : 48000;
-    r->sample_count = p[1] ? p[1] : 240;
-    r->mix_buffer_count = p[2];
-    r->voice_count = p[4] > MAX_VOICES ? MAX_VOICES : p[4];
-    r->sink_count = p[5];
-    r->state = RENDERER_STOPPED;
-    r->time_limit = 100;
     HOS_LOGD(MOD, "renderer opened: %u Hz, %u samples per frame, %u voices, %u sinks",
              r->sample_rate, r->sample_count, p[4], p[5]);
-    hos_object *o = hos_ipc_object_new(&g_renderer_class, r);
-    if (!o) {
-        r->used = 0;
-        return HOS_KERNEL_OUT_OF_RESOURCE;
-    }
     return hos_ipc_return_object(ctx, o);
 }
 
