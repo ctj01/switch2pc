@@ -299,6 +299,23 @@ def write_history(path, results, now, commit):
         f.write("\n")
 
 
+def markdown(results, now, commit):
+    lines = [f"| App | Category | Level | Frames | Blockers |", "|---|---|---|---|---|"]
+    for r in results:
+        keys = ", ".join(f"`{b['key']}`" for b in r["blockers"][:3])
+        if len(r["blockers"]) > 3:
+            keys += f" +{len(r['blockers']) - 3}"
+        if r.get("crash"):
+            keys = f"{r['crash']}" + (f"; {keys}" if keys else "")
+        if r.get("note"):
+            keys += f" ({r['note']})" if keys else r["note"]
+        lines.append(f"| {r.get('title') or r['name']} | {r.get('category', '')} | **{r['level']}** | "
+                     f"{r['frames']} | {keys} |")
+    counts = ", ".join(f"{k} {v}" for k, v in counts_of(results).items())
+    return (f"**Homebrew compatibility** at {commit}, {now}: {counts}\n\n" + "\n".join(lines)
+            + "\n")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--apps", default=os.path.join(ROOT, "compat/apps.json"))
@@ -308,6 +325,7 @@ def main():
     ap.add_argument("--results", default=os.path.join(ROOT, "compat/results.json"))
     ap.add_argument("--history", default=None, help="append the level counts to this file")
     ap.add_argument("--thumbs", default=os.path.join(ROOT, "docs/compat"))
+    ap.add_argument("--markdown", default=None, help="also write the table as markdown here")
     ap.add_argument("--every", type=int, default=10, help="dump every n-th frame")
     ap.add_argument("--grace", type=int, default=120,
                     help="seconds past the duration before a run is abandoned")
@@ -327,6 +345,9 @@ def main():
         f.write("\n")
     if args.history:
         write_history(args.history, results, now, commit)
+    if args.markdown:
+        with open(args.markdown, "w") as f:
+            f.write(markdown(results, now, commit))
     log(" ".join(f"{k}={v}" for k, v in counts_of(results).items()) + f" -> {args.results}")
     return 0
 

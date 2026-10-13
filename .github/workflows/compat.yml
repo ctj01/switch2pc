@@ -1,0 +1,136 @@
+# Nightly homebrew compatibility list: build every app in compat/apps.json from
+# source with devkitPro, run each one under switch2pc on a native ARM64 runner,
+# classify how far it gets and publish the table on the status page.
+# See compat/README.md.
+name: compat
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: 'Space-separated app names to run (default: every app)'
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compat-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      apps: ${{ steps.gen.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: gen
+        run: echo "apps=$(python3 compat/matrix.py ${{ inputs.apps }})" >> "$GITHUB_OUTPUT"
+
+  # One job per app in the devkitPro container. A build failure is a result
+  # (build.json says so), never a failed job; the cache is saved only for a
+  # successful build, keyed on everything that affects it.
+  build:
+    needs: matrix
+    runs-on: ubuntu-24.04
+    container: devkitpro/devkita64:latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.matrix.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: build/compat/${{ matrix.app.name }}
+          key: compat-${{ matrix.app.key }}
+      - name: Build ${{ matrix.app.name }}
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: compat/build_app.sh "${{ matrix.app.name }}" "build/compat/${{ matrix.app.name }}"
+      - name: Result
+        id: result
+        run: |
+          python3 -c 'import json,sys; b=json.load(open(sys.argv[1])); print("ok=%s" % str(b["ok"]).lower())' \
+            "build/compat/${{ matrix.app.name }}/build.json" | tee -a "$GITHUB_OUTPUT"
+          tail -20 "build/compat/${{ matrix.app.name }}/build.log"
+      - uses: actions/cache/save@v4
+        if: steps.cache.outputs.cache-hit != 'true' && steps.result.outputs.ok == 'true'
+        with:
+          path: build/compat/${{ matrix.app.name }}
+          key: compat-${{ matrix.app.key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app.name }}
+          path: build/compat/${{ matrix.app.name }}
+          retention-days: 3
+
+  # Build switch2pc natively, run every app, write the results. On main the
+  # results, thumbnails and the regenerated status page are committed so GitHub
+  # Pages updates and one issue per blocker is kept; elsewhere they are artifacts.
+  run:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the status page's history walks every commit
+      - uses: actions/download-artifact@v4
+        with:
+          path: build/compat
+      - name: Install toolchain
+        run: sudo scripts/setup_arm64_native.sh
+      - name: Build switch2pc
+        run: S2PC_NO_TESTS=1 scripts/build.sh
+      - name: Run every app
+        run: |
+          python3 compat/run.py --nro-dir build/compat --out build/compat/runs \
+            --results compat/results.json --history compat/history.json --thumbs docs/compat \
+            --markdown build/compat/summary.md
+          cat build/compat/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Issues (one per blocker; dry run off main)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.ref }}" = refs/heads/main ]; then
+            python3 compat/issues.py --results compat/results.json --state compat/issues.json
+          else
+            python3 compat/issues.py --results compat/results.json --dry-run compat/issues_preview.md
+          fi
+      - name: Status page
+        run: python3 scripts/gen_status.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compat-results
+          path: |
+            compat/results.json
+            compat/history.json
+            compat/issues_preview.md
+            compat/issues.json
+            docs/compat
+            docs/status.html
+            build/compat/summary.md
+            build/compat/runs/*/hosrun.log
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Commit results
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add compat/results.json compat/history.json docs/compat docs/status.html
+          [ -f compat/issues.json ] && git add compat/issues.json
+          if git diff --cached --quiet; then echo "nothing changed"; exit 0; fi
+          git commit -m "compat: nightly results $(date -u +%Y-%m-%d)"
+          git pull --rebase origin main
+          git push origin HEAD:main
