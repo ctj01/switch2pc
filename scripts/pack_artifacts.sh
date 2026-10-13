@@ -13,7 +13,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 files=()
 for f in examples/*/build/*.nso examples/*/romfs build/deko_examples/deko_examples.nso \
-    build/deko_examples/romfs; do
+    build/deko_examples/deko_examples.nro build/deko_examples/romfs; do
     [ -e "$f" ] && files+=("$f")
 done
 if [ ${#files[@]} -eq 0 ]; then

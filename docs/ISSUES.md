@@ -17,7 +17,7 @@ numbers.
 | 9  | hos_cpu | `sm:` service manager and ConnectToNamedPort                   | done (ipc.c, ipc_sm.c; CMIF, TIPC, domains) |
 | 10 | loader  | Load several NSOs (rtld, main, sdk, subsdk0-9) at adjacent bases | done (hosrun; exefs directory or explicit list) |
 | 11 | tests   | libFuzzer harness for nso_load, mod0_relocate and hipc_parse   | open   |
-| 12 | ci      | GitHub Actions: host build + cross build + ctest under qemu    | open   |
+| 12 | ci      | GitHub Actions: host build + cross build + ctest under qemu    | done (.github/workflows/ci.yml: devkitPro container builds the homebrew, native ARM64 and qemu jobs run the suite, the GitHub Action is tested) |
 | 13 | hos_cpu | Shared memory and transfer memory svcs (0x13-0x15, 0x50)        | done (svc_shmem.c; MapTransferMemory 0x51/0x52 still open) |
 | 14 | hos_os  | `applet` (appletOE/AE), `time`, `set:sys` stubs so runtime init completes | done (applet.c, time.c, setsys.c) |
 | 15 | hos_cpu | Priority-ordered wake in sync.c instead of FIFO                | open   |
