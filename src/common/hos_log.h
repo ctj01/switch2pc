@@ -9,6 +9,8 @@
  * of error, warn, info, debug, trace. Default is info.
  */
 
+#include <stddef.h>
+
 typedef enum hos_log_level {
     HOS_LOG_ERROR = 0,
     HOS_LOG_WARN = 1,
@@ -41,6 +43,17 @@ void hos_log_init_from_env(void);
  */
 void hos_log(hos_log_level level, const char *module, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
+
+/**
+ * Log text the game produced (svcOutputDebugString, lm), always under the module
+ * "game" and one line per line of text, with control characters replaced, so a game
+ * cannot write lines that read as switch2pc's own (tools parse those).
+ *
+ * @param source  The game's own module name or NULL; shown before the text
+ * @param text    The game's bytes, not necessarily NUL-terminated
+ * @param len     Their length
+ */
+void hos_log_guest(hos_log_level level, const char *source, const char *text, size_t len);
 
 #define HOS_LOGE(mod, ...) hos_log(HOS_LOG_ERROR, mod, __VA_ARGS__)
 #define HOS_LOGW(mod, ...) hos_log(HOS_LOG_WARN, mod, __VA_ARGS__)

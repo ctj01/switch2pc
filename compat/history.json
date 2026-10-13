@@ -1,0 +1,15 @@
+[
+ {
+  "date": "2026-10-13",
+  "generated_at": "2026-10-13T02:42:18Z",
+  "switch2pc_commit": "dc6ba46",
+  "counts": {
+   "build-failed": 0,
+   "crash": 1,
+   "boots": 4,
+   "renders": 4,
+   "runs": 19
+  },
+  "total": 28
+ }
+]

@@ -1,0 +1,166 @@
+# Nightly homebrew compatibility list: build every app in compat/apps.json from
+# source with devkitPro, run each one under switch2pc on a native ARM64 runner,
+# classify how far it gets and publish the table on the status page.
+# See compat/README.md.
+name: compat
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: 'Space-separated app names to run (default: every app)'
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compat-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      apps: ${{ steps.gen.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: gen
+        env:
+          APPS: ${{ inputs.apps }}   # through the environment, never into the script text
+        run: |
+          read -r -a names <<< "$APPS"
+          echo "apps=$(python3 compat/matrix.py "${names[@]}")" >> "$GITHUB_OUTPUT"
+
+  # One job per app in the devkitPro container. A build failure is a result
+  # (build.json says so), never a failed job; the cache is saved only for a
+  # successful build, keyed on everything that affects it.
+  build:
+    needs: matrix
+    runs-on: ubuntu-24.04
+    container: devkitpro/devkita64:latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.matrix.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: build/compat/${{ matrix.app.name }}
+          key: compat-${{ matrix.app.key }}
+      - name: Build ${{ matrix.app.name }}
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: compat/build_app.sh "${{ matrix.app.name }}" "build/compat/${{ matrix.app.name }}"
+      - name: Result
+        id: result
+        run: |
+          python3 -c 'import json,sys; b=json.load(open(sys.argv[1])); print("ok=%s" % str(b["ok"]).lower())' \
+            "build/compat/${{ matrix.app.name }}/build.json" | tee -a "$GITHUB_OUTPUT"
+          tail -20 "build/compat/${{ matrix.app.name }}/build.log"
+      - uses: actions/cache/save@v4
+        if: steps.cache.outputs.cache-hit != 'true' && steps.result.outputs.ok == 'true'
+        with:
+          path: build/compat/${{ matrix.app.name }}
+          key: compat-${{ matrix.app.key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app.name }}
+          path: build/compat/${{ matrix.app.name }}
+          retention-days: 3
+
+  # Build switch2pc natively and run every app. The apps are third-party code
+  # running natively on this runner, so this job can write nothing: read-only
+  # token, no credentials left in .git/config. Results leave as an artifact.
+  run:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the status page's history walks every commit
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: build/compat
+      - name: Install toolchain
+        run: sudo scripts/setup_arm64_native.sh
+      - name: Build switch2pc
+        run: S2PC_NO_TESTS=1 scripts/build.sh
+      - name: Run every app
+        run: |
+          python3 compat/run.py --nro-dir build/compat --out build/compat/runs \
+            --results compat/results.json --history compat/history.json --thumbs docs/compat \
+            --markdown build/compat/summary.md
+          cat build/compat/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Issues preview
+        run: python3 compat/issues.py --results compat/results.json --dry-run build/compat/issues_preview.md
+      - name: Status page
+        run: python3 scripts/gen_status.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compat-results
+          path: |
+            compat/results.json
+            compat/history.json
+            docs/compat
+            docs/status.html
+            build/compat/summary.md
+            build/compat/issues_preview.md
+            build/compat/runs/*/hosrun.log
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # Publish a complete nightly run on main: results and thumbnails are checked
+  # as data, the page is regenerated here from them, and one issue per blocker
+  # is kept. A partial run (workflow_dispatch with apps) or one whose builds did
+  # not all complete publishes nothing.
+  publish:
+    needs: [build, run]
+    if: ${{ github.ref == 'refs/heads/main' && inputs.apps == '' && needs.build.result == 'success' && needs.run.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: compat-results
+          path: ${{ runner.temp }}/results
+      - name: Take the results in as data
+        run: python3 compat/publish.py --from "$RUNNER_TEMP/results"
+      - name: Issues (one per blocker)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 compat/issues.py --results compat/results.json --state compat/issues.json
+          cp compat/issues.json "$RUNNER_TEMP/issues.json"
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3; do
+            python3 scripts/gen_status.py
+            git add compat/results.json compat/history.json compat/issues.json docs/compat docs/status.html
+            if git diff --cached --quiet; then echo "nothing changed"; exit 0; fi
+            git commit -q -m "compat: nightly results $(date -u +%Y-%m-%d)"
+            if git push origin HEAD:main; then exit 0; fi
+            # main moved meanwhile: start again from it with the same data
+            git reset -q --hard origin/main
+            git pull -q --ff-only origin main
+            python3 compat/publish.py --from "$RUNNER_TEMP/results"
+            cp "$RUNNER_TEMP/issues.json" compat/issues.json
+          done
+          exit 1

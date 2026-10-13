@@ -1,5 +1,5 @@
 /*
- * acc:u0 / acc:u1: the account service. One local user, always present and
+ * acc:u0 / acc:u1 / acc:su: the account service. One local user, always present and
  * already "opened", so homebrew that asks for a user (save data, profile
  * pickers) gets one without a selection dialog. The nickname comes from
  * HOS_USER_NAME, then $USER, then "switch2pc"; the profile image is empty.
@@ -148,5 +148,21 @@ static hos_result account_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
 const hos_service_class hos_account_class = {
     .name = "acc:u0",
     .dispatch = account_dispatch,
+    .destroy = NULL,
+};
+
+/* acc:u1 (system) and acc:su (administrator) share commands 0-5 with acc:u0, but
+ * their higher ids are other commands (51 there is GetUserStateChangeNotifier, an
+ * object, not a uid): only the shared ones are answered. */
+static hos_result account_system_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
+    if (ctx->cmd <= 5) {
+        return account_dispatch(obj, ctx);
+    }
+    return hos_ipc_unimplemented(obj, ctx);
+}
+
+const hos_service_class hos_account_system_class = {
+    .name = "acc:su",
+    .dispatch = account_system_dispatch,
     .destroy = NULL,
 };
