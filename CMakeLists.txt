@@ -14,6 +14,7 @@ add_compile_options(-Wall -Wextra -Werror -Wshadow -Wvla -Wformat=2 -Wundef)
 add_compile_definitions(_GNU_SOURCE)
 
 option(S2PC_BUILD_TESTS "Build the test suite" ON)
+option(S2PC_FUZZ "Build the libFuzzer harnesses (clang only; see scripts/fuzz.sh)" OFF)
 
 # Host tool used to build example NSOs. Defaults to the in-tree target, which only
 # runs on the build machine if it is ARM64 or has qemu binfmt registered. On a plain
@@ -39,4 +40,7 @@ endif()
 if(S2PC_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+if(S2PC_FUZZ)
+    add_subdirectory(fuzz)
 endif()
