@@ -810,10 +810,104 @@ void gpu_ms_grid(uint32_t mode, uint32_t *gx, uint32_t *gy) {
 
 #define BAND_ROWS 8 /* rows per fragment-worker band */
 
+/*
+ * Covered pixels are shaded in groups of SHADER_LANES: each one waits with its
+ * coverage, depth and interpolation state until the group is full or the
+ * triangle ends, then the group runs and its colours and depths are written in
+ * the order the pixels were found. Pixels of one triangle never overlap, so
+ * deferring their writes changes nothing.
+ */
+typedef struct pending_frag {
+    int32_t bx, by;
+    uint32_t cover, zq[16];
+    uint32_t *zp[16];
+} pending_frag;
+
+typedef struct frag_batch {
+    const uint32_t *r;
+    const program *fs;
+    const shader_env *env;
+    shader_group *g;
+    const targets *ts;
+    const depth_target *dt;
+    gpu_draw_stats *st;
+    uint32_t omap, first_reg[8], gx, ns;
+    int depth_write_on;
+    uint32_t n;
+    pending_frag frag[SHADER_LANES];
+    raster_ctx ctx[SHADER_LANES];
+} frag_batch;
+
+static float ipa_lane(void *user, uint32_t lane, uint32_t addr, uint32_t mode) {
+    return ipa(&((raster_ctx *)user)[lane], addr, mode);
+}
+
+/* Shade and write the pending pixels; -1 when the shader stops. */
+static int flush_batch(frag_batch *b) {
+    if (!b->n) {
+        return 0;
+    }
+    const uint32_t *r = b->r;
+    shader_group *g = b->g;
+    g->ipa = ipa_lane;
+    g->user = b->ctx;
+    uint64_t bad = 0;
+    uint32_t n = b->n;
+    b->n = 0;
+    if (shader_exec_group(b->fs->prog, g, (1u << n) - 1, b->env, &bad) != 0) {
+        if (!b->st->shader_errors++) {
+            HOS_LOGW(MOD, "fragment shader stopped at instruction %#018" PRIx64, bad);
+        }
+        return -1;
+    }
+    for (uint32_t q = 0; q < n; q++) {
+        const pending_frag *fr = &b->frag[q];
+        for (uint32_t t_i = 0; t_i < b->ts->n; t_i++) {
+            const target *tk = &b->ts->t[t_i];
+            uint32_t m = (b->omap >> (4 * tk->rt)) & 0xF, rn = b->first_reg[tk->rt];
+            if (!tk->base || !m) {
+                continue;
+            }
+            float src[4] = {0, 0, 0, 0};
+            for (uint32_t ch = 0; ch < 4; ch++) {
+                if (m & (1u << ch)) {
+                    src[ch] = fbits(g->r[rn++][q]);
+                }
+            }
+            int blending = r[M3D_BLEND_ENABLE + tk->rt] & 1;
+            for (uint32_t k = 0; k < b->ns; k++) {
+                if (!(fr->cover & (1u << k))) {
+                    continue;
+                }
+                uint32_t x = (uint32_t)fr->bx + k % b->gx, y = (uint32_t)fr->by + k / b->gx;
+                float rgba[4] = {src[0], src[1], src[2], src[3]};
+                if (blending) {
+                    uint64_t off = tk->pitch_layout
+                                       ? (uint64_t)y * tk->row_bytes + (uint64_t)x * tk->bpp
+                                       : gpu_bl_offset(x * tk->bpp, y, tk->row_bytes, tk->bh);
+                    float dst[4] = {0, 0, 0, 0};
+                    if (off + tk->bpp <= tk->size) {
+                        gpu_decode_color(tk->format, tk->base + off, dst);
+                    }
+                    blend(r, tk->rt, dst, rgba);
+                }
+                write_pixel(tk, x, y, rgba);
+            }
+        }
+        for (uint32_t k = 0; k < b->ns; k++) {
+            if ((fr->cover & (1u << k)) && fr->zp[k] && b->depth_write_on) {
+                depth_write(b->dt, fr->zp[k], fr->zq[k]);
+            }
+        }
+        b->st->pixels += (uint64_t)__builtin_popcount(fr->cover);
+    }
+    return 0;
+}
+
 static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v1, const vertex *v2,
-                            const program *fs, shader_env *env, const targets *ts,
-                            const depth_target *dt, int may_cull, uint32_t band, uint32_t nbands,
-                            gpu_draw_stats *st) {
+                            const program *fs, shader_env *env, shader_group *grp,
+                            const targets *ts, const depth_target *dt, int may_cull, uint32_t band,
+                            uint32_t nbands, gpu_draw_stats *st) {
     const target *t = &ts->t[0];
     if (v0->pos[3] <= 0.0f || v1->pos[3] <= 0.0f || v2->pos[3] <= 0.0f) {
         return; /* FIXME(#40): clip against w > 0 instead of dropping */
@@ -871,9 +965,6 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
         }
     }
     uint32_t depth_func = r[M3D_DEPTH_FUNC];
-    raster_ctx c = {.v = {v0, v1, v2}};
-    env->ipa = ipa;
-    env->user = &c;
     float inv_area = 1.0f / area;
     /* Multisampling shades once per pixel, as the hardware does: each sample of the
      * pixel (a gx x gy block of the target) is covered and depth-tested on its own,
@@ -882,14 +973,31 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
     uint32_t gx, gy;
     gpu_ms_grid(r[M3D_MS_MODE], &gx, &gy);
     uint32_t ns = gx * gy;
+    frag_batch *fb = malloc(sizeof(*fb));
+    if (!fb) {
+        return;
+    }
+    fb->r = r;
+    fb->fs = fs;
+    fb->env = env;
+    fb->g = grp;
+    fb->ts = ts;
+    fb->dt = dt;
+    fb->st = st;
+    fb->omap = omap;
+    memcpy(fb->first_reg, first_reg, sizeof(first_reg));
+    fb->gx = gx;
+    fb->ns = ns;
+    fb->depth_write_on = depth_write_on;
+    fb->n = 0;
     int32_t bx0 = x0 - x0 % (int32_t)gx, by0 = y0 - y0 % (int32_t)gy;
     for (int32_t by = by0; by < y1; by += (int32_t)gy) {
         if (((uint32_t)by / BAND_ROWS) % nbands != band) {
             continue; /* another worker's rows (blocks never straddle bands) */
         }
         for (int32_t bx = bx0; bx < x1; bx += (int32_t)gx) {
-            uint32_t cover = 0, zq[16];
-            uint32_t *zp[16];
+            pending_frag *fr = &fb->frag[fb->n];
+            uint32_t cover = 0;
             float l1[3] = {0, 0, 0};
             for (uint32_t k = 0; k < ns; k++) {
                 int32_t x = bx + (int32_t)(k % gx), y = by + (int32_t)(k / gx);
@@ -903,14 +1011,14 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
                 if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
                     continue;
                 }
-                zp[k] = NULL;
-                zq[k] = 0;
+                fr->zp[k] = NULL;
+                fr->zq[k] = 0;
                 if (depth_test || depth_write_on) {
-                    zp[k] = depth_ptr(dt, (uint32_t)x, (uint32_t)y);
+                    fr->zp[k] = depth_ptr(dt, (uint32_t)x, (uint32_t)y);
                     float z = w0 * v0->win[2] + w1 * v1->win[2] + w2 * v2->win[2];
-                    zq[k] = depth_quantize(dt, z);
-                    if (zp[k] && depth_test &&
-                        !depth_compare(depth_func, zq[k], depth_read(dt, zp[k]),
+                    fr->zq[k] = depth_quantize(dt, z);
+                    if (fr->zp[k] && depth_test &&
+                        !depth_compare(depth_func, fr->zq[k], depth_read(dt, fr->zp[k]),
                                        dt->format == 0x0A)) {
                         continue;
                     }
@@ -923,71 +1031,33 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
             if (!cover) {
                 continue;
             }
+            raster_ctx *c = &fb->ctx[fb->n];
+            c->v[0] = v0;
+            c->v[1] = v1;
+            c->v[2] = v2;
             if (ns == 1) {
-                memcpy(c.l, l1, sizeof(c.l));
-                c.px = (float)bx + 0.5f;
-                c.py = (float)by + 0.5f;
+                memcpy(c->l, l1, sizeof(c->l));
+                c->px = (float)bx + 0.5f;
+                c->py = (float)by + 0.5f;
             } else { /* attributes at the pixel centre; gl_FragCoord in pixels */
                 float cx = (float)bx + 0.5f * (float)gx, cy = (float)by + 0.5f * (float)gy;
-                c.l[0] = edge(v1->win, v2->win, cx, cy) * inv_area;
-                c.l[1] = edge(v2->win, v0->win, cx, cy) * inv_area;
-                c.l[2] = edge(v0->win, v1->win, cx, cy) * inv_area;
-                c.px = cx / (float)gx;
-                c.py = cy / (float)gy;
+                c->l[0] = edge(v1->win, v2->win, cx, cy) * inv_area;
+                c->l[1] = edge(v2->win, v0->win, cx, cy) * inv_area;
+                c->l[2] = edge(v0->win, v1->win, cx, cy) * inv_area;
+                c->px = cx / (float)gx;
+                c->py = cy / (float)gy;
             }
-            env->killed = 0;
-            uint64_t bad = 0;
-            if (shader_exec(fs->prog, env, &bad) != 0) {
-                if (!st->shader_errors++) {
-                    HOS_LOGW(MOD, "fragment shader stopped at instruction %#018" PRIx64, bad);
-                }
-                env->user = NULL;
+            fr->bx = bx;
+            fr->by = by;
+            fr->cover = cover;
+            if (++fb->n == SHADER_LANES && flush_batch(fb) != 0) {
+                free(fb);
                 return;
             }
-            if (env->killed) {
-                continue;
-            }
-            for (uint32_t t_i = 0; t_i < ts->n; t_i++) {
-                const target *tk = &ts->t[t_i];
-                uint32_t m = (omap >> (4 * tk->rt)) & 0xF, rn = first_reg[tk->rt];
-                if (!tk->base || !m) {
-                    continue;
-                }
-                float src[4] = {0, 0, 0, 0};
-                for (uint32_t ch = 0; ch < 4; ch++) {
-                    if (m & (1u << ch)) {
-                        src[ch] = fbits(env->r[rn++]);
-                    }
-                }
-                int blending = r[M3D_BLEND_ENABLE + tk->rt] & 1;
-                for (uint32_t k = 0; k < ns; k++) {
-                    if (!(cover & (1u << k))) {
-                        continue;
-                    }
-                    uint32_t x = (uint32_t)bx + k % gx, y = (uint32_t)by + k / gx;
-                    float rgba[4] = {src[0], src[1], src[2], src[3]};
-                    if (blending) {
-                        uint64_t off = tk->pitch_layout
-                                           ? (uint64_t)y * tk->row_bytes + (uint64_t)x * tk->bpp
-                                           : gpu_bl_offset(x * tk->bpp, y, tk->row_bytes, tk->bh);
-                        float dst[4] = {0, 0, 0, 0};
-                        if (off + tk->bpp <= tk->size) {
-                            gpu_decode_color(tk->format, tk->base + off, dst);
-                        }
-                        blend(r, tk->rt, dst, rgba);
-                    }
-                    write_pixel(tk, x, y, rgba);
-                }
-            }
-            for (uint32_t k = 0; k < ns; k++) {
-                if ((cover & (1u << k)) && zp[k] && depth_write_on) {
-                    depth_write(dt, zp[k], zq[k]);
-                }
-            }
-            st->pixels += (uint64_t)__builtin_popcount(cover);
         }
     }
-    env->user = NULL; /* c lives on this stack frame */
+    flush_batch(fb);
+    free(fb);
 }
 
 /*
@@ -1022,9 +1092,11 @@ static void frag_worker(void *arg, uint32_t band, uint32_t nbands) {
     frag_job *j = arg;
     gpu_draw_stats *st = &j->st[band];
     shader_env *env = malloc(sizeof(*env));
+    shader_group *grp = malloc(sizeof(*grp));
     tex_ctx *tc = j->tc ? malloc(sizeof(*tc)) : NULL;
-    if (!env || (j->tc && !tc)) {
+    if (!env || !grp || (j->tc && !tc)) {
         free(env);
+        free(grp);
         free(tc);
         return;
     }
@@ -1036,11 +1108,12 @@ static void frag_worker(void *arg, uint32_t band, uint32_t nbands) {
     st->shader_errors = j->errors;
     for (uint32_t k = 0; k < j->ntris; k++) {
         const frag_tri *t = &j->tris[k];
-        raster_triangle(j->r, t->v[0], t->v[1], t->v[2], j->fs, env, j->ts, j->dt, !t->no_cull,
+        raster_triangle(j->r, t->v[0], t->v[1], t->v[2], j->fs, env, grp, j->ts, j->dt, !t->no_cull,
                         band, nbands, st);
     }
     st->shader_errors -= j->errors;
     free(tc);
+    free(grp);
     free(env);
 }
 

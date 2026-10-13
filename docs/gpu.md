@@ -52,6 +52,22 @@ There the profile is plain: the shader interpreter is two thirds of the time
 (deferred: shader_run 67%, raster loop 11%, texture fetch 9%), so a
 predecoded or compiled shader is the next lever, before or alongside M2.
 
+Two steps followed. Shaders are now decoded once per program (handler, guard,
+registers, operand B resolved) and shared by the workers; natively that gave
+6-12%, because the interpreter was already at 2-3 ns per instruction and what
+remained was dispatch itself. So fragments now run in groups of eight
+(gpu_shader_simd.c): one dispatch per instruction for the whole group,
+registers laid out per lane, predicates as lane masks, and the hot float
+operations written so the compiler emits NEON. Uniform control flow stays in
+the group; a branch or SYNC that splits it, or an instruction groups do not
+run, hands each lane to the scalar interpreter at that pc, so results are
+those of running each fragment alone. test_shader_group checks exactly that
+on every compiled deko3d shader, from every 32-byte boundary, with different
+random state per lane. Making both paths agree bit for bit showed one more
+thing the hardware does and we did not: float arithmetic returns the
+canonical NaN 0x7FFFFFFF rather than propagating an operand's payload, which
+hosts do differently (aarch64 scalar and vector code included).
+
 ## Which path, and why
 
 Homebrew that uses the GPU goes through one of two libraries, both

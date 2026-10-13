@@ -76,4 +76,29 @@ int shader_exec(const shader_prog *prog, shader_env *env, uint64_t *bad_insn);
  */
 int shader_run(const uint64_t *code, uint32_t code_words, shader_env *env, uint64_t *bad_insn);
 
+/*
+ * Fragments in groups: one dispatch per instruction for up to SHADER_LANES
+ * fragments. Registers are r[reg][lane], predicates and the carry are lane
+ * masks; IPA asks for a lane. Results equal running each lane with shader_exec.
+ */
+#define SHADER_LANES 8
+
+typedef float (*shader_ipa_lane_fn)(void *user, uint32_t lane, uint32_t addr, uint32_t mode);
+
+typedef struct shader_group {
+    uint32_t r[260][SHADER_LANES]; /* as shader_env.r, per lane */
+    uint32_t p[9];                 /* as shader_env.p, one bit per lane */
+    uint32_t carry;
+    shader_ipa_lane_fn ipa;
+    void *user;
+} shader_group;
+
+/**
+ * Run `prog` for the lanes set in `active`. `env` supplies constant buffers and
+ * texture callbacks, and is the template for lanes that leave the group (a
+ * divergent branch, or an instruction groups do not run). Results as shader_exec.
+ */
+int shader_exec_group(const shader_prog *prog, shader_group *g, uint32_t active,
+                      const shader_env *env, uint64_t *bad_insn);
+
 #endif /* HOS_GPU_SHADER_H */

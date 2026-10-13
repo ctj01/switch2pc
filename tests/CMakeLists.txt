@@ -16,8 +16,17 @@ s2pc_add_test(test_mme s2pc_common)
 target_sources(test_mme PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_mme.c)
 target_include_directories(test_mme PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
 s2pc_add_test(test_shader s2pc_common m)
-target_sources(test_shader PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader.c)
+target_sources(test_shader PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader.c
+                                   ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader_simd.c)
 target_include_directories(test_shader PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
+# Group interpreter vs scalar, on whatever compiled deko3d shaders exist (devkitPro builds).
+add_executable(test_shader_group test_shader_group.c ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader.c
+                                 ${CMAKE_SOURCE_DIR}/shims/hos_gpu/gpu_shader_simd.c)
+target_include_directories(test_shader_group PRIVATE ${CMAKE_SOURCE_DIR}/shims/hos_gpu)
+target_link_libraries(test_shader_group PRIVATE m)
+file(GLOB s2pc_dksh ${CMAKE_SOURCE_DIR}/examples/*/romfs/shaders/*.dksh
+     ${CMAKE_SOURCE_DIR}/build/deko_examples/romfs/shaders/*.dksh)
+add_test(NAME test_shader_group COMMAND test_shader_group ${s2pc_dksh})
 
 # Runtime: ARM64 only (qemu-user through CMAKE_CROSSCOMPILING_EMULATOR when cross-building).
 if(S2PC_ARM64)
