@@ -150,3 +150,19 @@ const hos_service_class hos_account_class = {
     .dispatch = account_dispatch,
     .destroy = NULL,
 };
+
+/* acc:u1 (system) and acc:su (administrator) share commands 0-5 with acc:u0, but
+ * their higher ids are other commands (51 there is GetUserStateChangeNotifier, an
+ * object, not a uid): only the shared ones are answered. */
+static hos_result account_system_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
+    if (ctx->cmd <= 5) {
+        return account_dispatch(obj, ctx);
+    }
+    return hos_ipc_unimplemented(obj, ctx);
+}
+
+const hos_service_class hos_account_system_class = {
+    .name = "acc:su",
+    .dispatch = account_system_dispatch,
+    .destroy = NULL,
+};
