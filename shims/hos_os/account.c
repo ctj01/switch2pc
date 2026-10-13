@@ -1,5 +1,5 @@
 /*
- * acc:u0 / acc:u1: the account service. One local user, always present and
+ * acc:u0 / acc:u1 / acc:su: the account service. One local user, always present and
  * already "opened", so homebrew that asks for a user (save data, profile
  * pickers) gets one without a selection dialog. The nickname comes from
  * HOS_USER_NAME, then $USER, then "switch2pc"; the profile image is empty.

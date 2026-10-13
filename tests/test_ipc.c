@@ -106,6 +106,70 @@ TEST(ipc_sm_get_service_cmif_and_tipc) {
     ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
 }
 
+static uint32_t get_service(uint32_t sm, const char *name) {
+    ipc_response resp;
+    uint64_t n = service_name(name);
+    ipc_request req = {.type = IPC_TYPE_REQUEST, .cmd = 1, .data = &n, .data_size = 8};
+    if (ipc_call(sm, &req, &resp) != 0 || resp.num_move != 1) {
+        return 0;
+    }
+    return resp.move_handles[0];
+}
+
+/* The services a save manager or a launcher asks for on a console with nothing
+ * installed: the system account service, the application manager, play data. */
+TEST(ipc_account_ns_pdm) {
+    init_once();
+    uint32_t sm = connect_sm();
+    ipc_response resp;
+
+    uint32_t acc = get_service(sm, "acc:su");
+    ASSERT_TRUE(acc != 0);
+    ipc_request req = {.type = IPC_TYPE_REQUEST, .cmd = 0}; /* GetUserCount */
+    ASSERT_EQ(ipc_call(acc, &req, &resp), 0);
+    ASSERT_EQ((int32_t)resp.data[0], 1);
+    ASSERT_EQ(call(0x16, acc, 0, 0, 0).x[0], 0);
+
+    uint32_t ns = get_service(sm, "ns:am2");
+    ASSERT_TRUE(ns != 0);
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 7996}; /* GetApplicationManagerInterface */
+    ASSERT_EQ(ipc_call(ns, &req, &resp), 0);
+    ASSERT_EQ(resp.num_move, 1);
+    uint32_t am = resp.move_handles[0];
+    hos_svc_regs hr = call(0x01, 0, 0x200000, 0, 0); /* a 39-bit buffer for the records */
+    ASSERT_EQ(hr.x[0], 0);
+    int32_t offset = 0;
+    req = (ipc_request){.type = IPC_TYPE_REQUEST,
+                        .cmd = 0, /* ListApplicationRecord */
+                        .data = &offset,
+                        .data_size = 4,
+                        .b_buf = (void *)hr.x[1],
+                        .b_size = 0x100};
+    ASSERT_EQ(ipc_call(am, &req, &resp), 0);
+    ASSERT_EQ((int32_t)resp.data[0], 0);
+    uint32_t storage = 5; /* SdCard */
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 47, .data = &storage, .data_size = 4};
+    ASSERT_EQ(ipc_call(am, &req, &resp), 0); /* GetTotalSpaceSize */
+    int64_t total;
+    memcpy(&total, resp.data, 8);
+    ASSERT_TRUE(total > 0);
+    ASSERT_EQ(call(0x16, am, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, ns, 0, 0, 0).x[0], 0);
+
+    uint32_t pdm = get_service(sm, "pdm:qry");
+    ASSERT_TRUE(pdm != 0);
+    uint64_t id = 0x0100000000010000ull;
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 4, .data = &id, .data_size = 8};
+    ASSERT_EQ(ipc_call(pdm, &req, &resp), 0); /* QueryPlayStatisticsByApplicationId */
+    ASSERT_EQ(resp.data_words, 0x48 / 4);
+    uint64_t echoed;
+    memcpy(&echoed, resp.data, 8);
+    ASSERT_EQ(echoed, id);
+    ASSERT_EQ(resp.data[2 * 8 + 2], 0); /* total_launches */
+    ASSERT_EQ(call(0x16, pdm, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
+}
+
 static size_t make_log_packet(uint8_t *out, const char *text) {
     size_t n = strlen(text);
     memset(out, 0, 0x18);

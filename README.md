@@ -222,8 +222,10 @@ player 1's Npad LIFO in the hid shared memory at 60 Hz, from a timed script
 (`HOS_INPUT_SCRIPT`) or a Linux gamepad (`HOS_INPUT_EVDEV=auto`). The
 `libnx_input` example is the stock homebrew main loop and leaves on Plus.
 
-Also answered: `acc:u0` with one local user (nickname from `HOS_USER_NAME` or
-`$USER`) and `psm` with a full battery on the official charger.
+Also answered: `acc:u0`/`acc:u1`/`acc:su` with one local user (nickname from
+`HOS_USER_NAME` or `$USER`), `psm` with a full battery on the official charger,
+and, for save managers and launchers, `ns` (an empty list of installed titles,
+storage sizes from the host) and `pdm:qry` (no play history).
 
 Sockets work: `bsd:u` is served with host sockets (TCP and UDP over IPv4,
 poll, non-blocking mode, socket options), so homebrew that talks to the
@@ -328,7 +330,7 @@ src/patch      instruction classifier and rewriter
 src/cli        switch2pc (host tool)
 src/loader     hosrun (ARM64 loader)
 shims/hos_cpu  libhos_cpu.so: trap handler, svc table, threads, sync, memory map, shared memory, IPC, sm:
-shims/hos_os   libhos_os.so: lm, set, set:sys, time, appletOE/appletAE
+shims/hos_os   libhos_os.so: lm, set, set:sys, time, appletOE/appletAE, apm, acc, psm, ns, pdm
 shims/hos_input libhos_input.so: hid (shared memory, no real input yet)
 shims/hos_fs   libhos_fs.so: fsp-srv over host directories and a romfs image
 shims/hos_gpu  libhos_gpu.so: nvdrv (nvmap, nvhost-ctrl), vi + binder bufferqueue, swizzle, frame dump
