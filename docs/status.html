@@ -27,18 +27,23 @@ th { color:var(--muted); font-weight:600; }
 .st { display:inline-block; padding:0 8px; border-radius:10px; font-size:12px; font-weight:600; }
 .legendrow { color:var(--muted); font-size:13px; margin-top:6px; }
 .sq { display:inline-block; width:10px; height:10px; margin:0 4px 0 10px; vertical-align:middle; }
+.thumb { width:96px; height:auto; display:block; border:1px solid var(--line); }
+.muted { color:var(--muted); font-size:12px; }
+td code { font-size:12px; }
+.subh { font-size:14px; font-weight:600; margin:18px 0 6px; }
 footer { color:var(--muted); font-size:12px; margin-top:32px; }
 </style></head>
 <body><main>
 <h1>Status</h1>
 <p class="sub">switch2pc runs Nintendo Switch homebrew natively on Linux ARM64. Generated
-from the sources by scripts/gen_status.py at 6315161 2026-10-12.</p>
+from the sources by scripts/gen_status.py at 32e67ee 2026-10-13.</p>
 <div class="badges">
 <span class="badge"><span class="bl">kernel calls</span><span class="bv" style="background:#da3633">35.2%</span></span>
 <span class="badge"><span class="bl">shader instructions</span><span class="bv" style="background:#da3633">25.7%</span></span>
 <span class="badge"><span class="bl">IPC commands</span><span class="bv" style="background:#2ea043">362</span></span>
 <span class="badge"><span class="bl">homebrew working</span><span class="bv" style="background:#2ea043">22/24</span></span>
 <span class="badge"><span class="bl">tests</span><span class="bv" style="background:#2ea043">37</span></span>
+<span class="badge"><span class="bl">nightly homebrew</span><span class="bv" style="background:#2ea043">3/3 render</span></span>
 </div>
 <div class="maps">
 <section><h3>Kernel calls: 35.25% (43/122)</h3>
@@ -506,11 +511,11 @@ interpreter decodes some form of it.</p>
 <line x1="44" x2="750" y1="103.0" y2="103.0" class="gridline"/><text x="38" y="107.0" class="axis" text-anchor="end">50%</text>
 <line x1="44" x2="750" y1="57.5" y2="57.5" class="gridline"/><text x="38" y="61.5" class="axis" text-anchor="end">75%</text>
 <line x1="44" x2="750" y1="12.0" y2="12.0" class="gridline"/><text x="38" y="16.0" class="axis" text-anchor="end">100%</text>
-<polyline points="44.0,129.9 63.6,129.9 83.2,129.9 102.8,129.9 122.4,129.9 142.1,129.9 161.7,129.9 181.3,129.9 200.9,129.9 220.5,129.9 240.1,129.9 259.7,129.9 279.3,129.9 298.9,129.9 318.6,129.9 338.2,129.9 357.8,129.9 377.4,129.9 397.0,129.9 416.6,129.9 436.2,129.9 455.8,129.9 475.4,129.9 495.1,129.9 514.7,129.9 534.3,129.9 553.9,129.9 573.5,129.9 593.1,129.9 612.7,129.9 632.3,129.9 651.9,129.9 671.6,129.9 691.2,129.9 710.8,129.9 730.4,129.9 750.0,129.9" fill="none" stroke="#58a6ff" stroke-width="2"/>
+<polyline points="44.0,129.9 62.1,129.9 80.2,129.9 98.3,129.9 116.4,129.9 134.5,129.9 152.6,129.9 170.7,129.9 188.8,129.9 206.9,129.9 225.0,129.9 243.1,129.9 261.2,129.9 279.3,129.9 297.4,129.9 315.5,129.9 333.6,129.9 351.7,129.9 369.8,129.9 387.9,129.9 406.1,129.9 424.2,129.9 442.3,129.9 460.4,129.9 478.5,129.9 496.6,129.9 514.7,129.9 532.8,129.9 550.9,129.9 569.0,129.9 587.1,129.9 605.2,129.9 623.3,129.9 641.4,129.9 659.5,129.9 677.6,129.9 695.7,129.9 713.8,129.9 731.9,129.9 750.0,129.9" fill="none" stroke="#58a6ff" stroke-width="2"/>
 <circle cx="750.0" cy="129.9" r="3.5" fill="#58a6ff"/><text x="758.0" y="133.9" fill="#58a6ff" class="legend">Kernel calls 35.2%</text>
-<polyline points="44.0,194.0 63.6,194.0 83.2,194.0 102.8,194.0 122.4,194.0 142.1,194.0 161.7,194.0 181.3,194.0 200.9,194.0 220.5,194.0 240.1,194.0 259.7,194.0 279.3,194.0 298.9,160.2 318.6,160.2 338.2,160.2 357.8,160.2 377.4,159.0 397.0,149.1 416.6,149.1 436.2,149.1 455.8,149.1 475.4,149.1 495.1,149.1 514.7,147.3 534.3,147.3 553.9,147.3 573.5,147.3 593.1,147.3 612.7,147.3 632.3,147.3 651.9,147.3 671.6,147.3 691.2,147.3 710.8,147.3 730.4,147.3 750.0,147.3" fill="none" stroke="#2ea043" stroke-width="2"/>
+<polyline points="44.0,194.0 62.1,194.0 80.2,194.0 98.3,194.0 116.4,194.0 134.5,194.0 152.6,194.0 170.7,194.0 188.8,194.0 206.9,194.0 225.0,194.0 243.1,194.0 261.2,194.0 279.3,160.2 297.4,160.2 315.5,160.2 333.6,160.2 351.7,159.0 369.8,149.1 387.9,149.1 406.1,149.1 424.2,149.1 442.3,149.1 460.4,149.1 478.5,147.3 496.6,147.3 514.7,147.3 532.8,147.3 550.9,147.3 569.0,147.3 587.1,147.3 605.2,147.3 623.3,147.3 641.4,147.3 659.5,147.3 677.6,147.3 695.7,147.3 713.8,147.3 731.9,147.3 750.0,147.3" fill="none" stroke="#2ea043" stroke-width="2"/>
 <circle cx="750.0" cy="147.3" r="3.5" fill="#2ea043"/><text x="758.0" y="151.3" fill="#2ea043" class="legend">Shaders 25.7%</text>
-<text x="44" y="214" class="axis">2026-10-09</text><text x="750" y="214" class="axis" text-anchor="end">2026-10-12 (37 commits)</text>
+<text x="44" y="214" class="axis">2026-10-09</text><text x="750" y="214" class="axis" text-anchor="end">2026-10-13 (40 commits)</text>
 </svg>
 
 <h2>IPC: 362 commands in 36 service interfaces</h2>
@@ -921,6 +926,44 @@ here are those homebrew has asked for so far.</p>
 <tr><td>deko_examples 08 Deferred Shading</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td>three render targets</td></tr>
 <tr><td>deko_examples 09 Compute Shader</td><td>gpu</td><td><span class="st" style="background:#d29922">partial</span></td><td>line smoothing not done</td></tr>
 </tbody></table>
+
+<h2 id="compat">Homebrew compatibility (nightly)</h2>
+<p class="sub">3 open-source homebrew built from source and run under switch2pc
+every night (compat/apps.json, compat/run.py); last run 2026-10-13T02:06:31Z
+at a2110fc. Each blocker is a ready-made task:
+see <a href="https://github.com/ctj01/switch2pc/blob/main/compat/README.md">compat/README.md</a>
+and the <code>compat</code> issues.</p>
+<div class="badges">
+<span class="badge"><span class="bl">runs</span><span class="bv" style="background:#2ea043">2</span></span>
+<span class="badge"><span class="bl">renders</span><span class="bv" style="background:#9bba22">1</span></span>
+<span class="badge"><span class="bl">boots</span><span class="bv" style="background:#d29922">0</span></span>
+<span class="badge"><span class="bl">crash</span><span class="bv" style="background:#da3633">0</span></span>
+<span class="badge"><span class="bl">build-failed</span><span class="bv" style="background:#6e7681">0</span></span>
+</div>
+<p class="legendrow"><b>runs</b>: renders and exits cleanly when asked to, <b>renders</b>: presents frames with something on them, <b>boots</b>: runs without crashing but presents no frame, <b>crash</b>: fatal signal, fatal svcBreak or an error exit, <b>build-failed</b>: did not build with devkitPro from the pinned ref.</p>
+<table><thead><tr><th>App</th><th>Category</th><th>Level</th><th>Frames</th><th>Top blocker</th>
+<th>Frame</th></tr></thead>
+<tbody>
+<tr><td><a href="https://github.com/switchbrew/switch-examples/tree/v20260201">switch-examples: templates/application</a><div class="muted">libnx console template: prints to the console and exits on Plus.</div></td><td>demo</td><td><span class="st" style="background:#2ea043">runs</span></td><td>229</td><td></td><td><img class="thumb" src="compat/libnx-application.png" alt="" loading="lazy"></td></tr>
+<tr><td><a href="https://github.com/switchbrew/switch-examples/tree/v20260201">switch-examples: graphics/sdl2/sdl2-simple</a><div class="muted">SDL2 renderer (devkitPro&#x27;s Switch SDL2, GL-backed) drawing a moving rectangle.</div></td><td>demo</td><td><span class="st" style="background:#9bba22">renders</span><div class=muted>did not exit on the exit request</div></td><td>10</td><td></td><td><img class="thumb" src="compat/sdl2-simple.png" alt="" loading="lazy"></td></tr>
+<tr><td><a href="https://github.com/switchbrew/nx-hbmenu/tree/v3.6.1">nx-hbmenu</a><div class="muted">The homebrew menu: software-rendered framebuffer, lists sdmc:/switch, nxlink listener.</div></td><td>utility</td><td><span class="st" style="background:#2ea043">runs</span></td><td>380</td><td><code title="[s2pc sm   ] W: GetService(ts): not registered">service:ts</code></td><td><img class="thumb" src="compat/hbmenu.png" alt="" loading="lazy"></td></tr>
+</tbody></table>
+<h3 class="subh">Nightly history</h3>
+<svg viewBox="0 0 900 160" class="history" role="img">
+<line x1="44" x2="750" y1="134.0" y2="134.0" class="gridline"/><text x="38" y="138.0" class="axis" text-anchor="end">0</text>
+<line x1="44" x2="750" y1="92.0" y2="92.0" class="gridline"/><text x="38" y="96.0" class="axis" text-anchor="end">1</text>
+<line x1="44" x2="750" y1="50.0" y2="50.0" class="gridline"/><text x="38" y="54.0" class="axis" text-anchor="end">2</text>
+<line x1="44" x2="750" y1="8.0" y2="8.0" class="gridline"/><text x="38" y="12.0" class="axis" text-anchor="end">3</text>
+<rect x="385.0" y="92.0" width="24.0" height="42.0" fill="#9bba22"><title>2026-10-13: 1 renders</title></rect>
+<rect x="385.0" y="8.0" width="24.0" height="84.0" fill="#2ea043"><title>2026-10-13: 2 runs</title></rect>
+<rect x="760" y="12" width="10" height="10" fill="#2ea043"/><text x="774" y="21" class="legend" fill="#2ea043">runs 2</text>
+<rect x="760" y="28" width="10" height="10" fill="#9bba22"/><text x="774" y="37" class="legend" fill="#9bba22">renders 1</text>
+<rect x="760" y="44" width="10" height="10" fill="#d29922"/><text x="774" y="53" class="legend" fill="#d29922">boots 0</text>
+<rect x="760" y="60" width="10" height="10" fill="#da3633"/><text x="774" y="69" class="legend" fill="#da3633">crash 0</text>
+<rect x="760" y="76" width="10" height="10" fill="#6e7681"/><text x="774" y="85" class="legend" fill="#6e7681">build-failed 0</text>
+<text x="44" y="154" class="axis">2026-10-13</text><text x="750" y="154" class="axis" text-anchor="end">2026-10-13 (1 runs)</text></svg>
+
 <footer>Kernel-call names follow switchbrew; shader encodings come from envytools
-(MIT). Homebrew status is kept by hand in docs/data/compat.json.</footer>
+(MIT). Homebrew status is kept by hand in docs/data/compat.json; the nightly table comes
+from compat/results.json.</footer>
 </main></body></html>
