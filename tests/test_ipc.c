@@ -221,6 +221,61 @@ TEST(ipc_pl_shared_font) {
     ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
 }
 
+/* The built-in storage is an empty partition and there is no save data to list. */
+TEST(ipc_fsp_bis_and_save_info) {
+    init_once();
+    uint32_t sm = connect_sm();
+    uint32_t fsp = get_service(sm, "fsp-srv");
+    ASSERT_TRUE(fsp != 0);
+    ipc_response resp;
+    hos_svc_regs hr = call(0x01, 0, 0x200000, 0, 0); /* 39-bit buffers for the paths */
+    ASSERT_EQ(hr.x[0], 0);
+    char *path = (char *)hr.x[1];
+    memset(path, 0, 0x301);
+    path[0] = '/';
+
+    uint32_t partition = 30; /* User */
+    ipc_request req = {.type = IPC_TYPE_REQUEST,
+                       .cmd = 11, /* OpenBisFileSystem */
+                       .data = &partition,
+                       .data_size = 4,
+                       .x_buf = path,
+                       .x_size = 0x301};
+    ASSERT_EQ(ipc_call(fsp, &req, &resp), 0);
+    ASSERT_EQ(resp.num_move, 1);
+    uint32_t fs = resp.move_handles[0];
+    uint32_t mode = 3; /* directories and files */
+    req = (ipc_request){.type = IPC_TYPE_REQUEST,
+                        .cmd = 9, /* OpenDirectory */
+                        .data = &mode,
+                        .data_size = 4,
+                        .x_buf = path,
+                        .x_size = 0x301};
+    ASSERT_EQ(ipc_call(fs, &req, &resp), 0);
+    ASSERT_EQ(resp.num_move, 1);
+    uint32_t dir = resp.move_handles[0];
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 1}; /* GetEntryCount */
+    ASSERT_EQ(ipc_call(dir, &req, &resp), 0);
+    int64_t count;
+    memcpy(&count, resp.data, 8);
+    ASSERT_EQ(count, 0);
+    ASSERT_EQ(call(0x16, dir, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, fs, 0, 0, 0).x[0], 0);
+
+    uint32_t space = 1; /* User */
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 61, .data = &space, .data_size = 4};
+    ASSERT_EQ(ipc_call(fsp, &req, &resp), 0); /* OpenSaveDataInfoReaderBySaveDataSpaceId */
+    ASSERT_EQ(resp.num_move, 1);
+    uint32_t reader = resp.move_handles[0];
+    req = (ipc_request){.type = IPC_TYPE_REQUEST, .cmd = 0, .b_buf = path, .b_size = 0x100};
+    ASSERT_EQ(ipc_call(reader, &req, &resp), 0); /* ReadSaveDataInfo */
+    memcpy(&count, resp.data, 8);
+    ASSERT_EQ(count, 0);
+    ASSERT_EQ(call(0x16, reader, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, fsp, 0, 0, 0).x[0], 0);
+    ASSERT_EQ(call(0x16, sm, 0, 0, 0).x[0], 0);
+}
+
 static size_t make_log_packet(uint8_t *out, const char *text) {
     size_t n = strlen(text);
     memset(out, 0, 0x18);
