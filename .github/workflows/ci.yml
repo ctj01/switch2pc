@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The homebrew the suite runs, built with devkitPro (libnx and deko3d examples).
+  homebrew:
+    runs-on: ubuntu-24.04
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build libnx and deko3d examples
+        run: scripts/ci_homebrew.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homebrew
+          path: build/artifacts.tar.gz
+          retention-days: 7
+
+  # The real target: native ARM64 Linux, no emulation.
+  arm64:
+    needs: homebrew
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew
+      - name: Unpack homebrew
+        run: tar xzf artifacts.tar.gz
+      - name: Install toolchain
+        run: sudo scripts/setup_arm64_native.sh
+      - name: Build and test
+        run: scripts/build.sh
+      - name: Frame rates
+        run: scripts/bench_deko.sh 10 3 4 7 9
+
+  # Cross build from x86-64, tests under qemu-user: the setup most contributors have.
+  cross:
+    needs: homebrew
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew
+      - name: Unpack homebrew
+        run: tar xzf artifacts.tar.gz
+      - name: Install toolchain
+        run: sudo scripts/cloud_setup.sh
+      - name: Format
+        run: git ls-files '*.c' '*.h' | grep -v '^ports/' | xargs clang-format --dry-run --Werror
+      - name: Build and test
+        run: scripts/build.sh

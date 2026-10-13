@@ -33,9 +33,12 @@ typedef struct vertex {
     float color[4];
 } vertex;
 
-#define QUAD(x0, y0, x1, y1, z, r, g, b, a)                                                    \
-    {{x0, y0, z}, {r, g, b, a}}, {{x1, y0, z}, {r, g, b, a}}, {{x1, y1, z}, {r, g, b, a}},      \
-        {{x0, y1, z}, {r, g, b, a}}
+#define QUAD(x0, y0, x1, y1, z, r, g, b, a)                                                        \
+    {{x0, y0, z}, {r, g, b, a}}, {{x1, y0, z}, {r, g, b, a}}, {{x1, y1, z}, {r, g, b, a}}, {       \
+        {x0, y1, z}, {                                                                             \
+            r, g, b, a                                                                             \
+        }                                                                                          \
+    }
 
 static const vertex k_quads[16] = {
     QUAD(-0.6f, -0.5f, 0.2f, 0.5f, 0.3f, 1, 0, 0, 1),   /* A */
@@ -57,8 +60,7 @@ static void say(const char *fmt, ...) {
 
 static void on_debug(void *user, const char *context, DkResult result, const char *message) {
     (void)user;
-    say("deko3d: %s: result %d: %s", context ? context : "?", (int)result,
-        message ? message : "");
+    say("deko3d: %s: result %d: %s", context ? context : "?", (int)result, message ? message : "");
 }
 
 static int load_shader(DkShader *shader, DkMemBlock code, uint32_t *offset, const char *path) {

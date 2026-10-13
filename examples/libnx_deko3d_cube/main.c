@@ -127,8 +127,7 @@ static void say(const char *fmt, ...) {
 
 static void on_debug(void *user, const char *context, DkResult result, const char *message) {
     (void)user;
-    say("deko3d: %s: result %d: %s", context ? context : "?", (int)result,
-        message ? message : "");
+    say("deko3d: %s: result %d: %s", context ? context : "?", (int)result, message ? message : "");
 }
 
 static int load_shader(DkShader *shader, DkMemBlock code, uint32_t *offset, const char *path) {
