@@ -17,6 +17,10 @@ cmake --build build/aarch64 && ctest --test-dir build/aarch64 --output-on-failur
 with zero warnings. The compiler flags are `-Wall -Wextra -Werror -Wshadow -Wvla
 -Wformat=2 -Wundef`; do not weaken them, fix the code.
 
+A change to a parser that reads untrusted bytes (the NSO loader, MOD0, HIPC)
+also runs `scripts/fuzz.sh` (clang and `libclang-rt-dev`; a minute per harness
+by default), which is what the `fuzz` job in CI does on every push.
+
 ## Where to start
 
 Issues labelled `compat` come from the nightly homebrew run (compat/README.md):
