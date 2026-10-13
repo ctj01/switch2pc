@@ -63,16 +63,20 @@ static float ipa_group(void *user, uint32_t lane, uint32_t addr, uint32_t mode) 
     return fl(mix(g_seed[lane], mix(addr, mode)) & 0x3FFFFFFF);
 }
 
-static void tex(void *user, uint32_t index, float u, float v, float out[4]) {
+/* The group path hands over derivatives the scalar path cannot; a result that
+ * depends only on the coordinates, mode and lod is what both must agree on. */
+static void tex(void *user, uint32_t index, const shader_tex_coord *c, float out[4]) {
     (void)user;
-    uint32_t h = mix(index, mix(bits_of(u), bits_of(v)));
-    for (int c = 0; c < 4; c++) {
-        out[c] = fl(mix(h, (uint32_t)c) & 0x3FFFFFFF);
+    uint32_t h = mix(index, mix(bits_of(c->u), bits_of(c->v)));
+    h = mix(h, mix((uint32_t)c->lod_mode, bits_of(c->lod)));
+    for (int k = 0; k < 4; k++) {
+        out[k] = fl(mix(h, (uint32_t)k) & 0x3FFFFFFF);
     }
 }
 
-static void texel(void *user, uint32_t index, int32_t x, int32_t y, float out[4]) {
-    tex(user, index ^ 0x5555, fl((uint32_t)x), fl((uint32_t)y), out);
+static void texel(void *user, uint32_t index, int32_t x, int32_t y, uint32_t level, float out[4]) {
+    shader_tex_coord c = {.u = fl((uint32_t)x), .v = fl((uint32_t)y), .lod = (float)level};
+    tex(user, index ^ 0x5555, &c, out);
 }
 
 static uint8_t g_cbuf[SHADER_CBUFS][0x1000];

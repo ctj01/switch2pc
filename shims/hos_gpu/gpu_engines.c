@@ -183,43 +183,6 @@ static uint8_t unorm8(float v) {
     return (uint8_t)(v * 255.0f + 0.5f);
 }
 
-uint16_t gpu_float_to_half(float v) {
-    uint32_t x;
-    memcpy(&x, &v, 4);
-    uint32_t sign = (x >> 16) & 0x8000, e = (x >> 23) & 0xFF, m = x & 0x7FFFFF;
-    if (e == 0xFF) {
-        return (uint16_t)(sign | 0x7C00 | (m ? 0x200 : 0)); /* inf, nan */
-    }
-    int32_t he = (int32_t)e - 127 + 15;
-    if (he >= 0x1F) {
-        return (uint16_t)(sign | 0x7C00);
-    }
-    if (he <= 0) { /* subnormal or zero */
-        if (he < -10) {
-            return (uint16_t)sign;
-        }
-        m |= 0x800000;
-        uint32_t shift = (uint32_t)(14 - he), hm = m >> shift;
-        hm += (m >> (shift - 1)) & 1; /* round half up */
-        return (uint16_t)(sign | hm);
-    }
-    uint32_t h = sign | ((uint32_t)he << 10) | (m >> 13);
-    h += (m >> 12) & 1; /* round half up; a carry into the exponent is still right */
-    return (uint16_t)h;
-}
-
-float gpu_half_to_float(uint16_t h) {
-    uint32_t sign = (uint32_t)(h & 0x8000) << 16, e = (h >> 10) & 0x1F, m = h & 0x3FF, x;
-    if (e == 0) {
-        float v = (float)m / 16777216.0f; /* m * 2^-24 */
-        return sign ? -v : v;
-    }
-    x = sign | (e == 0x1F ? 0x7F800000 | (m << 13) : ((e + 112) << 23) | (m << 13));
-    float v;
-    memcpy(&v, &x, 4);
-    return v;
-}
-
 void gpu_fill(uint8_t *base, uint64_t size, const uint8_t *px, uint32_t bpp) {
     if (!bpp || size < bpp) {
         return;

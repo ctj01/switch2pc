@@ -33,12 +33,33 @@ typedef struct shader_prog shader_prog;
  * 2 constant (provoking vertex). `addr` is the attribute byte address. */
 typedef float (*shader_ipa_fn)(void *user, uint32_t addr, uint32_t mode);
 
+/* How a texture instruction chooses its level of detail. */
+enum {
+    SHADER_LOD_IMPLICIT = 0, /* from the coordinate derivatives (TEX, TEXS) */
+    SHADER_LOD_ZERO = 1,     /* .LZ: level 0 */
+    SHADER_LOD_EXPLICIT = 2, /* .LL: `lod` is the level */
+    SHADER_LOD_BIAS = 3,     /* .LB: `lod` is added to the implicit level */
+};
+
+/* A sample's coordinates. The derivatives are those of (u, v) across the 2x2
+ * pixel quad the fragment belongs to, when the fragment ran in a group that
+ * had its quad (has_grad); a lane that runs alone has none and an implicit
+ * lod is 0. */
+typedef struct shader_tex_coord {
+    float u, v;
+    float dudx, dvdx, dudy, dvdy;
+    int has_grad;
+    int lod_mode;
+    float lod;
+} shader_tex_coord;
+
 /* Texture sample: `index` is the instruction's texture index (the handle sits at
  * word `index` of the stage's texture constant buffer); coordinates are normalised. */
-typedef void (*shader_tex_fn)(void *user, uint32_t index, float u, float v, float out[4]);
+typedef void (*shader_tex_fn)(void *user, uint32_t index, const shader_tex_coord *c, float out[4]);
 
-/* Texel fetch (texelFetch, level 0): integer texel coordinates, same `index`. */
-typedef void (*shader_texel_fn)(void *user, uint32_t index, int32_t x, int32_t y, float out[4]);
+/* Texel fetch (texelFetch): integer texel coordinates of `level`, same `index`. */
+typedef void (*shader_texel_fn)(void *user, uint32_t index, int32_t x, int32_t y, uint32_t level,
+                                float out[4]);
 
 struct shader_env {
     uint32_t in[SHADER_ATTR_WORDS];

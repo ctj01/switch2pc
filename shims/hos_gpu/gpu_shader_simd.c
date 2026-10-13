@@ -129,12 +129,40 @@ static int run_lanes(const shader_prog *prog, shader_group *g, uint32_t live,
     return 0;
 }
 
+/*
+ * Coordinates of a texture instruction for the lanes in `m`, with the screen
+ * derivatives the 2x2 quad gives: lanes 4q..4q+3 are the quad's pixels in
+ * reading order, so a lane's x neighbour is the other lane of its row and its y
+ * neighbour the lane two below or above. A quad with a lane missing from `m`
+ * (one that left the group) has no derivatives.
+ */
+static void quad_coords(const shader_group *g, uint32_t m, uint32_t ru, uint32_t rv, int lod_mode,
+                        shader_tex_coord tc[SHADER_LANES]) {
+    for (uint32_t l = 0; l < SHADER_LANES; l++) {
+        tc[l].u = f(g->r[ru][l]);
+        tc[l].v = f(g->r[rv][l]);
+        tc[l].lod_mode = lod_mode;
+        tc[l].lod = 0.0f;
+        tc[l].has_grad = 0;
+        tc[l].dudx = tc[l].dvdx = tc[l].dudy = tc[l].dvdy = 0.0f;
+    }
+    for (uint32_t q = 0; q < SHADER_LANES; q += 4) {
+        if (((m >> q) & 0xF) != 0xF) {
+            continue;
+        }
+        for (uint32_t l = q; l < q + 4; l++) {
+            uint32_t row = l & ~1u, col = q | (l & 1);
+            tc[l].dudx = tc[row + 1].u - tc[row].u;
+            tc[l].dvdx = tc[row + 1].v - tc[row].v;
+            tc[l].dudy = tc[col + 2].u - tc[col].u;
+            tc[l].dvdy = tc[col + 2].v - tc[col].v;
+            tc[l].has_grad = 1;
+        }
+    }
+}
+
 int shader_exec_group(const shader_prog *prog, shader_group *g, uint32_t active,
                       const shader_env *env, uint64_t *bad_insn) {
-    static const uint8_t one[8][2] = {{0, 9}, {1, 9}, {2, 9}, {3, 9},
-                                      {0, 1}, {0, 3}, {1, 3}, {2, 3}};
-    static const uint8_t two[5][4] = {
-        {0, 1, 2, 9}, {0, 1, 3, 9}, {0, 2, 3, 9}, {1, 2, 3, 9}, {0, 1, 2, 3}};
     const pinsn *ins = prog->ins;
     uint32_t nwords = prog->n;
     uint32_t pc = 1; /* word 0 is the first control word */
@@ -497,14 +525,24 @@ int shader_exec_group(const shader_prog *prog, shader_group *g, uint32_t active,
             break;
         case OP_TEXS: {
             uint32_t d2 = bits(i, 28, 8), sel = bits(i, 50, 3), rb = bits(i, 20, 8);
-            int is_1d = bits(i, 53, 4) == 0;
-            const uint8_t *comp = d2 == RZ ? one[sel] : (sel < 5 ? two[sel] : two[4]);
+            tex_form form = texs_form(bits(i, 53, 4));
+            if (form.coords == TEXC_UNSUPPORTED) {
+                goto diverge; /* the scalar interpreter reports it */
+            }
+            const uint8_t *comp = d2 == RZ ? tex_one[sel] : (sel < 5 ? tex_two[sel] : tex_two[4]);
             uint32_t dst[4] = {d, d == RZ ? RZ : d + 1, d2, d2 == RZ ? RZ : d2 + 1};
+            uint32_t ra1 = ra == RZ ? RZ : ra + 1;
+            uint32_t ru = form.coords == TEXC_A1_B ? ra1 : ra;
+            uint32_t rv = form.coords == TEXC_A_A1 ? ra1 : rb;
+            shader_tex_coord tc[SHADER_LANES];
+            quad_coords(g, m, ru, form.coords == TEXC_A ? RZ : rv, form.lod, tc);
             FOR_LANES(m) {
+                if (form.lod == SHADER_LOD_EXPLICIT) {
+                    tc[l].lod = f(g->r[rb][l]);
+                }
                 float texel[4] = {0, 0, 0, 0};
                 if (env->tex) {
-                    env->tex(env->tex_user, bits(i, 36, 13), f(g->r[ra][l]),
-                             is_1d ? 0.0f : f(g->r[rb][l]), texel);
+                    env->tex(env->tex_user, bits(i, 36, 13), &tc[l], texel);
                 }
                 for (int k = 0; k < 4 && comp[k] != 9; k++) {
                     gset(g, dst[k], l, u(texel[comp[k]]));
@@ -513,18 +551,21 @@ int shader_exec_group(const shader_prog *prog, shader_group *g, uint32_t active,
             break;
         }
         case OP_TLDS: {
-            uint32_t d2 = bits(i, 28, 8), sel = bits(i, 50, 3), form = bits(i, 53, 4);
-            if (form != 2 && form != 4 && form != 5 && form != 6 && form != 12 && form > 1) {
+            uint32_t d2 = bits(i, 28, 8), sel = bits(i, 50, 3), rb = bits(i, 20, 8);
+            tex_form form = tlds_form(bits(i, 53, 4));
+            if (form.coords == TEXC_UNSUPPORTED) {
                 goto diverge; /* the scalar interpreter reports it */
             }
-            const uint8_t *comp = d2 == RZ ? one[sel] : (sel < 5 ? two[sel] : two[4]);
+            const uint8_t *comp = d2 == RZ ? tex_one[sel] : (sel < 5 ? tex_two[sel] : tex_two[4]);
             uint32_t dst[4] = {d, d == RZ ? RZ : d + 1, d2, d2 == RZ ? RZ : d2 + 1};
-            uint32_t ry = form == 2 ? bits(i, 20, 8) : (ra == RZ ? RZ : ra + 1);
+            uint32_t ry = form.coords == TEXC_A_B ? rb : (ra == RZ ? RZ : ra + 1);
             FOR_LANES(m) {
-                int32_t y = form <= 1 ? 0 : (int32_t)g->r[ry][l];
+                int32_t y = form.coords == TEXC_A ? 0 : (int32_t)g->r[ry][l];
+                uint32_t level = form.lod == SHADER_LOD_EXPLICIT ? g->r[rb][l] : 0;
                 float texel[4] = {0, 0, 0, 0};
                 if (env->texel) {
-                    env->texel(env->tex_user, bits(i, 36, 13), (int32_t)g->r[ra][l], y, texel);
+                    env->texel(env->tex_user, bits(i, 36, 13), (int32_t)g->r[ra][l], y, level,
+                               texel);
                 }
                 for (int k = 0; k < 4 && comp[k] != 9; k++) {
                     gset(g, dst[k], l, u(texel[comp[k]]));
@@ -533,11 +574,17 @@ int shader_exec_group(const shader_prog *prog, shader_group *g, uint32_t active,
             break;
         }
         case OP_TEX: {
-            uint32_t mask = bits(i, 31, 4), rv = ra == RZ ? RZ : ra + 1;
+            uint32_t mask = bits(i, 31, 4), rb = bits(i, 20, 8), rv = ra == RZ ? RZ : ra + 1;
+            uint32_t lod_mode = tex_lod_mode(bits(i, 37, 3));
+            shader_tex_coord tc[SHADER_LANES];
+            quad_coords(g, m, ra, rv, (int)lod_mode, tc);
             FOR_LANES(m) {
+                if (lod_mode == SHADER_LOD_EXPLICIT || lod_mode == SHADER_LOD_BIAS) {
+                    tc[l].lod = f(g->r[rb][l]);
+                }
                 float texel[4] = {0, 0, 0, 0};
                 if (env->tex) {
-                    env->tex(env->tex_user, bits(i, 36, 13), f(g->r[ra][l]), f(g->r[rv][l]), texel);
+                    env->tex(env->tex_user, bits(i, 36, 13), &tc[l], texel);
                 }
                 uint32_t k = 0;
                 for (int c = 0; c < 4; c++) {
