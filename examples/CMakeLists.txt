@@ -90,7 +90,17 @@ s2pc_add_c_module(multi_module_main_nso ${CMAKE_CURRENT_BINARY_DIR}/multi_module
 # DT_RELR: with no rtld, hosrun must apply the RELR (#22) and run the
 # initialiser (#21).
 find_program(S2PC_LLD ld.lld)
+set(lld_relr OFF)
 if(S2PC_LLD)
+    # pack-relative-relocs arrived in LLD 15; older ones ignore it with a warning.
+    execute_process(COMMAND ${S2PC_LLD} --version OUTPUT_VARIABLE lld_version ERROR_QUIET)
+    if(lld_version MATCHES "LLD ([0-9]+)\\." AND CMAKE_MATCH_1 GREATER_EQUAL 15)
+        set(lld_relr ON)
+    else()
+        message(STATUS "switch2pc: ${S2PC_LLD} predates DT_RELR (LLD 15); the sdk module keeps RELA")
+    endif()
+endif()
+if(lld_relr)
     # The cross gcc does not look for ld.lld itself; hand it a directory whose "ld" is lld.
     set(lld_dir ${CMAKE_CURRENT_BINARY_DIR}/lld-bin)
     file(MAKE_DIRECTORY ${lld_dir})
