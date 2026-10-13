@@ -1,0 +1,90 @@
+name: switch2pc homebrew test
+description: >-
+  Run Nintendo Switch homebrew (.nro or .nso) in CI on Linux, natively on ARM64
+  runners or under qemu on x86-64: boot it, feed it input, dump its frames, and
+  check its log and frames.
+author: ctj01
+branding:
+  icon: play-circle
+  color: red
+
+inputs:
+  app:
+    description: Path to the .nro (or .nso) to run.
+    required: true
+  romfs:
+    description: RomFS directory or image. Default for an .nro is the RomFS in its assets.
+    default: ''
+  sdmc:
+    description: Directory served as the SD card. Default is an empty one.
+    default: ''
+  input-script:
+    description: >-
+      Input script: lines "ms buttons_hex [lx ly rx ry]" (time since start, libnx
+      HidNpadButton bits). The app is asked to exit after duration-ms either way.
+    default: ''
+  duration-ms:
+    description: How long to run before asking the app to exit.
+    default: '10000'
+  frames-dir:
+    description: Directory to dump presented frames into (PPM). Empty dumps nothing.
+    default: ''
+  frames-every:
+    description: Dump every n-th frame.
+    default: '30'
+  expect-log:
+    description: Extended regular expression the run's log must match (e.g. your app's printf).
+    default: ''
+  reference-frames:
+    description: Directory of reference frame_NNNN.ppm files to compare with (needs frames-dir).
+    default: ''
+  tolerance:
+    description: Per-channel difference allowed when comparing frames.
+    default: '2'
+
+outputs:
+  log:
+    description: Path of the run's log.
+    value: ${{ steps.run.outputs.log }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build switch2pc
+      shell: bash
+      run: |
+        cd "$GITHUB_ACTION_PATH"
+        if [ "$(uname -m)" = aarch64 ]; then
+          sudo scripts/setup_arm64_native.sh > "$RUNNER_TEMP/s2pc-setup.log" 2>&1
+        else
+          sudo scripts/cloud_setup.sh > "$RUNNER_TEMP/s2pc-setup.log" 2>&1
+        fi
+        if ! S2PC_NO_TESTS=1 scripts/build.sh > "$RUNNER_TEMP/s2pc-build.log" 2>&1; then
+          tail -40 "$RUNNER_TEMP/s2pc-build.log"
+          exit 1
+        fi
+    - name: Run the homebrew
+      id: run
+      shell: bash
+      env:
+        S2PC_APP: ${{ inputs.app }}
+        S2PC_ROMFS: ${{ inputs.romfs }}
+        S2PC_SDMC: ${{ inputs.sdmc }}
+        S2PC_INPUT: ${{ inputs.input-script }}
+        S2PC_DURATION: ${{ inputs.duration-ms }}
+        S2PC_FRAMES: ${{ inputs.frames-dir }}
+        S2PC_EVERY: ${{ inputs.frames-every }}
+        S2PC_EXPECT: ${{ inputs.expect-log }}
+        S2PC_REFERENCE: ${{ inputs.reference-frames }}
+        S2PC_TOLERANCE: ${{ inputs.tolerance }}
+      run: |
+        log="$RUNNER_TEMP/switch2pc.log"
+        echo "log=$log" >> "$GITHUB_OUTPUT"
+        args=(--duration "$S2PC_DURATION" --every "$S2PC_EVERY" --tolerance "$S2PC_TOLERANCE" --log "$log")
+        [ -n "$S2PC_ROMFS" ] && args+=(--romfs "$S2PC_ROMFS")
+        [ -n "$S2PC_SDMC" ] && args+=(--sdmc "$S2PC_SDMC")
+        [ -n "$S2PC_INPUT" ] && args+=(--input "$S2PC_INPUT")
+        [ -n "$S2PC_FRAMES" ] && args+=(--frames "$S2PC_FRAMES")
+        [ -n "$S2PC_EXPECT" ] && args+=(--expect "$S2PC_EXPECT")
+        [ -n "$S2PC_REFERENCE" ] && args+=(--reference "$S2PC_REFERENCE")
+        "$GITHUB_ACTION_PATH/scripts/action_run.sh" "$S2PC_APP" "${args[@]}"

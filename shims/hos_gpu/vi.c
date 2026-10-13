@@ -149,7 +149,19 @@ static void write_bmp(const char *path, const uint8_t *rgb, uint32_t width, uint
     rename(tmp, path);
 }
 
+/* At exit: how many frames the program presented (tools count these). */
+static void report_frames(void) {
+    if (g_frame_counter) {
+        HOS_LOGI(MOD, "frames presented: %u", g_frame_counter);
+    }
+}
+
 static void dump_frame(vi_layer *layer, const uint8_t *gb) {
+    static int registered;
+    if (!registered) {
+        registered = 1;
+        atexit(report_frames);
+    }
     uint32_t width = gb_u32(gb, GB_PLANE_WIDTH), height = gb_u32(gb, GB_PLANE_HEIGHT);
     uint32_t stride = gb_u32(gb, GB_PLANE_PITCH), layout = gb_u32(gb, GB_PLANE_LAYOUT);
     uint32_t block_height = 1u << (gb_u32(gb, GB_PLANE_BLOCK_LOG2) & 7);

@@ -58,3 +58,37 @@ jobs:
         run: git ls-files '*.c' '*.h' | grep -v '^ports/' | xargs clang-format --dry-run --Werror
       - name: Build and test
         run: scripts/build.sh
+
+  # The GitHub Action (action.yml) used as a homebrew project would use it.
+  action:
+    needs: homebrew
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew
+      - name: Unpack homebrew
+        run: |
+          tar xzf artifacts.tar.gz
+          mkdir -p sd && echo 2 > sd/deko_example.txt
+      - name: A libnx program that exits on its own
+        uses: ./
+        with:
+          app: examples/libnx_hello/build/hello.nso
+          duration-ms: 5000
+          expect-log: 'libnx hello: done'
+      - name: An .nro with its RomFS, frames dumped
+        uses: ./
+        with:
+          app: build/deko_examples/deko_examples.nro
+          sdmc: sd
+          duration-ms: 8000
+          frames-dir: frames
+          frames-every: 20
+          expect-log: 'frames presented: [0-9]+'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: action-frames
+          path: frames
+          retention-days: 7
