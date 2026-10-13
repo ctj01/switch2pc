@@ -42,9 +42,15 @@ through powf per channel per pixel (now tables that give identical bytes,
 checked over every float in (0, 1)), and the decode cache, indexed by a hash
 of the word, missed 14% of lookups within one shader (now indexed by pc).
 Same 24-thread host: cube 31.5, textured cube 22.6, 4x MSAA 9.7, MSAA teapot
-6.2, deferred 2.7 frames per second (scripts/bench_deko.sh). What remains is field extraction and dispatch inside the
-interpreter (a predecoded program would cut it) and qemu itself, which native
-ARM64 removes.
+6.2, deferred 2.7 frames per second (scripts/bench_deko.sh).
+
+Native ARM64 (2026-10-12, AWS t4g.2xlarge: 8 Graviton2 vCPUs, Ubuntu 24.04):
+the whole suite passes unchanged, and the same examples run at cube 105,
+textured cube 67, 4x MSAA 36, MSAA teapot 22, deferred 7.9 and compute lines
+142 fps, about 3.5 times the 24-thread qemu figures on a third of the threads.
+There the profile is plain: the shader interpreter is two thirds of the time
+(deferred: shader_run 67%, raster loop 11%, texture fetch 9%), so a
+predecoded or compiled shader is the next lever, before or alongside M2.
 
 ## Which path, and why
 
