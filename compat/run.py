@@ -213,6 +213,9 @@ def run_app(app, args):
     frames = os.path.join(work, "frames")
     os.makedirs(sdmc)
     os.makedirs(frames)
+    packed = os.path.join(os.path.dirname(nro), "sdmc")
+    if os.path.isdir(packed):  # files build_app.sh took from the repository ("sdmc" entries)
+        shutil.copytree(packed, sdmc, dirs_exist_ok=True)
     if app.get("sdmc_setup"):
         subprocess.run(["bash", "-euo", "pipefail", "-c", app["sdmc_setup"]], cwd=sdmc, check=True,
                        env=dict(os.environ, NRO=os.path.abspath(nro)))
