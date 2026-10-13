@@ -22,6 +22,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
@@ -69,7 +70,9 @@ static void usage(FILE *out) {
           "  HOS_BREAK         continue  resume after a non-notification svcBreak\n"
           "  HOS_ROMFS, HOS_SDMC, HOS_SAVE   same as the options above\n"
           "  HOS_ARGV          the argv string an .nro sees (default sdmc:/switch/<name>)\n"
-          "  HOS_NO_HBABI=1    enter an .nro the NSO way instead of the homebrew ABI\n",
+          "  HOS_NO_HBABI=1    enter an .nro the NSO way instead of the homebrew ABI\n"
+          "                    (also done without --sdmc or with --romfs, so the RomFS\n"
+          "                    is still served)\n",
           out);
 }
 
@@ -164,7 +167,9 @@ static uint64_t build_init_trampoline(uint64_t at, const uint64_t *fns, size_t n
  * return address, and a data page with the entries, the argv string, the next
  * load path and argv that a launcher such as nx-hbmenu writes before leaving,
  * and the user id storage. An NSO keeps the kernel's entry (x0 = 0, x1 = the
- * main thread handle). HOS_NO_HBABI=1 enters an .nro the NSO way.
+ * main thread handle). HOS_NO_HBABI=1 enters an .nro the NSO way; so does a run
+ * without --sdmc or with the user's --romfs, since under the homebrew ABI libnx
+ * reads the app's RomFS from argv[0] on the SD card and would find none.
  */
 #define HBABI_PAGES         2
 #define HBABI_ARGV_OFF      0x200
@@ -174,6 +179,7 @@ static uint64_t build_init_trampoline(uint64_t at, const uint64_t *fns, size_t n
 #define HBABI_NEXT_ARGV_OFF 0x600
 #define HBABI_NEXT_ARGV_MAX 0x800
 #define HBABI_USER_ID_OFF   0xE00
+#define HBABI_CHAIN_MAX     8 /* hosrun -> app -> app ... hops before the chain stops */
 #define A64_BRK_7           0xd42000e0u
 
 enum {
@@ -205,6 +211,7 @@ static struct {
     char *nro_path; /* the .nro as given on the command line */
     char **argv;    /* hosrun's own arguments, for a chain load */
     int argc, app_arg;
+    int user_romfs; /* --romfs or HOS_ROMFS came from the user, not from the .nro */
 } g_hbabi;
 
 static void hbabi_put(config_entry **e, uint32_t key, uint32_t flags, uint64_t v0, uint64_t v1) {
@@ -245,38 +252,104 @@ static void hbabi_prepare(uint32_t main_thread, hos_entry_args *args, void *user
     args->lr = g_hbabi.stub;
 }
 
+/* Mark every descriptor but the standard three close-on-exec: the game's open
+ * files and sockets do not belong to the next app. */
+static void cloexec_all(void) {
+    DIR *d = opendir("/proc/self/fd");
+    if (!d) {
+        return;
+    }
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        int fd = atoi(ent->d_name);
+        if (fd > 2 && fd != dirfd(d)) {
+            int flags = fcntl(fd, F_GETFD);
+            if (flags >= 0) {
+                fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+            }
+        }
+    }
+    closedir(d);
+}
+
 /*
  * At exit: a launcher that filled in the next load path gets it loaded, the
  * way nx-hbloader chain-loads, by running hosrun again with the same options
- * on that file (sdmc:/... resolves inside the SD card directory) and the argv
- * string it asked for in HOS_ARGV.
+ * on that file and the argv string it asked for in HOS_ARGV. The path is the
+ * guest's choice, so only sdmc:/ paths are taken, and only when the file they
+ * resolve to is inside the --sdmc directory: hosrun never runs an arbitrary
+ * host file for an app. The chain stops after HBABI_CHAIN_MAX hops and does
+ * not continue from an exit with an error status.
  */
-static void hbabi_exit(void) {
-    const char *path = (const char *)(g_hbabi.data + HBABI_NEXT_PATH_OFF);
-    const char *args = (const char *)(g_hbabi.data + HBABI_NEXT_ARGV_OFF);
-    if (!g_hbabi.data || !path[0]) {
+static void hbabi_exit(int status, void *arg) {
+    (void)arg;
+    if (!g_hbabi.data) {
+        return;
+    }
+    /* The guest fills these buffers and need not terminate them. */
+    static char path[HBABI_NEXT_PATH_MAX + 1], args[HBABI_NEXT_ARGV_MAX + 1];
+    const char *raw_path = (const char *)(g_hbabi.data + HBABI_NEXT_PATH_OFF);
+    const char *raw_args = (const char *)(g_hbabi.data + HBABI_NEXT_ARGV_OFF);
+    size_t n = strnlen(raw_path, HBABI_NEXT_PATH_MAX);
+    memcpy(path, raw_path, n);
+    path[n] = '\0';
+    n = strnlen(raw_args, HBABI_NEXT_ARGV_MAX);
+    memcpy(args, raw_args, n);
+    args[n] = '\0';
+    if (!path[0]) {
         return;
     }
     HOS_LOGI(MOD, "next load: %s%s%s", path, args[0] ? " " : "", args);
-    static char host[PATH_MAX];
+    if (status != 0) {
+        HOS_LOGW(MOD, "next load: not chaining after an exit with status %d", status);
+        return;
+    }
+    const char *depth_str = getenv("HOS_CHAIN_DEPTH");
+    long depth = depth_str ? strtol(depth_str, NULL, 10) : 0;
+    if (depth < 0 || depth >= HBABI_CHAIN_MAX) {
+        HOS_LOGW(MOD, "next load: chain depth %d reached, not loading %s", HBABI_CHAIN_MAX, path);
+        return;
+    }
+    if (strncmp(path, "sdmc:/", 6) != 0) {
+        HOS_LOGW(MOD, "next load: %s: only sdmc:/ paths can be chain-loaded", path);
+        return;
+    }
+    static char host[PATH_MAX], real_host[PATH_MAX], real_sdmc[PATH_MAX];
     const char *sdmc = getenv("HOS_SDMC");
-    if (strncmp(path, "sdmc:/", 6) == 0 && sdmc && *sdmc) {
-        snprintf(host, sizeof(host), "%s/%s", sdmc, path + 6);
-    } else if (path[0] == '/') {
-        snprintf(host, sizeof(host), "%s", path);
-    } else {
-        HOS_LOGW(MOD, "cannot resolve %s on the host (no --sdmc)", path);
+    if (!sdmc || !*sdmc || !realpath(sdmc, real_sdmc)) {
+        HOS_LOGW(MOD, "next load: cannot resolve %s on the host (no --sdmc)", path);
+        return;
+    }
+    snprintf(host, sizeof(host), "%s/%s", sdmc, path + 6);
+    if (!realpath(host, real_host)) {
+        HOS_LOGW(MOD, "next load: %s: %s", host, strerror(errno));
+        return;
+    }
+    size_t root_len = strlen(real_sdmc);
+    if (strncmp(real_host, real_sdmc, root_len) != 0 || real_host[root_len] != '/') {
+        HOS_LOGW(MOD, "next load: %s is outside the SD card directory %s", real_host, real_sdmc);
         return;
     }
     struct stat st;
-    if (stat(host, &st) != 0 || !S_ISREG(st.st_mode)) {
-        HOS_LOGW(MOD, "next load: %s is not a file", host);
+    if (stat(real_host, &st) != 0 || !S_ISREG(st.st_mode)) {
+        HOS_LOGW(MOD, "next load: %s is not a file", real_host);
         return;
     }
+    /* What this .nro got from the loader does not carry over: the next one has
+     * its own RomFS and its own place on the card. */
+    unsetenv("HOS_ROMFS");
+    unsetenv("HOS_ROMFS_OFFSET");
+    unsetenv("HOS_ROMFS_SIZE");
+    unsetenv("HOS_SDMC_ALIAS");
     setenv("HOS_ARGV", args[0] ? args : path, 1);
-    g_hbabi.argv[g_hbabi.app_arg] = host;
+    char depth_next[16];
+    snprintf(depth_next, sizeof(depth_next), "%ld", depth + 1);
+    setenv("HOS_CHAIN_DEPTH", depth_next, 1);
+    fflush(NULL);
+    cloexec_all();
+    g_hbabi.argv[g_hbabi.app_arg] = real_host;
     execv("/proc/self/exe", g_hbabi.argv);
-    HOS_LOGE(MOD, "cannot run %s: %s", host, strerror(errno));
+    HOS_LOGE(MOD, "cannot run %s: %s", real_host, strerror(errno));
 }
 
 /* Map the two pages at `at` and register them as a module. 0 on failure. */
@@ -338,7 +411,7 @@ static uint64_t hbabi_setup(uint64_t at, hos_cpu_params *params) {
     cm->data_size = INIT_PAGE;
     cm->name = "hbabi";
     HOS_LOGI(MOD, "homebrew ABI: argv \"%s\", entries at %#" PRIx64, argv_out, at + INIT_PAGE);
-    atexit(hbabi_exit);
+    on_exit(hbabi_exit, NULL);
     return at;
 }
 
@@ -368,6 +441,7 @@ static int load_nro(loaded_module *m, int index, int count) {
         HOS_LOGI(MOD, "%s: %s%s%s", m->name, info.title, info.author[0] ? " by " : "", info.author);
     }
     const char *romfs = getenv("HOS_ROMFS");
+    g_hbabi.user_romfs = romfs && *romfs;
     if (info.romfs_size && (!romfs || !*romfs)) {
         char off[32], size[32];
         snprintf(off, sizeof(off), "%" PRIu64, info.romfs_off);
@@ -646,8 +720,24 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* Under the homebrew ABI libnx reads the app's RomFS from argv[0] on the SD
+     * card; with no card, or a RomFS the user chose, the NSO entry keeps it served. */
     const char *no_hbabi = getenv("HOS_NO_HBABI");
-    int use_hbabi = g_hbabi.nro_path && !(no_hbabi && *no_hbabi && strcmp(no_hbabi, "0") != 0);
+    const char *sdmc_dir = getenv("HOS_SDMC");
+    const char *nso_way = NULL;
+    if (g_hbabi.nro_path) {
+        if (no_hbabi && *no_hbabi && strcmp(no_hbabi, "0") != 0) {
+            nso_way = "HOS_NO_HBABI";
+        } else if (g_hbabi.user_romfs) {
+            nso_way = "--romfs given, libnx would look for the RomFS in argv[0] instead";
+        } else if (!sdmc_dir || !*sdmc_dir) {
+            nso_way = "no --sdmc to serve argv[0] from";
+        }
+    }
+    int use_hbabi = g_hbabi.nro_path && !nso_way;
+    if (nso_way) {
+        HOS_LOGI(MOD, "homebrew ABI: entering the NSO way (%s)", nso_way);
+    }
     if (use_hbabi && !hbabi_setup(cursor, &params)) {
         return 1;
     }

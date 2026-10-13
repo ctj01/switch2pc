@@ -43,8 +43,10 @@ function(s2pc_add_asm_example name)
     add_custom_target(${name}_nso ALL DEPENDS ${dir}/${name}.nso)
 endfunction()
 
-# Freestanding C module: static PIE with MOD0, converted with elf2nso.
+# Freestanding C module: static PIE with MOD0, converted with elf2nso. Set
+# S2PC_MODULE_NSO_FLAGS to override the packaging flags (default: --compress).
 #   s2pc_add_c_module(<target> <output dir> <nso name> <sources...>)
+set(S2PC_MODULE_NSO_FLAGS --compress)
 function(s2pc_add_c_module target dir nso_name)
     file(MAKE_DIRECTORY ${dir})
     set(headers ${CMAKE_CURRENT_SOURCE_DIR}/kernel_test/hos.h
@@ -58,8 +60,8 @@ function(s2pc_add_c_module target dir nso_name)
         COMMENT "Linking ${nso_name}.elf")
     add_custom_command(
         OUTPUT ${dir}/${nso_name}.nso
-        COMMAND ${S2PC_TOOL} elf2nso ${dir}/${nso_name}.elf --name ${nso_name} --compress
-                -o ${dir}/${nso_name}.nso
+        COMMAND ${S2PC_TOOL} elf2nso ${dir}/${nso_name}.elf --name ${nso_name}
+                ${S2PC_MODULE_NSO_FLAGS} -o ${dir}/${nso_name}.nso
         DEPENDS ${dir}/${nso_name}.elf ${S2PC_TOOL_DEP}
         COMMENT "Packaging ${nso_name}.nso")
     add_custom_target(${target} ALL DEPENDS ${dir}/${nso_name}.nso)
@@ -70,6 +72,14 @@ s2pc_add_asm_example(hello)
 set(kt ${CMAKE_CURRENT_SOURCE_DIR}/kernel_test)
 s2pc_add_c_module(kernel_test_nso ${CMAKE_CURRENT_BINARY_DIR}/kernel_test kernel_test
     ${kt}/crt0.S ${kt}/main.c)
+
+# The homebrew ABI test: its crt0 leaves room for the NRO header, so
+# tools/nso2nro.py wraps it in place; nso2nro takes uncompressed NSOs only.
+set(hb ${CMAKE_CURRENT_SOURCE_DIR}/hbabi_test)
+set(S2PC_MODULE_NSO_FLAGS)
+s2pc_add_c_module(hbabi_test_nso ${CMAKE_CURRENT_BINARY_DIR}/hbabi_test hbabi_test
+    ${hb}/crt0.S ${hb}/main.c)
+set(S2PC_MODULE_NSO_FLAGS --compress)
 
 # Two modules linked at load time: main imports from sdk.
 set(mm ${CMAKE_CURRENT_SOURCE_DIR}/multi_module)

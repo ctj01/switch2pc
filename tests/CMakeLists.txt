@@ -62,10 +62,82 @@ if(S2PC_ARM64)
             DEPENDS ${hello_nso} hello_nso ${CMAKE_SOURCE_DIR}/tools/nso2nro.py
             COMMENT "Wrapping hello.nro")
         add_custom_target(hello_nro ALL DEPENDS ${hello_nro})
-        add_test(NAME smoke_hello_nro COMMAND hosrun ${hello_nro})
+        add_test(NAME smoke_hello_nro COMMAND hosrun --sdmc ${CMAKE_BINARY_DIR}/tests/fixtures/sdmc ${hello_nro})
         set_tests_properties(smoke_hello_nro PROPERTIES
             PASS_REGULAR_EXPRESSION "hello.nro: hello nro by switch2pc.*homebrew ABI: argv \"sdmc:/switch/hello.nro\".*hello from HOS.*svcExitProcess"
             FAIL_REGULAR_EXPRESSION "fatal|unimplemented svc|svcBreak Panic")
+
+        # The homebrew ABI itself: examples/hbabi_test walks the config entries, reads
+        # argv[0] back through fsp-srv and returns through lr. One copy sits on the SD
+        # card fixture (argv[0] is its real place), one outside it (served through
+        # HOS_SDMC_ALIAS). Chain loads only go to files inside the card directory.
+        set(hb_dir ${CMAKE_BINARY_DIR}/tests/fixtures)
+        set(hb_nro ${hb_dir}/hbabi_test.nro)
+        set(hb_card ${hb_dir}/sdmc/switch/hbabi_test.nro)
+        set(hb_nso ${CMAKE_BINARY_DIR}/examples/hbabi_test/hbabi_test.nso)
+        file(MAKE_DIRECTORY ${hb_dir}/sdmc/switch ${hb_dir}/sdmc_empty)
+        add_custom_command(
+            OUTPUT ${hb_nro} ${hb_card}
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/nso2nro.py ${hb_nso} ${hb_nro}
+                    --name "hbabi test"
+            COMMAND ${CMAKE_COMMAND} -E copy ${hb_nro} ${hb_card}
+            DEPENDS ${hb_nso} hbabi_test_nso ${CMAKE_SOURCE_DIR}/tools/nso2nro.py
+            COMMENT "Wrapping hbabi_test.nro")
+        add_custom_target(hbabi_test_nro ALL DEPENDS ${hb_nro} ${hb_card})
+        set(hb_fail "FAIL|fatal|unimplemented svc|svcBreak Panic")
+        set(hb_ok "hbabi_test: 0xa entries, main thread handle 0x[0-9a-f]+, HOS version 0xb0001.*hbabi_test: argv[[]0[]] is an NRO.*hbabi_test: done, returning through lr.*svcExitProcess")
+
+        add_test(NAME smoke_hbabi_entries COMMAND hosrun --sdmc ${hb_dir}/sdmc ${hb_card})
+        set_tests_properties(smoke_hbabi_entries PROPERTIES
+            PASS_REGULAR_EXPRESSION "homebrew ABI: argv \"sdmc:/switch/hbabi_test.nro\".*${hb_ok}"
+            FAIL_REGULAR_EXPRESSION "${hb_fail}|HOS_SDMC_ALIAS")
+        add_test(NAME smoke_hbabi_alias COMMAND hosrun --sdmc ${hb_dir}/sdmc_empty ${hb_nro})
+        set_tests_properties(smoke_hbabi_alias PROPERTIES
+            PASS_REGULAR_EXPRESSION "homebrew ABI: argv \"sdmc:/switch/hbabi_test.nro\".*${hb_ok}"
+            FAIL_REGULAR_EXPRESSION "${hb_fail}")
+        # Without --sdmc, or with the user's --romfs, libnx could not read the RomFS
+        # from argv[0]: the .nro is entered the NSO way and HOS_ROMFS serves it.
+        add_test(NAME smoke_hbabi_nso_fallback COMMAND hosrun ${hb_nro})
+        set_tests_properties(smoke_hbabi_nso_fallback PROPERTIES
+            PASS_REGULAR_EXPRESSION "entering the NSO way [(]no --sdmc.*hbabi_test: NSO entry.*svcExitProcess"
+            FAIL_REGULAR_EXPRESSION "${hb_fail}|homebrew ABI: argv")
+        add_test(NAME smoke_hbabi_nso_fallback_romfs COMMAND hosrun --sdmc ${hb_dir}/sdmc
+                 --romfs ${hb_dir}/romfs.bin ${hb_card})
+        set_tests_properties(smoke_hbabi_nso_fallback_romfs PROPERTIES
+            PASS_REGULAR_EXPRESSION "entering the NSO way [(]--romfs.*hbabi_test: NSO entry.*svcExitProcess"
+            FAIL_REGULAR_EXPRESSION "${hb_fail}|homebrew ABI: argv")
+        # A next load path that leaves the card (.. or an absolute host path) is refused.
+        add_test(NAME smoke_hbabi_chain_escape COMMAND hosrun --sdmc ${hb_dir}/sdmc ${hb_card})
+        set_tests_properties(smoke_hbabi_chain_escape PROPERTIES
+            ENVIRONMENT "HOS_ARGV=sdmc:/switch/hbabi_test.nro next=sdmc:/../hbabi_test.nro"
+            PASS_REGULAR_EXPRESSION "hbabi_test: next load sdmc:/../hbabi_test.nro.*svcExitProcess.*next load: .*hbabi_test.nro is outside the SD card directory"
+            FAIL_REGULAR_EXPRESSION "${hb_fail}|ABI: argv \"[^\"]* chained\"")
+        add_test(NAME smoke_hbabi_chain_absolute COMMAND hosrun --sdmc ${hb_dir}/sdmc ${hb_card})
+        set_tests_properties(smoke_hbabi_chain_absolute PROPERTIES
+            ENVIRONMENT "HOS_ARGV=sdmc:/switch/hbabi_test.nro next=${hb_nro}"
+            PASS_REGULAR_EXPRESSION "svcExitProcess.*next load: .*only sdmc:/ paths"
+            FAIL_REGULAR_EXPRESSION "${hb_fail}|ABI: argv \"[^\"]* chained\"")
+        # Chain loads run hosrun again: natively, or under qemu-user when binfmt_misc
+        # lets the kernel start an aarch64 binary.
+        if(NOT CMAKE_CROSSCOMPILING OR EXISTS /proc/sys/fs/binfmt_misc/qemu-aarch64)
+            set(hb_chain_env "")
+            if(CMAKE_CROSSCOMPILING AND S2PC_QEMU_LD_PREFIX)
+                set(hb_chain_env "QEMU_LD_PREFIX=${S2PC_QEMU_LD_PREFIX}")
+            endif()
+            add_test(NAME smoke_hbabi_chain COMMAND hosrun --sdmc ${hb_dir}/sdmc ${hb_card})
+            set_tests_properties(smoke_hbabi_chain PROPERTIES
+                TIMEOUT 120
+                ENVIRONMENT "HOS_ARGV=sdmc:/switch/hbabi_test.nro next=sdmc:/switch/hbabi_test.nro;${hb_chain_env}"
+                PASS_REGULAR_EXPRESSION "hbabi_test: next load sdmc:/switch/hbabi_test.nro.*next load: sdmc:/switch/hbabi_test.nro.*homebrew ABI: argv \"sdmc:/switch/hbabi_test.nro chained\".*hbabi_test: argv \"sdmc:/switch/hbabi_test.nro chained\".*hbabi_test: done, returning through lr.*svcExitProcess"
+                FAIL_REGULAR_EXPRESSION "${hb_fail}")
+            # `loop` asks for the same argv again and again: the chain stops at the cap.
+            add_test(NAME smoke_hbabi_chain_depth COMMAND hosrun --sdmc ${hb_dir}/sdmc ${hb_card})
+            set_tests_properties(smoke_hbabi_chain_depth PROPERTIES
+                TIMEOUT 300
+                ENVIRONMENT "HOS_ARGV=sdmc:/switch/hbabi_test.nro next=sdmc:/switch/hbabi_test.nro loop;${hb_chain_env}"
+                PASS_REGULAR_EXPRESSION "svcExitProcess.*next load: chain depth 8 reached, not loading sdmc:/switch/hbabi_test.nro"
+                FAIL_REGULAR_EXPRESSION "${hb_fail}")
+        endif()
     endif()
 
     # Fixtures for the service tests: an SD card directory and a fake romfs image.
