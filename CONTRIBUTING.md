@@ -13,6 +13,13 @@ cmake --build build/aarch64 && ctest --test-dir build/aarch64 --output-on-failur
 with zero warnings. The compiler flags are `-Wall -Wextra -Werror -Wshadow -Wvla
 -Wformat=2 -Wundef`; do not weaken them, fix the code.
 
+## Where to start
+
+Issues labelled `compat` come from the nightly homebrew run (compat/README.md):
+each names one missing service, IPC command, kernel call or GPU feature, the
+apps that stop at it and where in the shims it goes. Those also labelled
+`good first issue` are single commands with an example next to them.
+
 ## Adding an svc
 
 1. Declare `svc_<name>(hos_svc_regs *r)` in `shims/hos_cpu/cpu_internal.h`.

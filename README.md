@@ -60,6 +60,15 @@ Contributions are welcome: grey squares on the status page are unimplemented
 kernel calls and shader instructions, and [docs/ISSUES.md](docs/ISSUES.md)
 lists open work. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Homebrew compatibility
+
+A nightly workflow builds a curated list of open-source Switch homebrew from
+source, runs each one under switch2pc and publishes how far it gets (builds,
+boots, renders, runs) with the exact blocker that stopped it, on the
+[status page](https://ctj01.github.io/switch2pc/status.html#compat). Each
+blocker is a self-contained task with its own `compat` issue. How the pipeline
+works, what the levels mean and how to add an app: [compat/README.md](compat/README.md).
+
 ## Development log
 
 The detailed record, oldest first.

@@ -25,7 +25,11 @@
       "build": "make -C graphics/sdl2/sdl2-simple",
       "nro": "graphics/sdl2/sdl2-simple/sdl2-simple.nro",
       "duration_ms": 8000,
-      "notes": "SDL2 renderer (devkitPro's Switch SDL2, GL-backed) drawing a moving rectangle."
+      "notes": "SDL2 renderer (devkitPro's Switch SDL2, GL-backed) drawing coloured rectangles; the example ignores SDL_QUIT and exits on Plus, which the input script presses.",
+      "input": [
+        "6000 400",
+        "6200 0"
+      ]
     },
     {
       "name": "hbmenu",
@@ -40,6 +44,200 @@
       "duration_ms": 8000,
       "sdmc_setup": "mkdir -p switch",
       "notes": "The homebrew menu: software-rendered framebuffer, lists sdmc:/switch, nxlink listener."
+    },
+    {
+      "name": "opengl-triangle",
+      "title": "switch-examples: graphics/opengl/simple_triangle",
+      "repo": "switchbrew/switch-examples",
+      "ref": "v20260201",
+      "licence": "Public Domain (CC0)",
+      "category": "demo",
+      "dkp_packages": [],
+      "build": "make -C graphics/opengl/simple_triangle",
+      "nro": "graphics/opengl/simple_triangle/simple_triangle.nro",
+      "duration_ms": 8000,
+      "notes": "OpenGL ES through Mesa (nouveau) and EGL: one shaded triangle."
+    },
+    {
+      "name": "playtone",
+      "title": "switch-examples: audio/playtone",
+      "repo": "switchbrew/switch-examples",
+      "ref": "v20260201",
+      "licence": "Public Domain (CC0)",
+      "category": "demo",
+      "dkp_packages": [],
+      "build": "make -C audio/playtone",
+      "nro": "audio/playtone/playtone.nro",
+      "duration_ms": 8000,
+      "notes": "audout: plays tones when buttons are pressed (console UI).",
+      "input": [
+        "2000 1",
+        "2200 0",
+        "3000 2",
+        "3200 0"
+      ]
+    },
+    {
+      "name": "deko-basic",
+      "title": "switch-examples: graphics/deko3d/deko_basic",
+      "repo": "switchbrew/switch-examples",
+      "ref": "v20260201",
+      "licence": "Public Domain (CC0)",
+      "category": "demo",
+      "dkp_packages": [],
+      "build": "make -C graphics/deko3d/deko_basic",
+      "nro": "graphics/deko3d/deko_basic/deko_basic.nro",
+      "duration_ms": 8000,
+      "notes": "deko3d: clears the screen with a changing colour."
+    },
+    {
+      "name": "read-controls",
+      "title": "switch-examples: hid/read-controls",
+      "repo": "switchbrew/switch-examples",
+      "ref": "v20260201",
+      "licence": "Public Domain (CC0)",
+      "category": "demo",
+      "dkp_packages": [],
+      "build": "make -C hid/read-controls",
+      "nro": "hid/read-controls/read-controls.nro",
+      "duration_ms": 6000,
+      "notes": "hid: prints the buttons and sticks to the console.",
+      "input": [
+        "1000 1",
+        "1500 0",
+        "2000 8 -32000 0 0 0",
+        "2500 0"
+      ]
+    },
+    {
+      "name": "simplegfx",
+      "title": "switch-examples: graphics/simplegfx",
+      "repo": "switchbrew/switch-examples",
+      "ref": "v20260201",
+      "licence": "Public Domain (CC0)",
+      "category": "demo",
+      "dkp_packages": [],
+      "build": "make -C graphics/simplegfx",
+      "nro": "graphics/simplegfx/simplegfx.nro",
+      "duration_ms": 6000,
+      "notes": "libnx framebuffer: fills the screen with a gradient."
+    },
+    {
+      "name": "romfs-example",
+      "title": "switch-examples: fs/romfs",
+      "repo": "switchbrew/switch-examples",
+      "ref": "v20260201",
+      "licence": "Public Domain (CC0)",
+      "category": "demo",
+      "dkp_packages": [],
+      "build": "make -C fs/romfs",
+      "nro": "fs/romfs/romfs.nro",
+      "duration_ms": 5000,
+      "notes": "fs: reads a file from its own RomFS and prints it."
+    },
+    {
+      "name": "curl-example",
+      "title": "switch-examples: network/curl",
+      "repo": "switchbrew/switch-examples",
+      "ref": "v20260201",
+      "licence": "Public Domain (CC0)",
+      "category": "demo",
+      "dkp_packages": [],
+      "build": "make -C network/curl",
+      "nro": "network/curl/curl.nro",
+      "duration_ms": 10000,
+      "notes": "network: nifm + bsd + sfdnsres; fetches a page with curl over TLS."
+    },
+    {
+      "name": "ftpd",
+      "title": "ftpd",
+      "repo": "mtheall/ftpd",
+      "ref": "ac23689a0e65a7b8b7015fbeda380be36070a4f9",
+      "licence": "GPL-3.0",
+      "category": "utility",
+      "dkp_packages": [],
+      "build": "apt-get update -qq && apt-get install -y -qq zstd imagemagick > /dev/null && cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/Switch.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4",
+      "nro": "build/ftpd.nro",
+      "duration_ms": 10000,
+      "notes": "FTP server: deko3d-backed Dear ImGui UI, sockets, exits on Plus. Pinned past v3.2.1 (whose FreeBSD collate.c has old-style definitions GCC 15 rejects); its assets need zstd and ImageMagick, installed with apt in the container."
+    },
+    {
+      "name": "hb-appstore",
+      "title": "hb-appstore",
+      "repo": "vgmoose/hb-appstore",
+      "ref": "v2.3.2",
+      "licence": "GPL-3.0",
+      "category": "utility",
+      "dkp_packages": [],
+      "build": "CFLAGS=-D_GNU_SOURCE make switch",
+      "nro": "appstore.nro",
+      "duration_ms": 12000,
+      "notes": "Homebrew App Store: SDL2 (chesto), curl over TLS to the repository, fonts via SDL_ttf. Built with CFLAGS=-D_GNU_SOURCE: chesto's -D_XOPEN_SOURCE hides strdup and GCC 15 makes the implicit declaration an error."
+    },
+    {
+      "name": "nx-shell",
+      "title": "NX-Shell",
+      "repo": "joel16/NX-Shell",
+      "ref": "4.01",
+      "licence": "GPL-2.0",
+      "category": "utility",
+      "dkp_packages": [],
+      "build": "sed -i '1i #include <ctime>' source/popups/properties.cpp && mkdir -p build/bin && printf '#!/bin/sh\\nexec aarch64-none-elf-pkg-config freetype2 \"$@\"\\n' > build/bin/freetype-config && chmod +x build/bin/freetype-config && PATH=\"$PWD/build/bin:$PATH\" make -j4",
+      "nro": "NX-Shell.nro",
+      "duration_ms": 10000,
+      "notes": "File manager: Dear ImGui over GLFW and Mesa, lists sdmc:/. Build fixes for GCC 15: a missing <ctime> include, and a freetype-config shim over pkg-config since freetype 2.13 no longer ships it."
+    },
+    {
+      "name": "jksv",
+      "title": "JKSV",
+      "repo": "J-D-K/JKSV",
+      "ref": "d39fd80a208b7c802d12edb12f362506a0addb47",
+      "licence": "GPL-3.0",
+      "category": "utility",
+      "dkp_packages": [],
+      "build": "make -j4",
+      "nro": "JKSV.nro",
+      "duration_ms": 10000,
+      "notes": "Save backup manager (its own SDL2-based UI, acc, ns, pdm); ref is the 12/02/2025 release, pinned by sha because the tag name contains slashes."
+    },
+    {
+      "name": "switchident",
+      "title": "SwitchIdent",
+      "repo": "joel16/SwitchIdent",
+      "ref": "0.5",
+      "licence": "GPL-3.0",
+      "category": "utility",
+      "dkp_packages": [],
+      "build": "make -j4",
+      "nro": "SwitchIdent.nro",
+      "duration_ms": 8000,
+      "notes": "System information viewer: SDL2 renderer, SDL_ttf, set:sys, nifm, psm, ts."
+    },
+    {
+      "name": "noods",
+      "title": "NooDS",
+      "repo": "Hydr8gon/NooDS",
+      "ref": "4cb1439c330248b26cdf5f8dbcfa4e5ac53dcda0",
+      "licence": "GPL-3.0",
+      "category": "emulator",
+      "dkp_packages": [],
+      "build": "make switch -j4",
+      "nro": "noods.nro",
+      "duration_ms": 10000,
+      "notes": "DS emulator: libnx + EGL/Mesa UI, reaches its file browser without a ROM. Only a rolling 'release' tag upstream, so pinned by sha."
+    },
+    {
+      "name": "mgba",
+      "title": "mGBA",
+      "repo": "mgba-emu/mgba",
+      "ref": "0.10.5",
+      "licence": "MPL-2.0",
+      "category": "emulator",
+      "dkp_packages": [],
+      "build": "cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=src/platform/switch/CMakeToolchain.txt -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4",
+      "nro": "build/switch/mgba.nro",
+      "duration_ms": 15000,
+      "notes": "GBA emulator: libnx + EGL/Mesa GUI, file browser without a ROM."
     }
   ]
 }
