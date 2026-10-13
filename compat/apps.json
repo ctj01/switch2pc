@@ -1,0 +1,45 @@
+{
+  "_comment": "Open-source Switch homebrew the nightly compatibility workflow builds and runs. See compat/README.md for the fields and the rules an entry must satisfy.",
+  "apps": [
+    {
+      "name": "libnx-application",
+      "title": "switch-examples: templates/application",
+      "repo": "switchbrew/switch-examples",
+      "ref": "v20260201",
+      "licence": "Public Domain (CC0)",
+      "category": "demo",
+      "dkp_packages": [],
+      "build": "make -C templates/application",
+      "nro": "templates/application/application.nro",
+      "duration_ms": 5000,
+      "notes": "libnx console template: prints to the console and exits on Plus."
+    },
+    {
+      "name": "sdl2-simple",
+      "title": "switch-examples: graphics/sdl2/sdl2-simple",
+      "repo": "switchbrew/switch-examples",
+      "ref": "v20260201",
+      "licence": "Public Domain (CC0)",
+      "category": "demo",
+      "dkp_packages": [],
+      "build": "make -C graphics/sdl2/sdl2-simple",
+      "nro": "graphics/sdl2/sdl2-simple/sdl2-simple.nro",
+      "duration_ms": 8000,
+      "notes": "SDL2 renderer (devkitPro's Switch SDL2, GL-backed) drawing a moving rectangle."
+    },
+    {
+      "name": "hbmenu",
+      "title": "nx-hbmenu",
+      "repo": "switchbrew/nx-hbmenu",
+      "ref": "v3.6.1",
+      "licence": "ISC",
+      "category": "utility",
+      "dkp_packages": [],
+      "build": "make nx",
+      "nro": "nx-hbmenu.nro",
+      "duration_ms": 8000,
+      "sdmc_setup": "mkdir -p switch",
+      "notes": "The homebrew menu: software-rendered framebuffer, lists sdmc:/switch, nxlink listener."
+    }
+  ]
+}
