@@ -2,7 +2,8 @@
 # Frames per second of the deko3d examples (scripts/build_deko_examples.sh),
 # headless: each runs for SECONDS and the presented frames are counted. Runs
 # natively on ARM64 and through qemu-user elsewhere; HOS_GPU_THREADS and
-# HOS_PROFILE pass through. Numbers to compare against are in docs/gpu.md.
+# HOS_PROFILE pass through; frames are unpaced (HOS_VSYNC=0). Numbers to compare
+# against are in docs/gpu.md.
 #
 #   scripts/bench_deko.sh [SECONDS] [EXAMPLE...]     (default: 30 s, 3 4 6 7 8)
 set -euo pipefail
@@ -25,7 +26,7 @@ for n in "${examples[@]}"; do
     mkdir -p "$sd"
     echo "$n" > "$sd/deko_example.txt"
     echo "$((secs * 1000)) exit" > "build/tmp/bench_input$n.txt"
-    HOS_LOG_LEVEL=debug HOS_INPUT_SCRIPT="build/tmp/bench_input$n.txt" timeout $((secs + 60)) \
+    HOS_VSYNC=0 HOS_LOG_LEVEL=debug HOS_INPUT_SCRIPT="build/tmp/bench_input$n.txt" timeout $((secs + 60)) \
         "${run[@]}" --romfs build/deko_examples/romfs --sdmc "$sd" \
         build/deko_examples/deko_examples.nso > "$log" 2>&1 || true
     frames=$(grep -cE "vi   \] [ID]: frame [0-9]+:" "$log" || true)

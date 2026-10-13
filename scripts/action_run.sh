@@ -14,6 +14,9 @@
 #     --tolerance <n>       per-channel difference allowed (default 2)
 #     --log <file>          where to write the log (default: <frames or tmp>/hosrun.log)
 #
+# Frames are presented unpaced (HOS_VSYNC=0) so a run takes as long as the app
+# needs, not 60 frames a second; export HOS_VSYNC=1 to pace it as on the console.
+#
 # Fails when hosrun crashes or does not exit after the exit request, when the
 # expected text is missing, or when a frame differs from its reference.
 set -euo pipefail
@@ -65,7 +68,7 @@ mkdir -p "$(dirname "$log")"
 
 args=(--sdmc "$sdmc")
 [ -n "$romfs" ] && args+=(--romfs "$romfs")
-env_vars=(HOS_INPUT_SCRIPT="$script")
+env_vars=(HOS_INPUT_SCRIPT="$script" HOS_VSYNC="${HOS_VSYNC:-0}")
 [ -n "$frames" ] && env_vars+=(HOS_FRAMES="$frames" HOS_FRAMES_EVERY="$every")
 
 limit=$(( duration / 1000 + 60 ))

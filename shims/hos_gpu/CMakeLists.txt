@@ -12,6 +12,7 @@ add_library(hos_gpu SHARED
     parcel.c
     swizzle.c
     vi.c
+    vsync.c
     display_x11.c
 )
 set_target_properties(hos_gpu PROPERTIES

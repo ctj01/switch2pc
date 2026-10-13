@@ -287,7 +287,9 @@ hosrun [options] <exefs directory>                  loads rtld, main, subsdk0-9,
 Environment: `HOS_LOG_LEVEL=error|warn|info|debug|trace`, `HOS_BREAK=continue`
 to resume after a fatal `svcBreak`, `HOS_ROMFS`/`HOS_SDMC`/`HOS_SAVE` as the
 options above, `HOS_FONT=<file.ttf>` for the shared font (`pl:u`; default: DejaVu,
-Liberation or Noto Sans from the host).
+Liberation or Noto Sans from the host), `HOS_VSYNC=0` to present frames as
+fast as they come instead of holding each one until the next 60 Hz refresh
+(the tests, `scripts/action_run.sh` and the benchmarks run that way).
 
 An `.nro` is entered the way nx-hbloader enters it, under the homebrew ABI:
 libnx finds the config entries in `x0` (its main thread handle, an argv string,
