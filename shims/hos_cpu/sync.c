@@ -1,8 +1,11 @@
 /*
  * Synchronisation: the address arbiter (mutexes, condition variables,
  * WaitForAddress), events and WaitSynchronization. One lock, one wait list;
- * each blocked thread sleeps on its own condition variable. HOS wakes in
- * priority order; we wake FIFO, which no correct program can tell apart.
+ * each blocked thread sleeps on its own condition variable. The list is kept
+ * in arrival order and a wake picks the highest-priority waiter (the lowest
+ * number, as the kernel does), the earliest arrival among equals, reading
+ * each thread's priority at that moment so SetThreadPriority on a parked
+ * thread takes effect at once.
  */
 
 #include <errno.h>
@@ -124,13 +127,21 @@ static int32_t count_waiters(wait_kind kind, uint64_t key) {
     return n;
 }
 
+static int32_t waiter_priority(const waiter *w) {
+    /* SetThreadPriority writes it from another thread without this lock. */
+    return w->thread ? __atomic_load_n(&w->thread->priority, __ATOMIC_RELAXED) : 44;
+}
+
+/* The waiter to wake next on `key`: highest priority, then longest waiting. */
 static waiter *first_waiter(wait_kind kind, uint64_t key) {
+    waiter *best = NULL;
     for (waiter *w = g_list.next; w != &g_list; w = w->next) {
-        if (w->kind == kind && w->key == key) {
-            return w;
+        if (w->kind == kind && w->key == key &&
+            (!best || waiter_priority(w) < waiter_priority(best))) {
+            best = w;
         }
     }
-    return NULL;
+    return best;
 }
 
 /* ---- mutex ----------------------------------------------------------------- */

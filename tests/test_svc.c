@@ -73,6 +73,71 @@ __asm__(".text\n"
 extern void test_thread_entry(void);
 extern void test_mutex_entry(void);
 
+/*
+ * Wake-order bodies. x0 = wake_args (see below): raise the flag, park on the
+ * key (address arbiter, a mutex owned by the test, or a condvar with the
+ * thread's own mutex), and on waking append the id to order[] through an
+ * atomic counter, then exit. The mutex body hands the mutex on with
+ * ArbitrateUnlock, so one unlock from the test drains the whole queue.
+ */
+#define WAKE_PROLOGUE                                                                              \
+    "    mov x19, x0\n"                                                                            \
+    "    ldr x20, [x19]\n"      /* key */                                                          \
+    "    ldr x21, [x19, #8]\n"  /* order[] */                                                      \
+    "    ldr x22, [x19, #16]\n" /* count */                                                        \
+    "    ldr w23, [x19, #24]\n" /* id */                                                           \
+    "    ldr x24, [x19, #32]\n" /* flag */                                                         \
+    "    ldr w25, [x19, #40]\n" /* self */                                                         \
+    "    ldr x26, [x19, #48]\n" /* own mutex */                                                    \
+    "    mov w0, #1\n"                                                                             \
+    "    stlr w0, [x24]\n"
+#define WAKE_RECORD                                                                                \
+    "8:  ldaxr w0, [x22]\n"                                                                        \
+    "    add w1, w0, #1\n"                                                                         \
+    "    stlxr w2, w1, [x22]\n"                                                                    \
+    "    cbnz w2, 8b\n"                                                                            \
+    "    str w23, [x21, x0, lsl #2]\n"
+__asm__(".text\n"
+        ".globl test_wake_arbiter_entry\n"
+        ".type test_wake_arbiter_entry, %function\n"
+        "test_wake_arbiter_entry:\n" WAKE_PROLOGUE
+        "    mov x0, x20\n" /* WaitForAddress(key, WaitIfEqual, 0, forever) */
+        "    mov w1, #2\n"
+        "    mov w2, #0\n"
+        "    mov x3, #-1\n"
+        "    brk #0x34\n" WAKE_RECORD "    brk #0x0A\n"
+        "    b .\n"
+        ".size test_wake_arbiter_entry, . - test_wake_arbiter_entry\n"
+        ".globl test_wake_mutex_entry\n"
+        ".type test_wake_mutex_entry, %function\n"
+        "test_wake_mutex_entry:\n" WAKE_PROLOGUE
+        "2:  ldaxr w0, [x20]\n" /* mark the owner's word: someone is parked */
+        "    orr w1, w0, #0x40000000\n"
+        "    stlxr w2, w1, [x20]\n"
+        "    cbnz w2, 2b\n"
+        "    and w0, w0, #0x3fffffff\n" /* ArbitrateLock(owner, key, self) */
+        "    mov x1, x20\n"
+        "    mov w2, w25\n"
+        "    brk #0x1A\n" WAKE_RECORD
+        "    mov x0, x20\n" /* ArbitrateUnlock(key): hand it to the next waiter */
+        "    brk #0x1B\n"
+        "    brk #0x0A\n"
+        "    b .\n"
+        ".size test_wake_mutex_entry, . - test_wake_mutex_entry\n"
+        ".globl test_wake_condvar_entry\n"
+        ".type test_wake_condvar_entry, %function\n"
+        "test_wake_condvar_entry:\n" WAKE_PROLOGUE
+        "    mov x0, x26\n" /* WaitProcessWideKeyAtomic(own mutex, key, self, forever) */
+        "    mov x1, x20\n"
+        "    mov w2, w25\n"
+        "    mov x3, #-1\n"
+        "    brk #0x1C\n" WAKE_RECORD "    brk #0x0A\n"
+        "    b .\n"
+        ".size test_wake_condvar_entry, . - test_wake_condvar_entry\n");
+extern void test_wake_arbiter_entry(void);
+extern void test_wake_mutex_entry(void);
+extern void test_wake_condvar_entry(void);
+
 static int g_inited;
 
 static void init_once(void) {
@@ -107,7 +172,7 @@ static hos_svc_regs call(uint32_t id, uint64_t x0, uint64_t x1, uint64_t x2, uin
     return r;
 }
 
-static uint32_t create_thread(void (*entry)(void), void *arg, void **stack_out) {
+static uint32_t create_thread_prio(void (*entry)(void), void *arg, int32_t prio, void **stack_out) {
     size_t stack_size = 0x10000;
     uint8_t *stack =
         mmap(NULL, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -115,10 +180,14 @@ static uint32_t create_thread(void (*entry)(void), void *arg, void **stack_out) 
         return 0;
     }
     *stack_out = stack;
-    hos_svc_regs r = {
-        {0, (uint64_t)entry, (uint64_t)arg, (uint64_t)stack + stack_size, 44, 0, 0, 0}};
+    hos_svc_regs r = {{0, (uint64_t)entry, (uint64_t)arg, (uint64_t)stack + stack_size,
+                       (uint64_t)(uint32_t)prio, 0, 0, 0}};
     hos_svc_dispatch(0x08, &r);
     return r.x[0] == 0 ? (uint32_t)r.x[1] : 0;
+}
+
+static uint32_t create_thread(void (*entry)(void), void *arg, void **stack_out) {
+    return create_thread_prio(entry, arg, 44, stack_out);
 }
 
 static uint32_t wait_one(uint32_t handle, uint64_t timeout) {
@@ -321,6 +390,145 @@ TEST(svc_condvar_timeout_and_signal_clears_key) {
     r = call(0x1D, (uint64_t)&cv, (uint64_t)(int64_t)-1, 0, 0);
     ASSERT_EQ(r.x[0], HOS_RESULT_SUCCESS);
     ASSERT_EQ(cv, 0);
+}
+
+/* ---- wake order --------------------------------------------------------------- */
+
+typedef struct wake_args {
+    uint64_t key;
+    uint64_t order;
+    uint64_t count;
+    uint64_t id;
+    uint64_t flag;
+    uint64_t self;
+    uint64_t mutex;
+} wake_args;
+
+enum { WAKE_N = 4 };
+
+/* Four threads park on `key` one after another, so arrival order is known:
+ * A (prio 50), B (30), C (40), D (30). The kernel wakes by priority, then
+ * arrival: B, D, C, A. */
+static const int32_t k_wake_prio[WAKE_N] = {50, 30, 40, 30};
+
+typedef struct wake_fixture {
+    wake_args args[WAKE_N];
+    uint32_t handles[WAKE_N];
+    void *stacks[WAKE_N];
+    uint32_t order[WAKE_N];
+    uint32_t count;
+    uint32_t flags[WAKE_N];
+    uint32_t mutexes[WAKE_N]; /* the condvar body's own mutex per thread */
+} wake_fixture;
+
+static int poll_u32(volatile uint32_t *p, uint32_t want) {
+    for (int i = 0; i < 5000; i++) {
+        if (__atomic_load_n(p, __ATOMIC_ACQUIRE) == want) {
+            return 1;
+        }
+        call(0x0B, 1000000, 0, 0, 0);
+    }
+    return 0;
+}
+
+/* Create and start the threads one at a time; each is parked before the next starts. */
+static int wake_fixture_start(wake_fixture *f, void (*entry)(void), volatile void *key) {
+    memset(f, 0, sizeof(*f));
+    for (int i = 0; i < WAKE_N; i++) {
+        f->args[i].key = (uint64_t)key;
+        f->args[i].order = (uint64_t)f->order;
+        f->args[i].count = (uint64_t)&f->count;
+        f->args[i].id = (uint64_t)(i + 1);
+        f->args[i].flag = (uint64_t)&f->flags[i];
+        f->args[i].mutex = (uint64_t)&f->mutexes[i];
+        f->handles[i] = create_thread_prio(entry, &f->args[i], k_wake_prio[i], &f->stacks[i]);
+        if (!f->handles[i]) {
+            return 0;
+        }
+        f->args[i].self = f->handles[i];
+        f->mutexes[i] = f->handles[i];
+    }
+    for (int i = 0; i < WAKE_N; i++) {
+        if (call(0x09, f->handles[i], 0, 0, 0).x[0] != HOS_RESULT_SUCCESS) {
+            return 0;
+        }
+        if (!poll_u32(&f->flags[i], 1)) {
+            return 0;
+        }
+        /* The flag goes up just before the svc; give the thread time to park. */
+        call(0x0B, 50000000, 0, 0, 0);
+    }
+    return 1;
+}
+
+static int wake_fixture_finish(wake_fixture *f) {
+    int ok = 1;
+    for (int i = 0; i < WAKE_N; i++) {
+        ok = ok && wait_one(f->handles[i], 5000000000ull) == HOS_RESULT_SUCCESS;
+        call(0x16, f->handles[i], 0, 0, 0);
+        munmap(f->stacks[i], 0x10000);
+    }
+    return ok;
+}
+
+TEST(svc_wake_order_address_arbiter) {
+    init_once();
+    static wake_fixture f;
+    static volatile int32_t word;
+    word = 0;
+    ASSERT_TRUE(wake_fixture_start(&f, test_wake_arbiter_entry, &word));
+    /* A parked thread whose priority is raised moves to the front. */
+    ASSERT_EQ(call(0x0D, f.handles[0], 10, 0, 0).x[0], HOS_RESULT_SUCCESS);
+    for (uint32_t n = 1; n <= WAKE_N; n++) {
+        ASSERT_EQ(call(0x35, (uint64_t)&word, 0, 0, 1).x[0], HOS_RESULT_SUCCESS); /* one */
+        ASSERT_TRUE(poll_u32(&f.count, n));
+    }
+    ASSERT_TRUE(wake_fixture_finish(&f));
+    ASSERT_EQ(f.order[0], 1); /* A, now prio 10 */
+    ASSERT_EQ(f.order[1], 2); /* B, 30, arrived before D */
+    ASSERT_EQ(f.order[2], 4); /* D, 30 */
+    ASSERT_EQ(f.order[3], 3); /* C, 40 */
+}
+
+TEST(svc_wake_order_mutex_handoff) {
+    init_once();
+    static wake_fixture f;
+    static volatile uint32_t mutex;
+    mutex = hos_cpu_adopt_current_thread(); /* held by the test thread */
+    ASSERT_TRUE(wake_fixture_start(&f, test_wake_mutex_entry, &mutex));
+    ASSERT_EQ(mutex & MUTEX_FLAG, MUTEX_FLAG);
+    ASSERT_EQ(call(0x1B, (uint64_t)&mutex, 0, 0, 0).x[0], HOS_RESULT_SUCCESS);
+    ASSERT_TRUE(poll_u32(&f.count, WAKE_N));
+    ASSERT_TRUE(wake_fixture_finish(&f));
+    ASSERT_EQ(mutex, 0);
+    ASSERT_EQ(f.order[0], 2);
+    ASSERT_EQ(f.order[1], 4);
+    ASSERT_EQ(f.order[2], 3);
+    ASSERT_EQ(f.order[3], 1);
+}
+
+TEST(svc_wake_order_condvar) {
+    init_once();
+    static wake_fixture f;
+    static volatile uint32_t cv;
+    cv = 1;
+    ASSERT_TRUE(wake_fixture_start(&f, test_wake_condvar_entry, &cv));
+    for (int i = 0; i < WAKE_N; i++) {
+        ASSERT_EQ(f.mutexes[i], 0); /* released on entry to the wait */
+    }
+    for (uint32_t n = 1; n <= WAKE_N; n++) {
+        ASSERT_EQ(call(0x1D, (uint64_t)&cv, 1, 0, 0).x[0], HOS_RESULT_SUCCESS);
+        ASSERT_TRUE(poll_u32(&f.count, n));
+    }
+    ASSERT_EQ(cv, 0); /* key cleared once the queue is empty */
+    ASSERT_TRUE(wake_fixture_finish(&f));
+    for (int i = 0; i < WAKE_N; i++) {
+        ASSERT_EQ(f.mutexes[i], f.handles[i]); /* handed back to the woken thread */
+    }
+    ASSERT_EQ(f.order[0], 2);
+    ASSERT_EQ(f.order[1], 4);
+    ASSERT_EQ(f.order[2], 3);
+    ASSERT_EQ(f.order[3], 1);
 }
 
 TEST(svc_address_arbiter_fast_paths) {

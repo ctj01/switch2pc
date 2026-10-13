@@ -20,7 +20,7 @@ numbers.
 | 12 | ci      | GitHub Actions: host build + cross build + ctest under qemu    | done (.github/workflows/ci.yml: devkitPro container builds the homebrew, native ARM64 and qemu jobs run the suite, the GitHub Action is tested) |
 | 13 | hos_cpu | Shared memory and transfer memory svcs (0x13-0x15, 0x50)        | done (svc_shmem.c; MapTransferMemory 0x51/0x52 still open) |
 | 14 | hos_os  | `applet` (appletOE/AE), `time`, `set:sys` stubs so runtime init completes | done (applet.c, time.c, setsys.c) |
-| 15 | hos_cpu | Priority-ordered wake in sync.c instead of FIFO                | open   |
+| 15 | hos_cpu | Priority-ordered wake in sync.c instead of FIFO                | done (sync.c: a wake takes the highest-priority waiter on the key, the earliest arrival among equals, for mutex hand-off, condvars and the address arbiter; a parked thread's SetThreadPriority counts at once; svc_wake_order_* tests) |
 | 16 | hos_cpu | Per-service locking instead of the single IPC request lock      | open (no contention measured: ~180 IPC requests/s in the games we run, once audout stopped spinning) |
 | 17 | hos_os  | Publish steady/system clock contexts in the time shared memory  | done (time.c; steady base 0, matches the 19.2 MHz counter) |
 | 18 | tests   | Run a libnx hello world                                        | done (examples/libnx_hello, smoke_libnx_hello; devkitA64 installed on Windows, scripts/build_libnx_hello.sh) |
