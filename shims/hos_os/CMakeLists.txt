@@ -1,4 +1,4 @@
-# libhos_os.so: OS-level services (lm, set, set:sys, time, applet, apm, account, psm, ns, pdm, pl).
+# libhos_os.so: OS-level services (lm, set, set:sys, time, applet, apm, account, psm, ns, pdm, pl, csrng).
 add_library(hos_os SHARED
     os_init.c
     lm.c
@@ -11,6 +11,7 @@ add_library(hos_os SHARED
     ns.c
     pdm.c
     pl.c
+    csrng.c
 )
 set_target_properties(hos_os PROPERTIES
     OUTPUT_NAME hos_os

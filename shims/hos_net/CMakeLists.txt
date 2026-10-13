@@ -1,8 +1,11 @@
-# libhos_net.so: nifm (offline), bsd:u sockets over host sockets, sfdnsres.
+# libhos_net.so: nifm (offline), bsd:u sockets over host sockets, sfdnsres over the host
+# resolver, ssl without TLS behind it yet.
 add_library(hos_net SHARED
     net_init.c
     nifm.c
     bsd.c
+    sfdnsres.c
+    ssl.c
 )
 set_target_properties(hos_net PROPERTIES
     OUTPUT_NAME hos_net

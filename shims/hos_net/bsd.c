@@ -545,15 +545,3 @@ const hos_service_class hos_bsd_class = {
     .dispatch = bsd_dispatch,
     .destroy = NULL,
 };
-
-/* ---- sfdnsres: resolver. Opened by socketInitialize; lookups are not served yet. */
-
-static hos_result sfdnsres_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
-    return hos_ipc_unimplemented(obj, ctx);
-}
-
-const hos_service_class hos_sfdnsres_class = {
-    .name = "sfdnsres",
-    .dispatch = sfdnsres_dispatch,
-    .destroy = NULL,
-};
