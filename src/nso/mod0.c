@@ -45,8 +45,8 @@ hos_result mod0_find(const uint8_t *image, size_t size, mod0_info *out) {
         return HOS_RESULT_SUCCESS;
     }
     uint32_t off = rd32(image + 4);
-    if (off == 0 || off > size - 0x1C) {
-        return HOS_RESULT_SUCCESS; /* no MOD0 (hand-built modules) */
+    if (off == 0 || !in_image(off, 0x1C, size)) {
+        return HOS_RESULT_SUCCESS; /* no MOD0 (hand-built modules), or no room for one */
     }
     if (memcmp(image + off, MOD0_MAGIC, 4) != 0) {
         HOS_LOGD(MOD, "word at +4 (%#x) does not point at a MOD0 header", off);

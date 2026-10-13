@@ -406,6 +406,20 @@ TEST(mod0_symbol_name_runs_to_the_image_end) {
     free(img);
 }
 
+/* Found by fuzz_mod0_relocate: an image shorter than a MOD0 header made the
+ * "offset > size - 0x1C" test wrap and the magic was compared past the end. */
+TEST(mod0_image_shorter_than_a_header) {
+    uint8_t img[23];
+    memset(img, 0, sizeof(img));
+    put32(img + 4, 8); /* points inside the image, but a header would not fit */
+    mod0_info mi;
+    ASSERT_EQ(mod0_find(img, sizeof(img), &mi), HOS_RESULT_SUCCESS);
+    ASSERT_EQ(mi.present, 0);
+    put32(img + 4, 0x7FFFFFF0);
+    ASSERT_EQ(mod0_find(img, sizeof(img), &mi), HOS_RESULT_SUCCESS);
+    ASSERT_EQ(mi.present, 0);
+}
+
 TEST(mod0_rejects_out_of_range_fields) {
     uint8_t *img = malloc(0x1000);
     build_mod0_image(img);
