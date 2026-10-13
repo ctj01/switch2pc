@@ -20,6 +20,15 @@ static int32_t rds32(const uint8_t *p) {
     return v;
 }
 
+/*
+ * Every offset and length below is a 64-bit word the module chose, so a bound
+ * is written as "off <= size && len <= size - off": "off + len <= size" wraps
+ * for a value near 2^64 and then reads or writes far outside the image.
+ */
+static int in_image(uint64_t off, uint64_t len, size_t size) {
+    return off <= size && len <= size - off;
+}
+
 /* Resolve a signed offset relative to `mod0_off`; returns 0 when out of range. */
 static int rel_off(uint64_t mod0_off, int32_t rel, size_t size, uint64_t *out) {
     int64_t v = (int64_t)mod0_off + rel;
@@ -143,21 +152,21 @@ static hos_result read_dynamic(const uint8_t *image, size_t size, uint64_t dyn_o
 
 done:
     /* Symbol count: DT_HASH says it outright; DT_GNU_HASH needs a walk. */
-    if (d->hash_off && d->hash_off + 8 <= size) {
+    if (d->hash_off && in_image(d->hash_off, 8, size)) {
         d->sym_count = rd32(image + d->hash_off + 4); /* nchain */
-    } else if (d->gnu_hash_off && d->gnu_hash_off + 16 <= size) {
+    } else if (d->gnu_hash_off && in_image(d->gnu_hash_off, 16, size)) {
         uint32_t nbuckets = rd32(image + d->gnu_hash_off);
         uint32_t symoffset = rd32(image + d->gnu_hash_off + 4);
         uint32_t bloom_size = rd32(image + d->gnu_hash_off + 8);
         uint64_t buckets = d->gnu_hash_off + 16 + (uint64_t)bloom_size * 8;
         uint64_t chains = buckets + (uint64_t)nbuckets * 4;
         uint32_t max = 0;
-        for (uint32_t b = 0; b < nbuckets && buckets + (uint64_t)b * 4 + 4 <= size; b++) {
+        for (uint32_t b = 0; b < nbuckets && in_image(buckets + (uint64_t)b * 4, 4, size); b++) {
             uint32_t idx = rd32(image + buckets + (uint64_t)b * 4);
             if (idx < symoffset) {
                 continue;
             }
-            while (chains + (uint64_t)(idx - symoffset) * 4 + 4 <= size) {
+            while (in_image(chains + (uint64_t)(idx - symoffset) * 4, 4, size)) {
                 uint32_t c = rd32(image + chains + (uint64_t)(idx - symoffset) * 4);
                 if (idx + 1 > max) {
                     max = idx + 1;
@@ -176,18 +185,27 @@ done:
     return HOS_RESULT_SUCCESS;
 }
 
+/* The name, or "?" when it is not a terminated string inside both the string
+ * table and the image. */
 static const char *sym_name(const uint8_t *image, size_t size, const dyn_view *d,
                             const Elf64_Sym *s) {
-    if (!d->strtab_off || s->st_name >= d->strtab_size || d->strtab_off + s->st_name >= size) {
+    if (!d->strtab_off || s->st_name >= d->strtab_size ||
+        !in_image(d->strtab_off, d->strtab_size, size)) {
         return "?";
     }
-    return (const char *)(image + d->strtab_off + s->st_name);
+    const char *name = (const char *)(image + d->strtab_off + s->st_name);
+    size_t room = d->strtab_size - s->st_name;
+    if (strnlen(name, room) == room) {
+        return "?";
+    }
+    return name;
 }
 
 static int read_sym(const uint8_t *image, size_t size, const dyn_view *d, uint32_t index,
                     Elf64_Sym *out) {
     uint64_t off = d->symtab_off + (uint64_t)index * sizeof(Elf64_Sym);
-    if (!d->symtab_off || off + sizeof(Elf64_Sym) > size) {
+    if (!d->symtab_off || !in_image(d->symtab_off, 0, size) ||
+        !in_image(off, sizeof(Elf64_Sym), size)) {
         return 0;
     }
     memcpy(out, image + off, sizeof(*out));
@@ -265,7 +283,7 @@ static int resolve(link_ctx *c, uint32_t index, uint64_t *value, const char **na
 
 static void apply_one(link_ctx *c, uint64_t r_offset, uint32_t type, uint32_t sym, int64_t addend) {
     mod0_module *m = &c->mods[c->self];
-    if (r_offset + 8 > m->size) {
+    if (!in_image(r_offset, 8, m->size)) {
         HOS_LOGW(MOD, "relocation target %#" PRIx64 " outside image, skipped", r_offset);
         c->st.unsupported++;
         return;
@@ -302,7 +320,7 @@ static void apply_one(link_ctx *c, uint64_t r_offset, uint32_t type, uint32_t sy
 
 static hos_result walk_rela(link_ctx *c, uint64_t off, uint64_t size) {
     mod0_module *m = &c->mods[c->self];
-    if (off + size > m->size) {
+    if (!in_image(off, size, m->size)) {
         HOS_LOGE(MOD, "RELA table outside image");
         return S2PC_ERR_CORRUPT;
     }
@@ -316,7 +334,7 @@ static hos_result walk_rela(link_ctx *c, uint64_t off, uint64_t size) {
 
 static hos_result walk_rel(link_ctx *c, uint64_t off, uint64_t size) {
     mod0_module *m = &c->mods[c->self];
-    if (off + size > m->size) {
+    if (!in_image(off, size, m->size)) {
         HOS_LOGE(MOD, "REL table outside image");
         return S2PC_ERR_CORRUPT;
     }
@@ -324,7 +342,7 @@ static hos_result walk_rel(link_ctx *c, uint64_t off, uint64_t size) {
         Elf64_Rel r;
         memcpy(&r, m->image + p, sizeof(r));
         int64_t addend = 0;
-        if (r.r_offset + 8 <= m->size) {
+        if (in_image(r.r_offset, 8, m->size)) {
             memcpy(&addend, m->image + r.r_offset, 8);
         }
         apply_one(c, r.r_offset, ELF64_R_TYPE(r.r_info), ELF64_R_SYM(r.r_info), addend);
@@ -356,7 +374,7 @@ static int relr_add(mod0_module *m, uint64_t where) {
 
 static hos_result walk_relr(link_ctx *c, uint64_t off, uint64_t size) {
     mod0_module *m = &c->mods[c->self];
-    if (off + size > m->size) {
+    if (!in_image(off, size, m->size)) {
         HOS_LOGE(MOD, "RELR table outside image");
         return S2PC_ERR_CORRUPT;
     }

@@ -288,6 +288,124 @@ TEST(mod0_find_and_relocate) {
     free(img);
 }
 
+/* Replace the value of `tag` in the fixture's .dynamic (at 0x200). */
+static void set_dyn(uint8_t *img, int64_t tag, uint64_t value) {
+    for (size_t off = 0x200;; off += sizeof(Elf64_Dyn)) {
+        Elf64_Dyn e;
+        memcpy(&e, img + off, sizeof(e));
+        if (e.d_tag == DT_NULL) {
+            return;
+        }
+        if (e.d_tag == tag) {
+            e.d_un.d_val = value;
+            memcpy(img + off, &e, sizeof(e));
+            return;
+        }
+    }
+}
+
+/* Append a dynamic entry before the terminator; the fixture leaves room. */
+static void add_dyn(uint8_t *img, int64_t tag, uint64_t value) {
+    for (size_t off = 0x200;; off += sizeof(Elf64_Dyn)) {
+        Elf64_Dyn e;
+        memcpy(&e, img + off, sizeof(e));
+        if (e.d_tag == DT_NULL) {
+            Elf64_Dyn n = {tag, {value}};
+            memcpy(img + off, &n, sizeof(n));
+            memcpy(img + off + sizeof(n), &e, sizeof(e));
+            return;
+        }
+    }
+}
+
+/*
+ * Offsets from a module are 64-bit words the file chooses; a value near 2^64
+ * made "offset + length <= size" wrap and pass, and the loader read or wrote
+ * far outside the image. Each case below did that before the bounds were
+ * written as "offset <= size && length <= size - offset".
+ */
+TEST(mod0_relocation_target_near_top_of_address_space) {
+    uint8_t *img = malloc(0x1000);
+    build_mod0_image(img);
+    Elf64_Rela r = {0xFFFFFFFFFFFFFFF8ull, ELF64_R_INFO(0, R_AARCH64_RELATIVE), 0};
+    memcpy(img + 0x300, &r, sizeof(r));
+    mod0_info mi;
+    ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
+    mod0_reloc_stats st;
+    ASSERT_EQ(mod0_relocate(img, 0x1000, 0x10000, &mi, &st), HOS_RESULT_SUCCESS);
+    ASSERT_EQ(st.unsupported, 1); /* skipped, like any target outside the image */
+    ASSERT_EQ(st.applied, 1);
+    free(img);
+}
+
+TEST(mod0_rela_table_near_top_of_address_space) {
+    uint8_t *img = malloc(0x1000);
+    build_mod0_image(img);
+    set_dyn(img, DT_RELA, 0xFFFFFFFFFFFFFFF0ull); /* + RELASZ 48 wraps to 32 */
+    mod0_info mi;
+    ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
+    ASSERT_EQ(mod0_relocate(img, 0x1000, 0x10000, &mi, NULL), S2PC_ERR_CORRUPT);
+    free(img);
+}
+
+TEST(mod0_rel_entry_near_top_of_address_space) {
+    uint8_t *img = malloc(0x1000);
+    build_mod0_image(img);
+    set_dyn(img, DT_PLTREL, DT_REL); /* JMPREL read as REL: addend from the target word */
+    Elf64_Rel r = {0xFFFFFFFFFFFFFFFCull, ELF64_R_INFO(0, R_AARCH64_RELATIVE)};
+    memcpy(img + 0x330, &r, sizeof(r));
+    mod0_info mi;
+    ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
+    mod0_reloc_stats st;
+    ASSERT_EQ(mod0_relocate(img, 0x1000, 0x10000, &mi, &st), HOS_RESULT_SUCCESS);
+    ASSERT_EQ(st.unsupported, 1);
+    free(img);
+}
+
+TEST(mod0_symtab_near_top_of_address_space) {
+    uint8_t *img = malloc(0x1000);
+    build_mod0_image(img);
+    set_dyn(img, DT_SYMTAB, 0xFFFFFFFFFFFFFFE8ull); /* symbol 1 lands at offset 0 after wrap */
+    mod0_info mi;
+    ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
+    mod0_reloc_stats st;
+    ASSERT_EQ(mod0_relocate(img, 0x1000, 0x10000, &mi, &st), HOS_RESULT_SUCCESS);
+    ASSERT_EQ(st.unresolved, 2); /* no symbol table to resolve from */
+    mod0_module m = {.image = img, .size = 0x1000, .base = 0x10000, .info = mi};
+    uint64_t v;
+    ASSERT_EQ(mod0_lookup(&m, "foo", &v), 0);
+    free(img);
+}
+
+TEST(mod0_hash_tables_near_top_of_address_space) {
+    uint8_t *img = malloc(0x1000);
+    build_mod0_image(img);
+    add_dyn(img, DT_HASH, 0xFFFFFFFFFFFFFFFCull);
+    mod0_info mi;
+    ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
+    mod0_module m = {.image = img, .size = 0x1000, .base = 0x10000, .info = mi};
+    uint64_t v = 0;
+    mod0_lookup(&m, "foo", &v); /* must not read outside the image */
+    set_dyn(img, DT_HASH, 0);
+    add_dyn(img, DT_GNU_HASH, 0xFFFFFFFFFFFFFFF8ull);
+    mod0_lookup(&m, "foo", &v);
+    free(img);
+}
+
+TEST(mod0_symbol_name_runs_to_the_image_end) {
+    uint8_t *img = malloc(0x1000);
+    build_mod0_image(img);
+    set_dyn(img, DT_STRTAB, 0xFFC); /* "foo" as the last four bytes, no terminator */
+    set_dyn(img, DT_STRSZ, 0x100);
+    memcpy(img + 0xFFC, "ffoo", 4);
+    mod0_info mi;
+    ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
+    mod0_module m = {.image = img, .size = 0x1000, .base = 0x10000, .info = mi};
+    uint64_t v = 0;
+    ASSERT_EQ(mod0_lookup(&m, "foo", &v), 0); /* an unterminated name matches nothing */
+    free(img);
+}
+
 TEST(mod0_rejects_out_of_range_fields) {
     uint8_t *img = malloc(0x1000);
     build_mod0_image(img);
