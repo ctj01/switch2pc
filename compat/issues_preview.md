@@ -1,12 +1,12 @@
 # Compatibility issues: dry run
 
-Results of 2026-10-13T02:30:28Z at switch2pc 2bb3907: 24 distinct blockers.
+Results of 2026-10-13T02:42:18Z at switch2pc dc6ba46: 24 distinct blockers.
 
 ## create: [compat] service:audren:u: needed by hb-appstore, open-supaplex, audren-simple, sdl2-demo
 
 labels: compat
 
-**Blocker** `service:audren:u`, hit by 4 apps in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 3 of them.
+**Blocker** `service:audren:u`, hit by 4 apps in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 3 of them.
 
 ### What it is
 
@@ -16,8 +16,8 @@ The app asks the service manager (`sm:`) for the `audren:u` service and switch2p
 
 - **hb-appstore** ([vgmoose/hb-appstore@v2.3.2](https://github.com/vgmoose/hb-appstore/tree/v2.3.2)), level `renders`, 1 frames
 - **OpenSupaplex** ([sergiou87/open-supaplex@v7.2.2](https://github.com/sergiou87/open-supaplex/tree/v7.2.2)), level `boots`, 1 frames, first blocker
-- **switch-examples: audio/audren-simple** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 269 frames, first blocker
-- **switch-examples: graphics/sdl2/sdl2-demo** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 73 frames, first blocker
+- **switch-examples: audio/audren-simple** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 3118 frames, first blocker
+- **switch-examples: graphics/sdl2/sdl2-demo** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 349 frames, first blocker
 
 ### Log
 
@@ -45,11 +45,93 @@ The log line above should be gone and the app's level should not drop; see compa
 
 `<!-- compat:service:audren:u -->`
 
+## create: [compat] service:pl:u: needed by ftpd, nx-shell, shared-font
+
+labels: compat
+
+**Blocker** `service:pl:u`, hit by 3 apps in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 2 of them.
+
+### What it is
+
+The app asks the service manager (`sm:`) for the `pl:u` service and switch2pc has no implementation of it, so `GetService` fails with "not registered". Most homebrew tolerate a missing service for a while and fail later, when they use it. What `pl:u` does is on [switchbrew](https://switchbrew.org/wiki/Services_API).
+
+### Apps that stop at it
+
+- **ftpd** ([mtheall/ftpd@ac23689a0e65a7b8b7015fbeda380be36070a4f9](https://github.com/mtheall/ftpd/tree/ac23689a0e65a7b8b7015fbeda380be36070a4f9)), level `boots`, 0 frames, first blocker
+- **NX-Shell** ([joel16/NX-Shell@4.01](https://github.com/joel16/NX-Shell/tree/4.01)), level `boots`, 0 frames
+- **switch-examples: graphics/shared_font** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `crash`, 0 frames, first blocker
+
+### Log
+
+```
+ftpd: 
+nx-shell: [s2pc sm   ] W: GetService(pl:u): not registered
+shared-font: [s2pc sm   ] W: GetService(pl:u): not registered
+```
+
+### Where it goes
+
+A new `hos_service_class` registered under the name `pl:u` from a library constructor with `hos_ipc_register_service` (CONTRIBUTING.md, "Adding a service"); `shims/hos_os/lm.c` is the smallest complete example and `shims/hos_os/` is where it most likely belongs. `shims/hos_cpu/ipc_sm.c` logs the miss. Start with the commands the apps below actually call: run the app with `HOS_LOG_LEVEL=debug` and look for the `command N not implemented` lines that follow.
+
+### How to check a fix
+
+Build the app with `compat/build_app.sh <name> build/compat/<name>` in the `devkitpro/devkita64` container, then run it the way the nightly does:
+
+```
+compat/run.py --nro-dir build/compat --only ftpd --results /tmp/r.json
+scripts/action_run.sh build/compat/ftpd/ftpd.nro --duration 8000 --frames out
+```
+
+The log line above should be gone and the app's level should not drop; see compat/README.md for the levels. This issue is maintained by the nightly run (compat/issues.py): it is updated while apps hit the blocker and closed when none does.
+
+`<!-- compat:service:pl:u -->`
+
+## create: [compat] service:ssl: needed by curl-example, ftpd, hb-appstore
+
+labels: compat
+
+**Blocker** `service:ssl`, hit by 3 apps in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 2 of them.
+
+### What it is
+
+The app asks the service manager (`sm:`) for the `ssl` service and switch2pc has no implementation of it, so `GetService` fails with "not registered". Most homebrew tolerate a missing service for a while and fail later, when they use it. What `ssl` does is on [switchbrew](https://switchbrew.org/wiki/Services_API).
+
+### Apps that stop at it
+
+- **switch-examples: network/curl** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `renders`, 1 frames, first blocker
+- **ftpd** ([mtheall/ftpd@ac23689a0e65a7b8b7015fbeda380be36070a4f9](https://github.com/mtheall/ftpd/tree/ac23689a0e65a7b8b7015fbeda380be36070a4f9)), level `boots`, 0 frames
+- **hb-appstore** ([vgmoose/hb-appstore@v2.3.2](https://github.com/vgmoose/hb-appstore/tree/v2.3.2)), level `renders`, 1 frames, first blocker
+
+### Log
+
+```
+curl-example: [s2pc sm   ] W: GetService(ssl): not registered
+ftpd: 
+hb-appstore: [s2pc sm   ] W: GetService(ssl): not registered
+```
+
+### Where it goes
+
+A new `hos_service_class` registered under the name `ssl` from a library constructor with `hos_ipc_register_service` (CONTRIBUTING.md, "Adding a service"); `shims/hos_os/lm.c` is the smallest complete example and `shims/hos_net/` is where it most likely belongs. `shims/hos_cpu/ipc_sm.c` logs the miss. Start with the commands the apps below actually call: run the app with `HOS_LOG_LEVEL=debug` and look for the `command N not implemented` lines that follow.
+
+### How to check a fix
+
+Build the app with `compat/build_app.sh <name> build/compat/<name>` in the `devkitpro/devkita64` container, then run it the way the nightly does:
+
+```
+compat/run.py --nro-dir build/compat --only curl-example --results /tmp/r.json
+scripts/action_run.sh build/compat/curl-example/curl-example.nro --duration 8000 --frames out
+```
+
+The log line above should be gone and the app's level should not drop; see compat/README.md for the levels. This issue is maintained by the nightly run (compat/issues.py): it is updated while apps hit the blocker and closed when none does.
+
+`<!-- compat:service:ssl -->`
+
 ## create: [compat] ipc:applet:ILibraryAppletCreator:0: needed by account, software-keyboard
 
 labels: compat, good first issue
 
-**Blocker** `ipc:applet:ILibraryAppletCreator:0`, hit by 2 apps in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 2 of them.
+**Blocker** `ipc:applet:ILibraryAppletCreator:0`, hit by 2 apps in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 2 of them.
 
 ### What it is
 
@@ -57,8 +139,8 @@ The app sends command 0 to the `applet:ILibraryAppletCreator` interface and swit
 
 ### Apps that stop at it
 
-- **switch-examples: account** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 229 frames, first blocker
-- **switch-examples: applet/libapplets/software-keyboard** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 293 frames, first blocker
+- **switch-examples: account** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 2608 frames, first blocker
+- **switch-examples: applet/libapplets/software-keyboard** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 3144 frames, first blocker
 
 ### Log
 
@@ -88,7 +170,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat, good first issue
 
-**Blocker** `ipc:sfdnsres:6`, hit by 2 apps in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `ipc:sfdnsres:6`, hit by 2 apps in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -127,7 +209,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:clkrst`, hit by 2 apps in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 1 of them.
+**Blocker** `service:clkrst`, hit by 2 apps in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 1 of them.
 
 ### What it is
 
@@ -135,8 +217,8 @@ The app asks the service manager (`sm:`) for the `clkrst` service and switch2pc 
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
-- **NooDS** ([Hydr8gon/NooDS@4cb1439c330248b26cdf5f8dbcfa4e5ac53dcda0](https://github.com/Hydr8gon/NooDS/tree/4cb1439c330248b26cdf5f8dbcfa4e5ac53dcda0)), level `renders`, 400 frames, first blocker
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
+- **NooDS** ([Hydr8gon/NooDS@4cb1439c330248b26cdf5f8dbcfa4e5ac53dcda0](https://github.com/Hydr8gon/NooDS/tree/4cb1439c330248b26cdf5f8dbcfa4e5ac53dcda0)), level `renders`, 10500 frames, first blocker
 
 ### Log
 
@@ -162,89 +244,11 @@ The log line above should be gone and the app's level should not drop; see compa
 
 `<!-- compat:service:clkrst -->`
 
-## create: [compat] service:pl:u: needed by nx-shell, shared-font
-
-labels: compat
-
-**Blocker** `service:pl:u`, hit by 2 apps in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 1 of them.
-
-### What it is
-
-The app asks the service manager (`sm:`) for the `pl:u` service and switch2pc has no implementation of it, so `GetService` fails with "not registered". Most homebrew tolerate a missing service for a while and fail later, when they use it. What `pl:u` does is on [switchbrew](https://switchbrew.org/wiki/Services_API).
-
-### Apps that stop at it
-
-- **NX-Shell** ([joel16/NX-Shell@4.01](https://github.com/joel16/NX-Shell/tree/4.01)), level `boots`, 0 frames
-- **switch-examples: graphics/shared_font** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `crash`, 0 frames, first blocker
-
-### Log
-
-```
-nx-shell: [s2pc sm   ] W: GetService(pl:u): not registered
-shared-font: [s2pc sm   ] W: GetService(pl:u): not registered
-```
-
-### Where it goes
-
-A new `hos_service_class` registered under the name `pl:u` from a library constructor with `hos_ipc_register_service` (CONTRIBUTING.md, "Adding a service"); `shims/hos_os/lm.c` is the smallest complete example and `shims/hos_os/` is where it most likely belongs. `shims/hos_cpu/ipc_sm.c` logs the miss. Start with the commands the apps below actually call: run the app with `HOS_LOG_LEVEL=debug` and look for the `command N not implemented` lines that follow.
-
-### How to check a fix
-
-Build the app with `compat/build_app.sh <name> build/compat/<name>` in the `devkitpro/devkita64` container, then run it the way the nightly does:
-
-```
-compat/run.py --nro-dir build/compat --only nx-shell --results /tmp/r.json
-scripts/action_run.sh build/compat/nx-shell/nx-shell.nro --duration 8000 --frames out
-```
-
-The log line above should be gone and the app's level should not drop; see compat/README.md for the levels. This issue is maintained by the nightly run (compat/issues.py): it is updated while apps hit the blocker and closed when none does.
-
-`<!-- compat:service:pl:u -->`
-
-## create: [compat] service:ssl: needed by curl-example, hb-appstore
-
-labels: compat
-
-**Blocker** `service:ssl`, hit by 2 apps in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 2 of them.
-
-### What it is
-
-The app asks the service manager (`sm:`) for the `ssl` service and switch2pc has no implementation of it, so `GetService` fails with "not registered". Most homebrew tolerate a missing service for a while and fail later, when they use it. What `ssl` does is on [switchbrew](https://switchbrew.org/wiki/Services_API).
-
-### Apps that stop at it
-
-- **switch-examples: network/curl** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `renders`, 1 frames, first blocker
-- **hb-appstore** ([vgmoose/hb-appstore@v2.3.2](https://github.com/vgmoose/hb-appstore/tree/v2.3.2)), level `renders`, 1 frames, first blocker
-
-### Log
-
-```
-curl-example: [s2pc sm   ] W: GetService(ssl): not registered
-hb-appstore: [s2pc sm   ] W: GetService(ssl): not registered
-```
-
-### Where it goes
-
-A new `hos_service_class` registered under the name `ssl` from a library constructor with `hos_ipc_register_service` (CONTRIBUTING.md, "Adding a service"); `shims/hos_os/lm.c` is the smallest complete example and `shims/hos_net/` is where it most likely belongs. `shims/hos_cpu/ipc_sm.c` logs the miss. Start with the commands the apps below actually call: run the app with `HOS_LOG_LEVEL=debug` and look for the `command N not implemented` lines that follow.
-
-### How to check a fix
-
-Build the app with `compat/build_app.sh <name> build/compat/<name>` in the `devkitpro/devkita64` container, then run it the way the nightly does:
-
-```
-compat/run.py --nro-dir build/compat --only curl-example --results /tmp/r.json
-scripts/action_run.sh build/compat/curl-example/curl-example.nro --duration 8000 --frames out
-```
-
-The log line above should be gone and the app's level should not drop; see compat/README.md for the levels. This issue is maintained by the nightly run (compat/issues.py): it is updated while apps hit the blocker and closed when none does.
-
-`<!-- compat:service:ssl -->`
-
 ## create: [compat] service:ts: needed by hbmenu, switchident
 
 labels: compat
 
-**Blocker** `service:ts`, hit by 2 apps in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 1 of them.
+**Blocker** `service:ts`, hit by 2 apps in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 1 of them.
 
 ### What it is
 
@@ -252,8 +256,8 @@ The app asks the service manager (`sm:`) for the `ts` service and switch2pc has 
 
 ### Apps that stop at it
 
-- **nx-hbmenu** ([switchbrew/nx-hbmenu@v3.6.1](https://github.com/switchbrew/nx-hbmenu/tree/v3.6.1)), level `runs`, 376 frames, first blocker
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **nx-hbmenu** ([switchbrew/nx-hbmenu@v3.6.1](https://github.com/switchbrew/nx-hbmenu/tree/v3.6.1)), level `runs`, 4123 frames, first blocker
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -283,7 +287,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat, good first issue
 
-**Blocker** `ipc:applet:ICommonStateGetter:40`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `ipc:applet:ICommonStateGetter:40`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -291,7 +295,7 @@ The app sends command 40 to the `applet:ICommonStateGetter` interface and switch
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -320,7 +324,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat, good first issue
 
-**Blocker** `ipc:applet:ILibraryAppletCreator:10`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `ipc:applet:ILibraryAppletCreator:10`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -328,7 +332,7 @@ The app sends command 10 to the `applet:ILibraryAppletCreator` interface and swi
 
 ### Apps that stop at it
 
-- **switch-examples: applet/libapplets/software-keyboard** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 293 frames
+- **switch-examples: applet/libapplets/software-keyboard** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 3144 frames
 
 ### Log
 
@@ -357,7 +361,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat, good first issue
 
-**Blocker** `ipc:fsp-srv:11`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 1 of them.
+**Blocker** `ipc:fsp-srv:11`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 1 of them.
 
 ### What it is
 
@@ -394,7 +398,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat, good first issue
 
-**Blocker** `ipc:fsp-srv:61`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 1 of them.
+**Blocker** `ipc:fsp-srv:61`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 1 of them.
 
 ### What it is
 
@@ -402,7 +406,7 @@ The app sends command 61 to the `fsp-srv` interface and switch2pc's implementati
 
 ### Apps that stop at it
 
-- **switch-examples: fs/save** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 229 frames, first blocker
+- **switch-examples: fs/save** ([switchbrew/switch-examples@v20260201](https://github.com/switchbrew/switch-examples/tree/v20260201)), level `runs`, 2616 frames, first blocker
 
 ### Log
 
@@ -431,7 +435,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat, good first issue
 
-**Blocker** `ipc:set:sys:68`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `ipc:set:sys:68`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -439,7 +443,7 @@ The app sends command 68 to the `set:sys` interface and switch2pc's implementati
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -468,7 +472,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:acc:su`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 1 of them.
+**Blocker** `service:acc:su`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 1 of them.
 
 ### What it is
 
@@ -505,7 +509,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:gpio`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `service:gpio`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -513,7 +517,7 @@ The app asks the service manager (`sm:`) for the `gpio` service and switch2pc ha
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -542,7 +546,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:hid:dbg`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `service:hid:dbg`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -550,7 +554,7 @@ The app asks the service manager (`sm:`) for the `hid:dbg` service and switch2pc
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -579,7 +583,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:ns:am2`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `service:ns:am2`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -587,7 +591,7 @@ The app asks the service manager (`sm:`) for the `ns:am2` service and switch2pc 
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -616,7 +620,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:ns:ec`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `service:ns:ec`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -624,7 +628,7 @@ The app asks the service manager (`sm:`) for the `ns:ec` service and switch2pc h
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -653,7 +657,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:ns:rid`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `service:ns:rid`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -661,7 +665,7 @@ The app asks the service manager (`sm:`) for the `ns:rid` service and switch2pc 
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -690,7 +694,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:ns:ro`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `service:ns:ro`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -698,7 +702,7 @@ The app asks the service manager (`sm:`) for the `ns:ro` service and switch2pc h
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -727,7 +731,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:ns:rt`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `service:ns:rt`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -735,7 +739,7 @@ The app asks the service manager (`sm:`) for the `ns:rt` service and switch2pc h
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -764,7 +768,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:ns:web`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `service:ns:web`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -772,7 +776,7 @@ The app asks the service manager (`sm:`) for the `ns:web` service and switch2pc 
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -801,7 +805,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:set:cal`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 1 of them.
+**Blocker** `service:set:cal`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 1 of them.
 
 ### What it is
 
@@ -809,7 +813,7 @@ The app asks the service manager (`sm:`) for the `set:cal` service and switch2pc
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames, first blocker
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames, first blocker
 
 ### Log
 
@@ -838,7 +842,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:spl:`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `service:spl:`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -846,7 +850,7 @@ The app asks the service manager (`sm:`) for the `spl:` service and switch2pc ha
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 
@@ -875,7 +879,7 @@ The log line above should be gone and the app's level should not drop; see compa
 
 labels: compat
 
-**Blocker** `service:wlan:inf`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:30:28Z (switch2pc 2bb3907); the first blocker in 0 of them.
+**Blocker** `service:wlan:inf`, hit by 1 app in the nightly compatibility run of 2026-10-13T02:42:18Z (switch2pc dc6ba46); the first blocker in 0 of them.
 
 ### What it is
 
@@ -883,7 +887,7 @@ The app asks the service manager (`sm:`) for the `wlan:inf` service and switch2p
 
 ### Apps that stop at it
 
-- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 12 frames
+- **SwitchIdent** ([joel16/SwitchIdent@0.5](https://github.com/joel16/SwitchIdent/tree/0.5)), level `runs`, 320 frames
 
 ### Log
 

@@ -1,12 +1,12 @@
 {
- "generated_at": "2026-10-13T02:30:28Z",
- "switch2pc_commit": "2bb3907",
+ "generated_at": "2026-10-13T02:42:18Z",
+ "switch2pc_commit": "dc6ba46",
  "counts": {
-  "build-failed": 1,
+  "build-failed": 0,
   "crash": 1,
-  "boots": 3,
-  "renders": 5,
-  "runs": 18
+  "boots": 4,
+  "renders": 4,
+  "runs": 19
  },
  "apps": [
   {
@@ -18,8 +18,8 @@
    "category": "demo",
    "notes": "libnx console template: prints to the console and exits on Plus.",
    "level": "runs",
-   "frames": 239,
-   "seconds": 5.2,
+   "frames": 2598,
+   "seconds": 5.0,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -46,10 +46,10 @@
    "licence": "Public domain",
    "category": "demo",
    "notes": "SDL2 renderer (devkitPro's Switch SDL2, GL-backed) drawing coloured rectangles; the example ignores SDL_QUIT and exits on Plus, which the input script presses.",
-   "level": "renders",
-   "frames": 10,
-   "seconds": 68.1,
-   "exit_status": 124,
+   "level": "runs",
+   "frames": 147,
+   "seconds": 6.1,
+   "exit_status": 0,
    "blockers": [],
    "crash": null,
    "log_tail": [
@@ -64,8 +64,7 @@
    ],
    "thumbnail": "docs/compat/sdl2-simple.png",
    "build_seconds": 4,
-   "frame": "frame_0060.ppm",
-   "note": "did not exit on the exit request"
+   "frame": "frame_0060.ppm"
   },
   {
    "name": "hbmenu",
@@ -76,8 +75,8 @@
    "category": "utility",
    "notes": "The homebrew menu: software-rendered framebuffer, lists sdmc:/switch, nxlink listener.",
    "level": "runs",
-   "frames": 376,
-   "seconds": 8.2,
+   "frames": 4123,
+   "seconds": 8.0,
    "exit_status": 0,
    "blockers": [
     {
@@ -112,8 +111,8 @@
    "category": "demo",
    "notes": "OpenGL ES through Mesa (nouveau) and EGL: one shaded triangle.",
    "level": "runs",
-   "frames": 74,
-   "seconds": 8.3,
+   "frames": 2165,
+   "seconds": 8.1,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -142,8 +141,8 @@
    "category": "demo",
    "notes": "audout: plays tones when buttons are pressed (console UI).",
    "level": "runs",
-   "frames": 400,
-   "seconds": 8.2,
+   "frames": 4058,
+   "seconds": 8.0,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -171,8 +170,8 @@
    "category": "demo",
    "notes": "deko3d: clears the screen with a changing colour.",
    "level": "runs",
-   "frames": 25,
-   "seconds": 8.2,
+   "frames": 790,
+   "seconds": 8.0,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -202,8 +201,8 @@
    "category": "demo",
    "notes": "hid: prints the buttons and sticks to the console.",
    "level": "runs",
-   "frames": 288,
-   "seconds": 6.1,
+   "frames": 3105,
+   "seconds": 6.0,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -231,8 +230,8 @@
    "category": "demo",
    "notes": "libnx framebuffer: fills the screen with a gradient.",
    "level": "runs",
-   "frames": 146,
-   "seconds": 6.2,
+   "frames": 2179,
+   "seconds": 6.0,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -260,8 +259,8 @@
    "category": "demo",
    "notes": "fs: reads a file from its own RomFS and prints it.",
    "level": "runs",
-   "frames": 237,
-   "seconds": 5.1,
+   "frames": 2585,
+   "seconds": 5.0,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -327,17 +326,26 @@
    "licence": "GPL-3.0",
    "category": "utility",
    "notes": "FTP server: deko3d-backed Dear ImGui UI, sockets, exits on Plus. Pinned past v3.2.1 (whose FreeBSD collate.c has old-style definitions GCC 15 rejects); its assets need zstd and ImageMagick, installed with apt in the container.",
-   "level": "build-failed",
+   "level": "boots",
    "frames": 0,
-   "seconds": 0,
-   "exit_status": null,
-   "blockers": [],
+   "seconds": 0.0,
+   "exit_status": 0,
+   "blockers": [
+    {
+     "key": "service:pl:u",
+     "line": ""
+    },
+    {
+     "key": "service:ssl",
+     "line": ""
+    }
+   ],
    "crash": null,
    "log_tail": [
-    "not built locally (this session cannot fetch GitHub archives the build needs); built in CI"
+    "(run on GitHub Actions; see the compat-results artifact of run 38337326413)"
    ],
    "thumbnail": null,
-   "build_seconds": null
+   "build_seconds": 39
   },
   {
    "name": "hb-appstore",
@@ -349,7 +357,7 @@
    "notes": "Homebrew App Store: SDL2 (chesto), curl over TLS to the repository, fonts via SDL_ttf. Build workarounds for current portlibs and GCC 15: -D_GNU_SOURCE (chesto's -D_XOPEN_SOURCE hides strdup, now an error), harfbuzz linked in (freetype 2.13 needs it, chesto's link line predates that), serial make (chesto's Makefile races under -j).",
    "level": "renders",
    "frames": 1,
-   "seconds": 72.1,
+   "seconds": 72.0,
    "exit_status": 124,
    "blockers": [
     {
@@ -393,7 +401,7 @@
    "notes": "File manager: Dear ImGui over GLFW and Mesa, lists sdmc:/. Build fixes for GCC 15: a missing <ctime> include, and a freetype-config shim over pkg-config since freetype 2.13 no longer ships it.",
    "level": "boots",
    "frames": 0,
-   "seconds": 0.2,
+   "seconds": 0.0,
    "exit_status": 0,
    "blockers": [
     {
@@ -432,7 +440,7 @@
    "notes": "Save backup manager (its own SDL2-based UI, acc, ns, pdm); ref is the 12/02/2025 release, pinned by sha because the tag name contains slashes.",
    "level": "boots",
    "frames": 0,
-   "seconds": 0.2,
+   "seconds": 0.0,
    "exit_status": 0,
    "blockers": [
     {
@@ -467,8 +475,8 @@
    "category": "utility",
    "notes": "System information viewer: SDL2 renderer, SDL_ttf, set:sys, nifm, psm, ts.",
    "level": "runs",
-   "frames": 12,
-   "seconds": 8.5,
+   "frames": 320,
+   "seconds": 8.1,
    "exit_status": 0,
    "blockers": [
     {
@@ -574,8 +582,8 @@
    "category": "emulator",
    "notes": "DS emulator: libnx + EGL/Mesa UI, reaches its file browser without a ROM. Only a rolling 'release' tag upstream, so pinned by sha.",
    "level": "renders",
-   "frames": 400,
-   "seconds": 70.1,
+   "frames": 10500,
+   "seconds": 70.0,
    "exit_status": 124,
    "blockers": [
     {
@@ -609,8 +617,8 @@
    "category": "emulator",
    "notes": "GBA emulator: libnx + EGL/Mesa GUI, file browser without a ROM.",
    "level": "runs",
-   "frames": 99,
-   "seconds": 15.3,
+   "frames": 1939,
+   "seconds": 15.1,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -641,7 +649,7 @@
    "notes": "Supaplex reimplemented in C over SDL2 (stock Switch SDL2); its data (released as freeware by its authors) ships in the repository and is copied to sdmc:/switch/OpenSupaplex. A presses through the title screens.",
    "level": "boots",
    "frames": 1,
-   "seconds": 2.1,
+   "seconds": 0.2,
    "exit_status": 0,
    "blockers": [
     {
@@ -662,8 +670,7 @@
     "[s2pc vi   ] I: frames presented: 1"
    ],
    "thumbnail": null,
-   "build_seconds": 9,
-   "note": "every presented frame was black"
+   "build_seconds": 9
   },
   {
    "name": "spacenx",
@@ -674,8 +681,8 @@
    "category": "game",
    "notes": "Small SDL2 space shooter with everything drawn in code (no data files). Makefile.libnx predates the current toolchain, so the build passes CFLAGS (-fpermissive and -fcommon: GCC 15 rejects its return-type and pointer-type mismatches and its tentative definitions in a header) and LIBS (SDL2 now needs EGL, glapi, drm_nouveau and libstdc++ for Mesa) whole.",
    "level": "renders",
-   "frames": 10,
-   "seconds": 70.1,
+   "frames": 500,
+   "seconds": 70.0,
    "exit_status": 124,
    "blockers": [],
    "crash": null,
@@ -704,7 +711,7 @@
    "notes": "Text editor and file browser on chesto (SDL2); same build workarounds as hb-appstore (shared library code).",
    "level": "runs",
    "frames": 1,
-   "seconds": 10.3,
+   "seconds": 10.1,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -732,8 +739,8 @@
    "category": "demo",
    "notes": "OpenGL ES 2 gears through Mesa: more draw calls and depth than the triangle.",
    "level": "runs",
-   "frames": 35,
-   "seconds": 8.4,
+   "frames": 658,
+   "seconds": 8.1,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -762,8 +769,8 @@
    "category": "demo",
    "notes": "OpenGL ES textured cube through Mesa: texture upload and sampling.",
    "level": "runs",
-   "frames": 8,
-   "seconds": 8.7,
+   "frames": 326,
+   "seconds": 8.1,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -791,8 +798,8 @@
    "category": "demo",
    "notes": "audren:u, the audio renderer (not audout): a blocker for most games with music.",
    "level": "runs",
-   "frames": 269,
-   "seconds": 6.1,
+   "frames": 3118,
+   "seconds": 6.0,
    "exit_status": 0,
    "blockers": [
     {
@@ -827,7 +834,7 @@
    "notes": "pl:u: draws text with the system's shared font.",
    "level": "crash",
    "frames": 0,
-   "seconds": 0.2,
+   "seconds": 7.1,
    "exit_status": 134,
    "blockers": [
     {
@@ -858,8 +865,8 @@
    "category": "demo",
    "notes": "acc:u1: lists the users and their profile images.",
    "level": "runs",
-   "frames": 229,
-   "seconds": 5.1,
+   "frames": 2608,
+   "seconds": 5.0,
    "exit_status": 0,
    "blockers": [
     {
@@ -893,8 +900,8 @@
    "category": "demo",
    "notes": "fs: mounts save data for the current title and reads it.",
    "level": "runs",
-   "frames": 229,
-   "seconds": 5.1,
+   "frames": 2616,
+   "seconds": 5.0,
    "exit_status": 0,
    "blockers": [
     {
@@ -928,8 +935,8 @@
    "category": "demo",
    "notes": "library applets: opens the software keyboard (swkbd) and prints what it returns.",
    "level": "runs",
-   "frames": 293,
-   "seconds": 6.2,
+   "frames": 3144,
+   "seconds": 6.0,
    "exit_status": 0,
    "blockers": [
     {
@@ -970,8 +977,8 @@
    "category": "demo",
    "notes": "SDL2 with SDL_image, SDL_ttf and SDL_mixer: images, text and music through the stock Switch SDL2.",
    "level": "runs",
-   "frames": 73,
-   "seconds": 10.3,
+   "frames": 349,
+   "seconds": 10.1,
    "exit_status": 0,
    "blockers": [
     {
@@ -998,5 +1005,6 @@
    "build_seconds": 3,
    "frame": "frame_0070.ppm"
   }
- ]
+ ],
+ "source": "GitHub Actions run 38337326413 on ubuntu-24.04-arm (levels, frames, times, blockers); thumbnails and log excerpts from the same apps run locally under qemu-user"
 }
