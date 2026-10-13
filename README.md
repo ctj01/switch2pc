@@ -50,8 +50,8 @@ Because the code runs natively, `gdb` works on it as on any Linux program.
 ## What runs
 
 DOOM, Quake and OpenTyrian (stock SDL2 ports) are playable with keyboard and
-sound; the libnx examples work; devkitPro's deko3d examples render, from a
-triangle to MSAA, sRGB lighting, deferred shading and compute shaders, all but
+sound; the libnx examples work; devkitPro's deko3d examples all render, from a
+triangle to MSAA, sRGB lighting, deferred shading, compute shaders and
 tessellation. Kernel calls, shader instructions, IPC commands, the homebrew
 list and their history are on the [status page](https://ctj01.github.io/switch2pc/status.html), generated
 from the sources by `scripts/gen_status.py`.
