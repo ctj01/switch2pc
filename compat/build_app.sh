@@ -108,6 +108,17 @@ if [ ! -f "$src/$nro" ]; then
     finish 0 "$start"
 fi
 cp "$src/$nro" "$out/$name.nro"
+# "sdmc": files the app reads from the SD card at run time (free game data
+# that lives in the repository), as "repo path:sd card path" pairs.
+rm -rf "$out/sdmc"
+while IFS= read -r pair; do
+    [ -n "$pair" ] || continue
+    from=${pair%%:*}
+    to=${pair#*:}
+    mkdir -p "$out/sdmc/$(dirname "$to")"
+    cp -r "$src/$from" "$out/sdmc/$to"
+    echo "== sdmc:/$to from $from" | tee -a "$log"
+done < <(field sdmc)
 rm -rf "$out/src"
 echo "== $out/$name.nro ($(stat -c %s "$out/$name.nro") bytes)" | tee -a "$log"
 finish 1 "$start"

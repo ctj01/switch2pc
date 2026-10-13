@@ -162,4 +162,6 @@ compat/issues.py --results /tmp/results.json --dry-run /tmp/issues.md
 | RetroArch | GPLv3 and fine in principle, but builds for an hour; revisit with a cached core |
 | NXMP | needs a patched FFmpeg (averne/nvtegra), libusbhsfs and hand-built portlibs: not reproducible in the container yet |
 | Moonlight-Switch | builds through vcpkg and its own scripts; too heavy to reproduce for now |
+| pplay | needs its own FFmpeg build (ffmpeg.sh) and libsmb2 from source, like NXMP |
+| NoiES v1.2 | written against the pre-4.0 libnx hid API (KEY_A ...), does not build with current libnx |
 | NX-Activity-Log v1.4.0 | its SimpleIniParser submodule points at a repository that no longer exists |
