@@ -2,7 +2,8 @@
  * hosrun: load one or more NSO modules and run them natively in this process.
  *
  *   hosrun [options] <module.nso> [more.nso ...]
- *   hosrun [options] <app.nro>                   homebrew as hbmenu launches it
+ *   hosrun [options] <app.nro>                   homebrew as hbmenu launches it,
+ *                                                 under nx-hbloader's homebrew ABI
  *   hosrun [options] <exefs directory>          loads rtld, main, subsdk0-9, sdk
  *     --stack <bytes>    main thread stack (default 8 MiB)
  *     --no-patch         leave svc/mrs instructions alone (debugging aid)
@@ -22,11 +23,13 @@
 #include <dirent.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "common/hos_file.h"
 #include "common/hos_log.h"
@@ -64,7 +67,9 @@ static void usage(FILE *out) {
           "environment:\n"
           "  HOS_LOG_LEVEL     error|warn|info|debug|trace (default info)\n"
           "  HOS_BREAK         continue  resume after a non-notification svcBreak\n"
-          "  HOS_ROMFS, HOS_SDMC, HOS_SAVE   same as the options above\n",
+          "  HOS_ROMFS, HOS_SDMC, HOS_SAVE   same as the options above\n"
+          "  HOS_ARGV          the argv string an .nro sees (default sdmc:/switch/<name>)\n"
+          "  HOS_NO_HBABI=1    enter an .nro the NSO way instead of the homebrew ABI\n",
           out);
 }
 
@@ -152,6 +157,191 @@ static uint64_t build_init_trampoline(uint64_t at, const uint64_t *fns, size_t n
     return at;
 }
 
+/*
+ * The homebrew ABI: what nx-hbloader hands an .nro and libnx's crt0 expects
+ * (x0 = config entries, x1 = -1, lr = where to return when main is done). Two
+ * pages after the modules: a code page with one `brk #7` (svcExitProcess) as the
+ * return address, and a data page with the entries, the argv string, the next
+ * load path and argv that a launcher such as nx-hbmenu writes before leaving,
+ * and the user id storage. An NSO keeps the kernel's entry (x0 = 0, x1 = the
+ * main thread handle). HOS_NO_HBABI=1 enters an .nro the NSO way.
+ */
+#define HBABI_PAGES         2
+#define HBABI_ARGV_OFF      0x200
+#define HBABI_ARGV_SIZE     0x200
+#define HBABI_NEXT_PATH_OFF 0x400
+#define HBABI_NEXT_PATH_MAX 0x200
+#define HBABI_NEXT_ARGV_OFF 0x600
+#define HBABI_NEXT_ARGV_MAX 0x800
+#define HBABI_USER_ID_OFF   0xE00
+#define A64_BRK_7           0xd42000e0u
+
+enum {
+    ENTRY_END_OF_LIST = 0,
+    ENTRY_MAIN_THREAD_HANDLE = 1,
+    ENTRY_NEXT_LOAD_PATH = 2,
+    ENTRY_ARGV = 5,
+    ENTRY_SYSCALL_HINT = 6,
+    ENTRY_APPLET_TYPE = 7,
+    ENTRY_LAST_LOAD_RESULT = 11,
+    ENTRY_RANDOM_SEED = 14,
+    ENTRY_USER_ID_STORAGE = 15,
+    ENTRY_HOS_VERSION = 16,
+    ENTRY_SYSCALL_HINT2 = 17,
+};
+#define ENTRY_FLAG_MANDATORY    1
+#define APPLET_TYPE_APPLICATION 0
+#define HBABI_HOS_VERSION       (11u << 16 | 0u << 8 | 1u) /* what set:sys reports */
+
+typedef struct config_entry {
+    uint32_t key;
+    uint32_t flags;
+    uint64_t value[2];
+} config_entry;
+
+static struct {
+    uint8_t *data;  /* the data page */
+    uint64_t stub;  /* the return address */
+    char *nro_path; /* the .nro as given on the command line */
+    char **argv;    /* hosrun's own arguments, for a chain load */
+    int argc, app_arg;
+} g_hbabi;
+
+static void hbabi_put(config_entry **e, uint32_t key, uint32_t flags, uint64_t v0, uint64_t v1) {
+    (*e)->key = key;
+    (*e)->flags = flags;
+    (*e)->value[0] = v0;
+    (*e)->value[1] = v1;
+    (*e)++;
+}
+
+/* Fill the entries once the main thread's handle is known. */
+static void hbabi_prepare(uint32_t main_thread, hos_entry_args *args, void *user) {
+    (void)user;
+    uint8_t *d = g_hbabi.data;
+    config_entry *e = (config_entry *)d;
+    uint64_t seed[2] = {0, 0};
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (f) {
+        if (fread(seed, sizeof(seed), 1, f) != 1) {
+            seed[0] = seed[1] = 0;
+        }
+        fclose(f);
+    }
+    hbabi_put(&e, ENTRY_MAIN_THREAD_HANDLE, ENTRY_FLAG_MANDATORY, main_thread, 0);
+    hbabi_put(&e, ENTRY_NEXT_LOAD_PATH, 0, (uint64_t)(d + HBABI_NEXT_PATH_OFF),
+              (uint64_t)(d + HBABI_NEXT_ARGV_OFF));
+    hbabi_put(&e, ENTRY_ARGV, 0, 0, (uint64_t)(d + HBABI_ARGV_OFF));
+    hbabi_put(&e, ENTRY_SYSCALL_HINT, 0, UINT64_MAX, UINT64_MAX);
+    hbabi_put(&e, ENTRY_APPLET_TYPE, 0, APPLET_TYPE_APPLICATION, 0);
+    hbabi_put(&e, ENTRY_LAST_LOAD_RESULT, 0, 0, 0);
+    hbabi_put(&e, ENTRY_RANDOM_SEED, 0, seed[0], seed[1]);
+    hbabi_put(&e, ENTRY_USER_ID_STORAGE, 0, (uint64_t)(d + HBABI_USER_ID_OFF), 0);
+    hbabi_put(&e, ENTRY_HOS_VERSION, 0, HBABI_HOS_VERSION, 0);
+    hbabi_put(&e, ENTRY_SYSCALL_HINT2, 0, UINT64_MAX, 0);
+    hbabi_put(&e, ENTRY_END_OF_LIST, 0, 0, 0);
+    args->x0 = (uint64_t)d;
+    args->x1 = UINT64_MAX;
+    args->lr = g_hbabi.stub;
+}
+
+/*
+ * At exit: a launcher that filled in the next load path gets it loaded, the
+ * way nx-hbloader chain-loads, by running hosrun again with the same options
+ * on that file (sdmc:/... resolves inside the SD card directory) and the argv
+ * string it asked for in HOS_ARGV.
+ */
+static void hbabi_exit(void) {
+    const char *path = (const char *)(g_hbabi.data + HBABI_NEXT_PATH_OFF);
+    const char *args = (const char *)(g_hbabi.data + HBABI_NEXT_ARGV_OFF);
+    if (!g_hbabi.data || !path[0]) {
+        return;
+    }
+    HOS_LOGI(MOD, "next load: %s%s%s", path, args[0] ? " " : "", args);
+    static char host[PATH_MAX];
+    const char *sdmc = getenv("HOS_SDMC");
+    if (strncmp(path, "sdmc:/", 6) == 0 && sdmc && *sdmc) {
+        snprintf(host, sizeof(host), "%s/%s", sdmc, path + 6);
+    } else if (path[0] == '/') {
+        snprintf(host, sizeof(host), "%s", path);
+    } else {
+        HOS_LOGW(MOD, "cannot resolve %s on the host (no --sdmc)", path);
+        return;
+    }
+    struct stat st;
+    if (stat(host, &st) != 0 || !S_ISREG(st.st_mode)) {
+        HOS_LOGW(MOD, "next load: %s is not a file", host);
+        return;
+    }
+    setenv("HOS_ARGV", args[0] ? args : path, 1);
+    g_hbabi.argv[g_hbabi.app_arg] = host;
+    execv("/proc/self/exe", g_hbabi.argv);
+    HOS_LOGE(MOD, "cannot run %s: %s", host, strerror(errno));
+}
+
+/* Map the two pages at `at` and register them as a module. 0 on failure. */
+static uint64_t hbabi_setup(uint64_t at, hos_cpu_params *params) {
+    void *pages = mmap((void *)at, HBABI_PAGES * INIT_PAGE, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    if (pages == MAP_FAILED || (uint64_t)pages != at || params->num_modules >= HOS_MAX_MODULES) {
+        HOS_LOGE(MOD, "cannot map the homebrew ABI pages at %#" PRIx64, at);
+        return 0;
+    }
+    uint32_t *code = pages;
+    code[0] = A64_BRK_7;
+    __builtin___clear_cache((char *)pages, (char *)pages + INIT_PAGE);
+    if (mprotect(pages, INIT_PAGE, PROT_READ | PROT_EXEC) != 0) {
+        HOS_LOGE(MOD, "mprotect homebrew ABI stub: %s", strerror(errno));
+        return 0;
+    }
+    g_hbabi.stub = at;
+    g_hbabi.data = (uint8_t *)at + INIT_PAGE;
+    /*
+     * argv[0] is where the .nro is on the SD card: libnx reads its RomFS from
+     * that file. When the .nro is not inside the SD card directory it is served
+     * at that path anyway, through HOS_SDMC_ALIAS for libhos_fs.
+     */
+    const char *argv_str = getenv("HOS_ARGV");
+    char *argv_out = (char *)(g_hbabi.data + HBABI_ARGV_OFF);
+    static char real_nro[PATH_MAX], real_sdmc[PATH_MAX], alias[2 * PATH_MAX];
+    const char *sdmc = getenv("HOS_SDMC");
+    if (!realpath(g_hbabi.nro_path, real_nro)) {
+        snprintf(real_nro, sizeof(real_nro), "%s", g_hbabi.nro_path);
+    }
+    if (argv_str && *argv_str) {
+        snprintf(argv_out, HBABI_ARGV_SIZE, "%s", argv_str);
+    } else if (sdmc && realpath(sdmc, real_sdmc) &&
+               strncmp(real_nro, real_sdmc, strlen(real_sdmc)) == 0 &&
+               real_nro[strlen(real_sdmc)] == '/') {
+        snprintf(argv_out, HBABI_ARGV_SIZE, "sdmc:%s", real_nro + strlen(real_sdmc));
+    } else {
+        const char *base = strrchr(g_hbabi.nro_path, '/');
+        snprintf(argv_out, HBABI_ARGV_SIZE, "sdmc:/switch/%s", base ? base + 1 : g_hbabi.nro_path);
+    }
+    if (strncmp(argv_out, "sdmc:/", 6) == 0) {
+        size_t n = strcspn(argv_out + 6, " ");
+        snprintf(alias, sizeof(alias), "%.*s=%s", (int)n, argv_out + 6, real_nro);
+        char on_card[PATH_MAX];
+        struct stat st;
+        if (!(sdmc &&
+              snprintf(on_card, sizeof(on_card), "%s/%.*s", sdmc, (int)n, argv_out + 6) > 0 &&
+              stat(on_card, &st) == 0)) {
+            setenv("HOS_SDMC_ALIAS", alias, 1);
+        }
+    }
+    hos_cpu_module *cm = &params->modules[params->num_modules++];
+    memset(cm, 0, sizeof(*cm));
+    cm->image_base = at;
+    cm->image_size = HBABI_PAGES * INIT_PAGE;
+    cm->text_size = INIT_PAGE;
+    cm->data_off = INIT_PAGE;
+    cm->data_size = INIT_PAGE;
+    cm->name = "hbabi";
+    HOS_LOGI(MOD, "homebrew ABI: argv \"%s\", entries at %#" PRIx64, argv_out, at + INIT_PAGE);
+    atexit(hbabi_exit);
+    return at;
+}
+
 /* Replace an NRO's bytes with the equivalent NSO; serve its RomFS. */
 static int load_nro(loaded_module *m, int index, int count) {
     nro_info info;
@@ -173,6 +363,7 @@ static int load_nro(loaded_module *m, int index, int count) {
     free(m->file);
     m->file = nso;
     m->file_len = nso_len;
+    g_hbabi.nro_path = m->path;
     if (info.title[0]) {
         HOS_LOGI(MOD, "%s: %s%s%s", m->name, info.title, info.author[0] ? " by " : "", info.author);
     }
@@ -294,8 +485,12 @@ int main(int argc, char **argv) {
             }
         } else if (!add_module(mods, &count, a)) {
             return 1;
+        } else {
+            g_hbabi.app_arg = i;
         }
     }
+    g_hbabi.argv = argv;
+    g_hbabi.argc = argc;
     if (count == 0) {
         usage(stderr);
         return 2;
@@ -447,7 +642,14 @@ int main(int argc, char **argv) {
             cm->text_size = INIT_PAGE;
             cm->name = "init";
             entry = page;
+            cursor += INIT_PAGE;
         }
+    }
+
+    const char *no_hbabi = getenv("HOS_NO_HBABI");
+    int use_hbabi = g_hbabi.nro_path && !(no_hbabi && *no_hbabi && strcmp(no_hbabi, "0") != 0);
+    if (use_hbabi && !hbabi_setup(cursor, &params)) {
+        return 1;
     }
 
     params.program_id = program_id;
@@ -464,5 +666,5 @@ int main(int argc, char **argv) {
              ps_total.by_kind[PATCH_COUNTER_TO_BRK], rs.applied, rs.unresolved, rs.relr_applied,
              rs.deferred);
 
-    hos_cpu_run_main(entry, stack_size);
+    hos_cpu_run_main_with(entry, stack_size, use_hbabi ? hbabi_prepare : NULL, NULL);
 }

@@ -4,6 +4,8 @@
  *   HOS_SDMC   directory served as the SD card (OpenSdCardFileSystem)
  *   HOS_SAVE   directory served as save data (OpenSaveDataFileSystem)
  *   HOS_BIS    directory served as every built-in storage partition (default: an empty one)
+ *   HOS_SDMC_ALIAS  "<path on the card>=<host file>": one file served at a path that is
+ *              not in the directory (hosrun sets it so an .nro can read its own RomFS)
  *   HOS_ROMFS  file served as the data storage (OpenDataStorageByCurrentProcess),
  *              a romfs image as hactool or build_romfs produce it, or a directory;
  *              HOS_ROMFS_OFFSET/HOS_ROMFS_SIZE select the image inside a larger
@@ -158,6 +160,15 @@ static hos_result resolve(const fs_mount *m, const hos_ipc_ctx *ctx, char *out, 
         while (*p == '/') {
             p++;
         }
+    }
+    /* HOS_SDMC_ALIAS: the one file served from outside the directory */
+    const char *alias = getenv("HOS_SDMC_ALIAS");
+    const char *eq = alias ? strchr(alias, '=') : NULL;
+    const char *sdmc = getenv("HOS_SDMC");
+    if (eq && sdmc && strcmp(m->root, sdmc) == 0 && strlen(guest) == (size_t)(eq - alias) &&
+        strncmp(guest, alias, (size_t)(eq - alias)) == 0) {
+        int wa = snprintf(out, cap, "%s", eq + 1);
+        return wa < 0 || (size_t)wa >= cap ? FS_INVALID_PATH : HOS_RESULT_SUCCESS;
     }
     int w = snprintf(out, cap, "%s/%s", m->root, guest);
     if (w < 0 || (size_t)w >= cap) {

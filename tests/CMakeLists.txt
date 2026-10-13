@@ -50,6 +50,24 @@ if(S2PC_ARM64)
     set_tests_properties(smoke_hello_info PROPERTIES
         PASS_REGULAR_EXPRESSION "patch sites   7 total, 7 svc->brk")
 
+    # The same module as an .nro: entered under the homebrew ABI (config entries
+    # in x0, -1 in x1), its name read from the NACP, argv[0] on the SD card.
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_FOUND)
+        set(hello_nro ${CMAKE_BINARY_DIR}/tests/fixtures/hello.nro)
+        add_custom_command(
+            OUTPUT ${hello_nro}
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/nso2nro.py ${hello_nso} ${hello_nro}
+                    --name "hello nro"
+            DEPENDS ${hello_nso} hello_nso ${CMAKE_SOURCE_DIR}/tools/nso2nro.py
+            COMMENT "Wrapping hello.nro")
+        add_custom_target(hello_nro ALL DEPENDS ${hello_nro})
+        add_test(NAME smoke_hello_nro COMMAND hosrun ${hello_nro})
+        set_tests_properties(smoke_hello_nro PROPERTIES
+            PASS_REGULAR_EXPRESSION "hello.nro: hello nro by switch2pc.*homebrew ABI: argv \"sdmc:/switch/hello.nro\".*hello from HOS.*svcExitProcess"
+            FAIL_REGULAR_EXPRESSION "fatal|unimplemented svc|svcBreak Panic")
+    endif()
+
     # Fixtures for the service tests: an SD card directory and a fake romfs image.
     set(fixture_dir ${CMAKE_BINARY_DIR}/tests/fixtures)
     file(MAKE_DIRECTORY ${fixture_dir}/sdmc)

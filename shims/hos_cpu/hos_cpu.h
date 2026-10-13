@@ -125,6 +125,22 @@ HOS_EXPORT void hos_svc_dispatch(uint32_t id, hos_svc_regs *r);
  */
 HOS_EXPORT void hos_cpu_run_main(uint64_t entry, uint64_t stack_size) __attribute__((noreturn));
 
+/* The registers the main thread enters game code with. */
+typedef struct hos_entry_args {
+    uint64_t x0, x1, lr;
+} hos_entry_args;
+
+/**
+ * Like hos_cpu_run_main, but `prepare` chooses the entry registers once the
+ * main thread exists: an NSO gets x0 = 0 and x1 = its thread handle, an .nro
+ * under the homebrew ABI gets x0 = the config entries (which name that handle),
+ * x1 = -1 and a return address in lr. `prepare` may be NULL for the NSO case.
+ */
+HOS_EXPORT void hos_cpu_run_main_with(uint64_t entry, uint64_t stack_size,
+                                      void (*prepare)(uint32_t main_thread, hos_entry_args *args,
+                                                      void *user),
+                                      void *user) __attribute__((noreturn));
+
 /**
  * Give the calling host thread a HOS identity (TLS block, handle) without
  * entering game code. For tests and tools that call hos_svc_dispatch directly.
