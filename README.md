@@ -218,9 +218,10 @@ switch2pc patch <in.nso> <out.nso>    write a pre-patched, uncompressed copy
 switch2pc mknso --text <bin> -o <out.nso> [--rodata <bin>] [--data <bin>] [--bss <n>] [--compress]
 switch2pc elf2nso <in.elf> -o <out.nso> [--name <str>] [--compress]   static-PIE ELF with MOD0 -> NSO
 
+hosrun [options] <app.nro>                         homebrew as built; its RomFS is the data storage
 hosrun [options] <module.nso> [more.nso ...]      modules mapped back to back, first one is entered
 hosrun [options] <exefs directory>                  loads rtld, main, subsdk0-9, sdk by name
-  --stack <bytes>  --no-patch  --romfs <file>  --sdmc <dir>  --save <dir>
+  --stack <bytes>  --no-patch  --romfs <file|dir>  --sdmc <dir>  --save <dir>
 ```
 
 Environment: `HOS_LOG_LEVEL=error|warn|info|debug|trace`, `HOS_BREAK=continue`

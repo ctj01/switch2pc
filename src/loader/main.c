@@ -2,6 +2,7 @@
  * hosrun: load one or more NSO modules and run them natively in this process.
  *
  *   hosrun [options] <module.nso> [more.nso ...]
+ *   hosrun [options] <app.nro>                   homebrew as hbmenu launches it
  *   hosrun [options] <exefs directory>          loads rtld, main, subsdk0-9, sdk
  *     --stack <bytes>    main thread stack (default 8 MiB)
  *     --no-patch         leave svc/mrs instructions alone (debugging aid)
@@ -12,6 +13,10 @@
  * Modules are mapped back to back in the order given, as the kernel lays an
  * exefs out, so a runtime linker that walks memory finds them. Relocations
  * are resolved across all modules; the entry point is the first module.
+ *
+ * An NRO is converted to an uncompressed NSO and started the same way, as an
+ * application rather than through hbloader's ABI; the RomFS in its assets
+ * becomes the data storage unless --romfs names another.
  */
 
 #include <dirent.h>
@@ -27,6 +32,7 @@
 #include "common/hos_log.h"
 #include "hos_cpu.h"
 #include "nso/mod0.h"
+#include "nso/nro.h"
 #include "nso/nso.h"
 #include "patch/patch.h"
 
@@ -45,10 +51,12 @@ typedef struct loaded_module {
 
 static void usage(FILE *out) {
     fputs("usage: hosrun [options] <module.nso> [more.nso ...]\n"
+          "       hosrun [options] <app.nro>\n"
           "       hosrun [options] <exefs directory>\n"
           "  --stack <bytes>   main thread stack size (default 8 MiB)\n"
           "  --no-patch        do not rewrite svc/mrs instructions\n"
-          "  --romfs <file>    romfs image for OpenDataStorageByCurrentProcess\n"
+          "  --romfs <path>    romfs image or directory for OpenDataStorageByCurrentProcess\n"
+          "                    (default for an .nro: the RomFS in its assets)\n"
           "  --sdmc <dir>      directory served as the SD card\n"
           "  --save <dir>      directory served as save data\n"
           "  --program-id <hex>  title id (e.g. 0000000000010000)\n"
@@ -142,6 +150,43 @@ static uint64_t build_init_trampoline(uint64_t at, const uint64_t *fns, size_t n
         return 0;
     }
     return at;
+}
+
+/* Replace an NRO's bytes with the equivalent NSO; serve its RomFS. */
+static int load_nro(loaded_module *m, int index, int count) {
+    nro_info info;
+    hos_result r = nro_parse(m->file, m->file_len, &info);
+    if (HOS_FAILED(r)) {
+        HOS_LOGE(MOD, "%s is not a valid NRO", m->path);
+        return die(r, "nro_parse");
+    }
+    if (index != 0 || count != 1) {
+        HOS_LOGE(MOD, "an NRO runs on its own (got %d modules)", count);
+        return 1;
+    }
+    uint8_t *nso = NULL;
+    size_t nso_len = 0;
+    r = nro_to_nso(m->file, m->file_len, &nso, &nso_len);
+    if (HOS_FAILED(r)) {
+        return die(r, "nro_to_nso");
+    }
+    free(m->file);
+    m->file = nso;
+    m->file_len = nso_len;
+    if (info.title[0]) {
+        HOS_LOGI(MOD, "%s: %s%s%s", m->name, info.title, info.author[0] ? " by " : "", info.author);
+    }
+    const char *romfs = getenv("HOS_ROMFS");
+    if (info.romfs_size && (!romfs || !*romfs)) {
+        char off[32], size[32];
+        snprintf(off, sizeof(off), "%" PRIu64, info.romfs_off);
+        snprintf(size, sizeof(size), "%" PRIu64, info.romfs_size);
+        setenv("HOS_ROMFS", m->path, 1);
+        setenv("HOS_ROMFS_OFFSET", off, 1);
+        setenv("HOS_ROMFS_SIZE", size, 1);
+        HOS_LOGI(MOD, "romfs: %" PRIu64 " bytes in the NRO's assets", info.romfs_size);
+    }
+    return 0;
 }
 
 static int take_value(int argc, char **argv, int *i, const char **out) {
@@ -263,6 +308,11 @@ int main(int argc, char **argv) {
         hos_result r = hos_file_read_all(m->path, &m->file, &m->file_len);
         if (HOS_FAILED(r)) {
             return die(r, "read");
+        }
+        if (nro_is(m->file, m->file_len)) {
+            if (load_nro(m, i, count) != 0) {
+                return 1;
+            }
         }
         nso_header h;
         r = nso_parse_header(m->file, m->file_len, &h);

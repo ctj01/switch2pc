@@ -4,7 +4,9 @@
  *   HOS_SDMC   directory served as the SD card (OpenSdCardFileSystem)
  *   HOS_SAVE   directory served as save data (OpenSaveDataFileSystem)
  *   HOS_ROMFS  file served as the data storage (OpenDataStorageByCurrentProcess),
- *              a romfs image as hactool or build_romfs produce it
+ *              a romfs image as hactool or build_romfs produce it, or a directory;
+ *              HOS_ROMFS_OFFSET/HOS_ROMFS_SIZE select the image inside a larger
+ *              file (an NRO's assets)
  *
  * hosrun sets these from --sdmc / --save / --romfs. Unset mounts report the
  * same results the real service gives for a missing card or title.
@@ -76,6 +78,8 @@ typedef struct fs_dir {
 typedef struct fs_storage {
     int used;
     int fd;           /* image file, or -1 */
+    uint64_t base;    /* the image's offset in the file */
+    int64_t limit;    /* its size, or -1 for the rest of the file */
     romfs_image *img; /* image built from a directory (shared, never freed) */
     int read_only;
 } fs_storage;
@@ -632,6 +636,18 @@ static hos_result storage_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
         if (s->img) {
             return romfs_image_read(s->img, (uint64_t)offset, p, n);
         }
+        if (s->limit >= 0) { /* a window of the file: nothing past its end */
+            if ((uint64_t)offset >= (uint64_t)s->limit) {
+                memset(p, 0, n);
+                return HOS_RESULT_SUCCESS;
+            }
+            if (n > (uint64_t)s->limit - (uint64_t)offset) {
+                memset(p + ((uint64_t)s->limit - (uint64_t)offset), 0,
+                       n - ((uint64_t)s->limit - (uint64_t)offset));
+                n = (uint64_t)s->limit - (uint64_t)offset;
+            }
+        }
+        offset += (int64_t)s->base;
         while (n) {
             ssize_t got = pread(s->fd, p, n, (off_t)offset);
             if (got < 0) {
@@ -659,10 +675,13 @@ static hos_result storage_dispatch(hos_object *obj, hos_ipc_ctx *ctx) {
             size = (int64_t)romfs_image_size(s->img);
         } else {
             struct stat st;
-            if (fstat(s->fd, &st) != 0) {
+            if (s->limit >= 0) {
+                size = s->limit;
+            } else if (fstat(s->fd, &st) != 0) {
                 return errno_result(errno);
+            } else {
+                size = st.st_size;
             }
-            size = st.st_size;
         }
         hos_ipc_out_write(ctx, &size, 8);
         return HOS_RESULT_SUCCESS;
@@ -732,6 +751,9 @@ static hos_result open_romfs_storage(hos_ipc_ctx *ctx) {
     }
     s->fd = fd;
     s->img = (fd < 0) ? g_romfs_dir_image : NULL;
+    const char *off = getenv("HOS_ROMFS_OFFSET"), *size = getenv("HOS_ROMFS_SIZE");
+    s->base = (fd >= 0 && off && *off) ? strtoull(off, NULL, 0) : 0;
+    s->limit = (fd >= 0 && size && *size) ? (int64_t)strtoull(size, NULL, 0) : -1;
     s->read_only = 1;
     hos_object *o = hos_ipc_object_new(&g_storage_class, s);
     if (!o) {

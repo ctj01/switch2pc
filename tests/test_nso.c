@@ -1,7 +1,9 @@
 #include <elf.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "nso/mod0.h"
+#include "nso/nro.h"
 #include "nso/nso.h"
 #include "test.h"
 
@@ -92,6 +94,88 @@ TEST(nso_write_then_load_compressed) {
     free(buf);
 }
 
+/* An NRO by hand: text 0x0-0x1000 (holding the header), rodata, data, then assets
+ * with a NACP whose first title is set and a small RomFS. */
+static void put32(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+
+static void put64(uint8_t *p, uint64_t v) {
+    put32(p, (uint32_t)v);
+    put32(p + 4, (uint32_t)(v >> 32));
+}
+
+#define NRO_IMAGE 0x3000u
+#define NRO_NACP  0x4000u
+#define NRO_LEN   (NRO_IMAGE + 0x38 + NRO_NACP + 0x40)
+
+static uint8_t *build_nro(void) {
+    uint8_t *f = calloc(1, NRO_LEN);
+    fill(f + 0x80, 0x1000 - 0x80, 1); /* text after the header */
+    fill(f + 0x1000, 0x800, 2);       /* rodata */
+    fill(f + 0x2000, 0x100, 3);       /* data */
+    memcpy(f + 0x10, "NRO0", 4);
+    put32(f + 0x18, NRO_IMAGE);
+    put32(f + 0x20, 0x0000);
+    put32(f + 0x24, 0x1000);
+    put32(f + 0x28, 0x1000);
+    put32(f + 0x2C, 0x800);
+    put32(f + 0x30, 0x2000);
+    put32(f + 0x34, 0x100);
+    put32(f + 0x38, 0x500); /* bss */
+    uint8_t *a = f + NRO_IMAGE;
+    memcpy(a, "ASET", 4);
+    put64(a + 0x18, 0x38); /* nacp */
+    put64(a + 0x20, NRO_NACP);
+    put64(a + 0x28, 0x38 + NRO_NACP); /* romfs */
+    put64(a + 0x30, 0x40);
+    memcpy(a + 0x38, "Fixture App", 11);
+    memcpy(a + 0x38 + 0x200, "switch2pc", 9);
+    memset(a + 0x38 + NRO_NACP, 0xAB, 0x40);
+    return f;
+}
+
+TEST(nro_parse_and_convert) {
+    uint8_t *f = build_nro();
+    nro_info info;
+    ASSERT_EQ(nro_parse(f, NRO_LEN, &info), HOS_RESULT_SUCCESS);
+    ASSERT_EQ(info.rodata_off, 0x1000);
+    ASSERT_EQ(info.data_size, 0x100);
+    ASSERT_EQ(info.bss_size, 0x500);
+    ASSERT_EQ(info.romfs_off, NRO_IMAGE + 0x38 + NRO_NACP);
+    ASSERT_EQ(info.romfs_size, 0x40);
+    ASSERT_TRUE(strcmp(info.title, "Fixture App") == 0);
+    ASSERT_TRUE(strcmp(info.author, "switch2pc") == 0);
+
+    uint8_t *nso;
+    size_t len;
+    ASSERT_EQ(nro_to_nso(f, NRO_LEN, &nso, &len), HOS_RESULT_SUCCESS);
+    nso_module m;
+    ASSERT_EQ(nso_load(nso, len, NULL, &m), HOS_RESULT_SUCCESS);
+    ASSERT_EQ(m.hdr.rodata.memory_offset, 0x1000);
+    ASSERT_EQ(m.hdr.data.memory_offset, 0x2000);
+    ASSERT_EQ(m.hdr.bss_size, 0x500);
+    /* the image is the NRO's, byte for byte, header included */
+    ASSERT_TRUE(memcmp(m.image, f, NRO_IMAGE - 0x1000 + 0x100) == 0);
+    nso_free(&m);
+    free(nso);
+    free(f);
+}
+
+TEST(nro_rejects_bad_layout) {
+    uint8_t *f = build_nro();
+    nro_info info;
+    ASSERT_EQ(nro_parse(f, 0x40, &info), S2PC_ERR_TRUNCATED);
+    put32(f + 0x28, 0x800); /* rodata overlapping text */
+    ASSERT_EQ(nro_parse(f, NRO_LEN, &info), S2PC_ERR_CORRUPT);
+    memcpy(f + 0x10, "NSO0", 4);
+    ASSERT_EQ(nro_parse(f, NRO_LEN, &info), S2PC_ERR_BAD_MAGIC);
+    free(f);
+}
+
 TEST(nso_rejects_bad_magic_and_truncation) {
     uint8_t *buf;
     size_t len;
@@ -124,14 +208,6 @@ TEST(mod0_absent) {
     mod0_info mi;
     ASSERT_EQ(mod0_find(image, sizeof(image), &mi), HOS_RESULT_SUCCESS);
     ASSERT_EQ(mi.present, 0);
-}
-
-static void put32(uint8_t *p, uint32_t v) {
-    memcpy(p, &v, 4);
-}
-
-static void put64(uint8_t *p, uint64_t v) {
-    memcpy(p, &v, 8);
 }
 
 /*

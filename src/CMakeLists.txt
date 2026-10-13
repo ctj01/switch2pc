@@ -6,10 +6,11 @@ add_library(s2pc_common STATIC
 )
 target_include_directories(s2pc_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-# Core: NSO parsing, LZ4, MOD0 relocation, instruction patching, ELF reading.
+# Core: NSO and NRO parsing, LZ4, MOD0 relocation, instruction patching, ELF reading.
 add_library(s2pc_core STATIC
     nso/lz4.c
     nso/nso.c
+    nso/nro.c
     nso/mod0.c
     nso/elf2nso.c
     patch/patch.c
