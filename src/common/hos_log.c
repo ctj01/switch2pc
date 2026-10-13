@@ -75,3 +75,29 @@ void hos_log(hos_log_level level, const char *module, const char *fmt, ...) {
     ssize_t rc = write(STDERR_FILENO, buf, used);
     (void)rc;
 }
+
+void hos_log_guest(hos_log_level level, const char *source, const char *text, size_t len) {
+    if (level > g_level) {
+        return;
+    }
+    char line[900];
+    size_t n = 0;
+    for (size_t i = 0; i <= len; i++) {
+        char c = i < len ? text[i] : '\n';
+        if (c == '\n' || c == '\r' || c == '\0' || n == sizeof(line) - 1) {
+            if (n) {
+                line[n] = '\0';
+                hos_log(level, "game", "%s%s%s", source && *source ? source : "",
+                        source && *source ? ": " : "", line);
+            }
+            n = 0;
+            if (c == '\0' && i < len) {
+                break; /* a C string ends here */
+            }
+            if (c == '\n' || c == '\r' || c == '\0') {
+                continue;
+            }
+        }
+        line[n++] = ((unsigned char)c < 0x20 && c != '\t') || c == 0x7F ? '?' : c;
+    }
+}

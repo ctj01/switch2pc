@@ -246,11 +246,7 @@ void svc_output_debug_string(hos_svc_regs *r) {
         n = sizeof(buf) - 1;
     }
     memcpy(buf, p, n);
-    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) {
-        n--;
-    }
-    buf[n] = '\0';
-    HOS_LOGI("game", "%s", buf);
+    hos_log_guest(HOS_LOG_INFO, NULL, buf, n);
     r->x[0] = HOS_RESULT_SUCCESS;
 }
 
