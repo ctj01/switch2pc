@@ -1,0 +1,29 @@
+{
+  "_comment": "Homebrew tested under hosrun. status: playable (runs fully, input and sound where it has them), works (does what it is meant to), partial (runs with something missing), broken. Edit by hand; scripts/gen_status.py renders it into docs/status.html.",
+  "entries": [
+    {"name": "DOOM (doomgeneric)", "kind": "game", "status": "playable", "notes": "libnx framebuffer, keyboard, sound"},
+    {"name": "Quake (SDL2)", "kind": "game", "status": "playable", "notes": "unmodified SDL2 port, sound"},
+    {"name": "OpenTyrian (SDL2)", "kind": "game", "status": "playable", "notes": "unmodified SDL2 game"},
+    {"name": "SDL2 test app", "kind": "sdl", "status": "works", "notes": "video, input, audio"},
+    {"name": "libnx hello", "kind": "libnx", "status": "works", "notes": ""},
+    {"name": "libnx console", "kind": "libnx", "status": "works", "notes": ""},
+    {"name": "libnx services", "kind": "libnx", "status": "works", "notes": "account, set, time, psm"},
+    {"name": "libnx romfs", "kind": "libnx", "status": "works", "notes": ""},
+    {"name": "libnx input", "kind": "libnx", "status": "works", "notes": ""},
+    {"name": "libnx sockets", "kind": "libnx", "status": "works", "notes": "bsd:u; no DNS yet (#41)"},
+    {"name": "deko3d clear (M0/M1)", "kind": "gpu", "status": "works", "notes": ""},
+    {"name": "deko3d triangle", "kind": "gpu", "status": "works", "notes": "matches a reference"},
+    {"name": "deko3d cube", "kind": "gpu", "status": "works", "notes": "matches a reference"},
+    {"name": "deko3d depth and blending", "kind": "gpu", "status": "works", "notes": "matches a reference"},
+    {"name": "deko3d textures", "kind": "gpu", "status": "works", "notes": "RGBA8 and BC1, matches a reference"},
+    {"name": "deko_examples 01 Simple Setup", "kind": "gpu", "status": "works", "notes": ""},
+    {"name": "deko_examples 02 Triangle", "kind": "gpu", "status": "works", "notes": ""},
+    {"name": "deko_examples 03 Cube", "kind": "gpu", "status": "works", "notes": ""},
+    {"name": "deko_examples 04 Textured Cube", "kind": "gpu", "status": "works", "notes": ""},
+    {"name": "deko_examples 05 Tessellation", "kind": "gpu", "status": "broken", "notes": "tessellation stages not implemented"},
+    {"name": "deko_examples 06 Multisampling", "kind": "gpu", "status": "works", "notes": "4x MSAA, 2D-engine resolve"},
+    {"name": "deko_examples 07 Mesh and Lighting (sRGB)", "kind": "gpu", "status": "works", "notes": ""},
+    {"name": "deko_examples 08 Deferred Shading", "kind": "gpu", "status": "works", "notes": "three render targets"},
+    {"name": "deko_examples 09 Compute Shader", "kind": "gpu", "status": "partial", "notes": "line smoothing not done"}
+  ]
+}

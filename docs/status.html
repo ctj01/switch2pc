@@ -1,0 +1,926 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>switch2pc status</title><style>
+:root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --text:#e6edf3; --muted:#8b949e; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text);
+       font:15px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+main { max-width:1100px; margin:0 auto; padding:24px 16px 48px; }
+h1 { font-size:28px; margin:0 0 4px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+h2 { font-size:17px; margin:28px 0 8px; font-weight:600; }
+.sub { color:var(--muted); margin:6px 0 16px; }
+.badges { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 4px; }
+.badge { display:inline-flex; font-size:13px; border-radius:3px; overflow:hidden; }
+.bl { background:#555; padding:2px 8px; } .bv { padding:2px 8px; font-weight:600; }
+.maps { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+.maps h3 { font-size:14px; font-weight:600; margin:0 0 6px; }
+@media (max-width: 760px) { .maps { grid-template-columns:1fr; } }
+svg { width:100%; height:auto; display:block; }
+.treemap .group { fill:#0d1117; stroke:#000; stroke-width:2; }
+.treemap .glabel { fill:#fff; font-size:11px; paint-order:stroke; stroke:#000; stroke-width:3px; }
+.history .gridline { stroke:var(--line); stroke-width:1; }
+.history .axis { fill:var(--muted); font-size:11px; } .history .legend { font-size:12px; font-weight:600; }
+table { width:100%; border-collapse:collapse; font-size:14px; }
+th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+th { color:var(--muted); font-weight:600; }
+.st { display:inline-block; padding:0 8px; border-radius:10px; font-size:12px; font-weight:600; }
+.legendrow { color:var(--muted); font-size:13px; margin-top:6px; }
+.sq { display:inline-block; width:10px; height:10px; margin:0 4px 0 10px; vertical-align:middle; }
+footer { color:var(--muted); font-size:12px; margin-top:32px; }
+</style></head>
+<body><main>
+<h1>Status</h1>
+<p class="sub">switch2pc runs Nintendo Switch homebrew natively on Linux ARM64. Generated
+from the sources by scripts/gen_status.py at 1076507 2026-10-12.</p>
+<div class="badges">
+<span class="badge"><span class="bl">kernel calls</span><span class="bv" style="background:#da3633">35.2%</span></span>
+<span class="badge"><span class="bl">shader instructions</span><span class="bv" style="background:#da3633">25.7%</span></span>
+<span class="badge"><span class="bl">IPC commands</span><span class="bv" style="background:#2ea043">362</span></span>
+<span class="badge"><span class="bl">homebrew working</span><span class="bv" style="background:#2ea043">22/24</span></span>
+<span class="badge"><span class="bl">tests</span><span class="bv" style="background:#2ea043">37</span></span>
+</div>
+<div class="maps">
+<section><h3>Kernel calls: 35.25% (43/122)</h3>
+<svg viewBox="0 0 520 300" class="treemap" role="img">
+<rect x="0.0" y="0.0" width="157.7" height="300.0" class="group"/>
+<rect x="2.0" y="17.0" width="29" height="29" fill="#2ea043"><title>Memory: 0x01 SetHeapSize</title></rect>
+<rect x="32.0" y="17.0" width="29" height="29" fill="#2ea043"><title>Memory: 0x02 SetMemoryPermission</title></rect>
+<rect x="62.0" y="17.0" width="29" height="29" fill="#2ea043"><title>Memory: 0x03 SetMemoryAttribute</title></rect>
+<rect x="92.0" y="17.0" width="29" height="29" fill="#2ea043"><title>Memory: 0x04 MapMemory</title></rect>
+<rect x="122.0" y="17.0" width="29" height="29" fill="#2ea043"><title>Memory: 0x05 UnmapMemory</title></rect>
+<rect x="2.0" y="47.0" width="29" height="29" fill="#2ea043"><title>Memory: 0x06 QueryMemory</title></rect>
+<rect x="32.0" y="47.0" width="29" height="29" fill="#2ea043"><title>Memory: 0x13 MapSharedMemory</title></rect>
+<rect x="62.0" y="47.0" width="29" height="29" fill="#2ea043"><title>Memory: 0x14 UnmapSharedMemory</title></rect>
+<rect x="92.0" y="47.0" width="29" height="29" fill="#2ea043"><title>Memory: 0x15 CreateTransferMemory</title></rect>
+<rect x="122.0" y="47.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x2c MapPhysicalMemory (missing)</title></rect>
+<rect x="2.0" y="77.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x2d UnmapPhysicalMemory (missing)</title></rect>
+<rect x="32.0" y="77.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x39 CreateIoPool (missing)</title></rect>
+<rect x="62.0" y="77.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x3a CreateIoRegion (missing)</title></rect>
+<rect x="92.0" y="77.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x46 MapIoRegion (missing)</title></rect>
+<rect x="122.0" y="77.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x47 UnmapIoRegion (missing)</title></rect>
+<rect x="2.0" y="107.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x48 MapPhysicalMemoryUnsafe (missing)</title></rect>
+<rect x="32.0" y="107.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x49 UnmapPhysicalMemoryUnsafe (missing)</title></rect>
+<rect x="62.0" y="107.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x4b CreateCodeMemory (missing)</title></rect>
+<rect x="92.0" y="107.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x4c ControlCodeMemory (missing)</title></rect>
+<rect x="122.0" y="107.0" width="29" height="29" fill="#2ea043"><title>Memory: 0x50 CreateSharedMemory</title></rect>
+<rect x="2.0" y="137.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x51 MapTransferMemory (missing)</title></rect>
+<rect x="32.0" y="137.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x52 UnmapTransferMemory (missing)</title></rect>
+<rect x="62.0" y="137.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x54 QueryPhysicalAddress (missing)</title></rect>
+<rect x="92.0" y="137.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x55 QueryIoMapping (missing)</title></rect>
+<rect x="122.0" y="137.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x59 MapDeviceAddressSpaceByForce (missing)</title></rect>
+<rect x="2.0" y="167.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x5a MapDeviceAddressSpaceAligned (missing)</title></rect>
+<rect x="32.0" y="167.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x5b MapDeviceAddressSpace (missing)</title></rect>
+<rect x="62.0" y="167.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x5c UnmapDeviceAddressSpace (missing)</title></rect>
+<rect x="92.0" y="167.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x69 QueryDebugProcessMemory (missing)</title></rect>
+<rect x="122.0" y="167.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x6a ReadDebugProcessMemory (missing)</title></rect>
+<rect x="2.0" y="197.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x6b WriteDebugProcessMemory (missing)</title></rect>
+<rect x="32.0" y="197.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x73 SetProcessMemoryPermission (missing)</title></rect>
+<rect x="62.0" y="197.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x74 MapProcessMemory (missing)</title></rect>
+<rect x="92.0" y="197.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x75 UnmapProcessMemory (missing)</title></rect>
+<rect x="122.0" y="197.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x76 QueryProcessMemory (missing)</title></rect>
+<rect x="2.0" y="227.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x77 MapProcessCodeMemory (missing)</title></rect>
+<rect x="32.0" y="227.0" width="29" height="29" fill="#6e7681"><title>Memory: 0x78 UnmapProcessCodeMemory (missing)</title></rect>
+<text x="4.0" y="12.0" class="glabel">Memory</text>
+<rect x="157.7" y="0.0" width="162.0" height="157.9" class="group"/>
+<rect x="159.7" y="17.0" width="30" height="30" fill="#2ea043"><title>Debug: 0x07 ExitProcess</title></rect>
+<rect x="190.7" y="17.0" width="30" height="30" fill="#2ea043"><title>Debug: 0x10 GetCurrentProcessorNumber</title></rect>
+<rect x="221.7" y="17.0" width="30" height="30" fill="#2ea043"><title>Debug: 0x24 GetProcessId</title></rect>
+<rect x="252.7" y="17.0" width="30" height="30" fill="#2ea043"><title>Debug: 0x26 Break</title></rect>
+<rect x="283.7" y="17.0" width="30" height="30" fill="#2ea043"><title>Debug: 0x27 OutputDebugString</title></rect>
+<rect x="159.7" y="48.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x3c KernelDebug (missing)</title></rect>
+<rect x="190.7" y="48.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x3d ChangeKernelTraceState (missing)</title></rect>
+<rect x="221.7" y="48.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x4f SetProcessActivity (missing)</title></rect>
+<rect x="252.7" y="48.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x5d InvalidateProcessDataCache (missing)</title></rect>
+<rect x="283.7" y="48.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x5e StoreProcessDataCache (missing)</title></rect>
+<rect x="159.7" y="79.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x5f FlushProcessDataCache (missing)</title></rect>
+<rect x="190.7" y="79.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x60 DebugActiveProcess (missing)</title></rect>
+<rect x="221.7" y="79.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x61 BreakDebugProcess (missing)</title></rect>
+<rect x="252.7" y="79.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x62 TerminateDebugProcess (missing)</title></rect>
+<rect x="283.7" y="79.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x65 GetProcessList (missing)</title></rect>
+<rect x="159.7" y="110.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x6c SetHardwareBreakPoint (missing)</title></rect>
+<rect x="190.7" y="110.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x79 CreateProcess (missing)</title></rect>
+<rect x="221.7" y="110.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x7a StartProcess (missing)</title></rect>
+<rect x="252.7" y="110.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x7b TerminateProcess (missing)</title></rect>
+<rect x="283.7" y="110.0" width="30" height="30" fill="#6e7681"><title>Debug: 0x7c GetProcessInfo (missing)</title></rect>
+<text x="161.7" y="12.0" class="glabel">Debug</text>
+<rect x="157.7" y="157.9" width="162.0" height="142.1" class="group"/>
+<rect x="159.7" y="174.9" width="29" height="29" fill="#2ea043"><title>Threads: 0x08 CreateThread</title></rect>
+<rect x="189.7" y="174.9" width="29" height="29" fill="#2ea043"><title>Threads: 0x09 StartThread</title></rect>
+<rect x="219.7" y="174.9" width="29" height="29" fill="#2ea043"><title>Threads: 0x0a ExitThread</title></rect>
+<rect x="249.7" y="174.9" width="29" height="29" fill="#2ea043"><title>Threads: 0x0b SleepThread</title></rect>
+<rect x="279.7" y="174.9" width="29" height="29" fill="#2ea043"><title>Threads: 0x0c GetThreadPriority</title></rect>
+<rect x="159.7" y="204.9" width="29" height="29" fill="#2ea043"><title>Threads: 0x0d SetThreadPriority</title></rect>
+<rect x="189.7" y="204.9" width="29" height="29" fill="#2ea043"><title>Threads: 0x0e GetThreadCoreMask</title></rect>
+<rect x="219.7" y="204.9" width="29" height="29" fill="#2ea043"><title>Threads: 0x0f SetThreadCoreMask</title></rect>
+<rect x="249.7" y="204.9" width="29" height="29" fill="#2ea043"><title>Threads: 0x25 GetThreadId</title></rect>
+<rect x="279.7" y="204.9" width="29" height="29" fill="#6e7681"><title>Threads: 0x2e GetDebugFutureThreadInfo (missing)</title></rect>
+<rect x="159.7" y="234.9" width="29" height="29" fill="#6e7681"><title>Threads: 0x2f GetLastThreadInfo (missing)</title></rect>
+<rect x="189.7" y="234.9" width="29" height="29" fill="#6e7681"><title>Threads: 0x32 SetThreadActivity (missing)</title></rect>
+<rect x="219.7" y="234.9" width="29" height="29" fill="#6e7681"><title>Threads: 0x33 GetThreadContext3 (missing)</title></rect>
+<rect x="249.7" y="234.9" width="29" height="29" fill="#6e7681"><title>Threads: 0x4d SleepSystem (missing)</title></rect>
+<rect x="279.7" y="234.9" width="29" height="29" fill="#6e7681"><title>Threads: 0x66 GetThreadList (missing)</title></rect>
+<rect x="159.7" y="264.9" width="29" height="29" fill="#6e7681"><title>Threads: 0x67 GetDebugThreadContext (missing)</title></rect>
+<rect x="189.7" y="264.9" width="29" height="29" fill="#6e7681"><title>Threads: 0x68 SetDebugThreadContext (missing)</title></rect>
+<rect x="219.7" y="264.9" width="29" height="29" fill="#6e7681"><title>Threads: 0x6d GetDebugThreadParam (missing)</title></rect>
+<text x="161.7" y="169.9" class="glabel">Threads</text>
+<rect x="319.7" y="0.0" width="200.3" height="102.1" class="group"/>
+<rect x="321.7" y="17.0" width="26" height="26" fill="#2ea043"><title>System: 0x16 CloseHandle</title></rect>
+<rect x="348.7" y="17.0" width="26" height="26" fill="#2ea043"><title>System: 0x1e GetSystemTick</title></rect>
+<rect x="375.7" y="17.0" width="26" height="26" fill="#6e7681"><title>System: 0x28 ReturnFromException (missing)</title></rect>
+<rect x="402.7" y="17.0" width="26" height="26" fill="#2ea043"><title>System: 0x29 GetInfo</title></rect>
+<rect x="429.7" y="17.0" width="26" height="26" fill="#2ea043"><title>System: 0x2a FlushEntireDataCache</title></rect>
+<rect x="456.7" y="17.0" width="26" height="26" fill="#2ea043"><title>System: 0x2b FlushDataCache</title></rect>
+<rect x="483.7" y="17.0" width="26" height="26" fill="#6e7681"><title>System: 0x30 GetResourceLimitLimitValue (missing)</title></rect>
+<rect x="321.7" y="44.0" width="26" height="26" fill="#6e7681"><title>System: 0x31 GetResourceLimitCurrentValue (missing)</title></rect>
+<rect x="348.7" y="44.0" width="26" height="26" fill="#6e7681"><title>System: 0x37 GetResourceLimitPeakValue (missing)</title></rect>
+<rect x="375.7" y="44.0" width="26" height="26" fill="#6e7681"><title>System: 0x56 CreateDeviceAddressSpace (missing)</title></rect>
+<rect x="402.7" y="44.0" width="26" height="26" fill="#6e7681"><title>System: 0x57 AttachDeviceAddressSpace (missing)</title></rect>
+<rect x="429.7" y="44.0" width="26" height="26" fill="#6e7681"><title>System: 0x58 DetachDeviceAddressSpace (missing)</title></rect>
+<rect x="456.7" y="44.0" width="26" height="26" fill="#6e7681"><title>System: 0x6f GetSystemInfo (missing)</title></rect>
+<rect x="483.7" y="44.0" width="26" height="26" fill="#6e7681"><title>System: 0x7d CreateResourceLimit (missing)</title></rect>
+<rect x="321.7" y="71.0" width="26" height="26" fill="#6e7681"><title>System: 0x7e SetResourceLimitLimitValue (missing)</title></rect>
+<rect x="348.7" y="71.0" width="26" height="26" fill="#6e7681"><title>System: 0x7f CallSecureMonitor (missing)</title></rect>
+<text x="323.7" y="12.0" class="glabel">System</text>
+<rect x="319.7" y="102.1" width="180.9" height="106.0" class="group"/>
+<rect x="321.7" y="119.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x11 SignalEvent</title></rect>
+<rect x="350.7" y="119.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x12 ClearEvent</title></rect>
+<rect x="379.7" y="119.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x17 ResetSignal</title></rect>
+<rect x="408.7" y="119.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x18 WaitSynchronization</title></rect>
+<rect x="437.7" y="119.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x19 CancelSynchronization</title></rect>
+<rect x="466.7" y="119.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x1a ArbitrateLock</title></rect>
+<rect x="321.7" y="148.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x1b ArbitrateUnlock</title></rect>
+<rect x="350.7" y="148.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x1c WaitProcessWideKeyAtomic</title></rect>
+<rect x="379.7" y="148.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x1d SignalProcessWideKey</title></rect>
+<rect x="408.7" y="148.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x34 WaitForAddress</title></rect>
+<rect x="437.7" y="148.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x35 SignalToAddress</title></rect>
+<rect x="466.7" y="148.1" width="28" height="28" fill="#2ea043"><title>Synchronization: 0x45 CreateEvent</title></rect>
+<rect x="321.7" y="177.1" width="28" height="28" fill="#6e7681"><title>Synchronization: 0x53 CreateInterruptEvent (missing)</title></rect>
+<rect x="350.7" y="177.1" width="28" height="28" fill="#6e7681"><title>Synchronization: 0x63 GetDebugEvent (missing)</title></rect>
+<rect x="379.7" y="177.1" width="28" height="28" fill="#6e7681"><title>Synchronization: 0x64 ContinueDebugEvent (missing)</title></rect>
+<text x="323.7" y="114.1" class="glabel">Synchronization</text>
+<rect x="319.7" y="208.1" width="180.9" height="91.9" class="group"/>
+<rect x="321.7" y="225.1" width="24" height="24" fill="#2ea043"><title>IPC: 0x1f ConnectToNamedPort</title></rect>
+<rect x="346.7" y="225.1" width="24" height="24" fill="#6e7681"><title>IPC: 0x20 SendSyncRequestLight (missing)</title></rect>
+<rect x="371.7" y="225.1" width="24" height="24" fill="#2ea043"><title>IPC: 0x21 SendSyncRequest</title></rect>
+<rect x="396.7" y="225.1" width="24" height="24" fill="#6e7681"><title>IPC: 0x22 SendSyncRequestWithUserBuffer (missing)</title></rect>
+<rect x="421.7" y="225.1" width="24" height="24" fill="#6e7681"><title>IPC: 0x23 SendAsyncRequestWithUserBuffer (missing)</title></rect>
+<rect x="446.7" y="225.1" width="24" height="24" fill="#6e7681"><title>IPC: 0x40 CreateSession (missing)</title></rect>
+<rect x="471.7" y="225.1" width="24" height="24" fill="#6e7681"><title>IPC: 0x41 AcceptSession (missing)</title></rect>
+<rect x="321.7" y="250.1" width="24" height="24" fill="#6e7681"><title>IPC: 0x42 ReplyAndReceiveLight (missing)</title></rect>
+<rect x="346.7" y="250.1" width="24" height="24" fill="#6e7681"><title>IPC: 0x43 ReplyAndReceive (missing)</title></rect>
+<rect x="371.7" y="250.1" width="24" height="24" fill="#6e7681"><title>IPC: 0x44 ReplyAndReceiveWithUserBuffer (missing)</title></rect>
+<rect x="396.7" y="250.1" width="24" height="24" fill="#6e7681"><title>IPC: 0x70 CreatePort (missing)</title></rect>
+<rect x="421.7" y="250.1" width="24" height="24" fill="#6e7681"><title>IPC: 0x71 ManageNamedPort (missing)</title></rect>
+<rect x="446.7" y="250.1" width="24" height="24" fill="#6e7681"><title>IPC: 0x72 ConnectToPort (missing)</title></rect>
+<text x="323.7" y="220.1" class="glabel">IPC</text>
+<rect x="500.6" y="102.1" width="19.4" height="197.9" class="group"/>
+<rect x="502.6" y="104.1" width="30" height="30" fill="#6e7681"><title>Other: 0x36 SynchronizePreemptionState (missing)</title></rect>
+<rect x="502.6" y="135.1" width="30" height="30" fill="#6e7681"><title>Other: 0x4a SetUnsafeLimit (missing)</title></rect>
+<rect x="502.6" y="166.1" width="30" height="30" fill="#6e7681"><title>Other: 0x4e ReadWriteRegister (missing)</title></rect>
+</svg></section>
+<section><h3>GPU shader instructions: 25.68% (76/296 encodings,
+41/146 mnemonics)</h3>
+<svg viewBox="0 0 520 300" class="treemap" role="img">
+<rect x="0.0" y="0.0" width="214.3" height="189.3" class="group"/>
+<rect x="2.0" y="17.0" width="20" height="20" fill="#6e7681"><title>Integer: setlmembase (0xe2f0) (missing)</title></rect>
+<rect x="23.0" y="17.0" width="20" height="20" fill="#6e7681"><title>Integer: setcrsptr (0xe2e0) (missing)</title></rect>
+<rect x="44.0" y="17.0" width="20" height="20" fill="#6e7681"><title>Integer: getlmembase (0xe2d0) (missing)</title></rect>
+<rect x="65.0" y="17.0" width="20" height="20" fill="#6e7681"><title>Integer: getcrsptr (0xe2c0) (missing)</title></rect>
+<rect x="86.0" y="17.0" width="20" height="20" fill="#6e7681"><title>Integer: vmad (0x5f00) (missing)</title></rect>
+<rect x="107.0" y="17.0" width="20" height="20" fill="#6e7681"><title>Integer: shf (0x5cf8) (missing)</title></rect>
+<rect x="128.0" y="17.0" width="20" height="20" fill="#6e7681"><title>Integer: iadd3 (0x5cc0) (missing)</title></rect>
+<rect x="149.0" y="17.0" width="20" height="20" fill="#2ea043"><title>Integer: shl (0x5c48)</title></rect>
+<rect x="170.0" y="17.0" width="20" height="20" fill="#2ea043"><title>Integer: lop (0x5c40)</title></rect>
+<rect x="191.0" y="17.0" width="20" height="20" fill="#6e7681"><title>Integer: imul (0x5c38) (missing)</title></rect>
+<rect x="2.0" y="38.0" width="20" height="20" fill="#2ea043"><title>Integer: shr (0x5c28)</title></rect>
+<rect x="23.0" y="38.0" width="20" height="20" fill="#6e7681"><title>Integer: imnmx (0x5c20) (missing)</title></rect>
+<rect x="44.0" y="38.0" width="20" height="20" fill="#2ea043"><title>Integer: iscadd (0x5c18)</title></rect>
+<rect x="65.0" y="38.0" width="20" height="20" fill="#2ea043"><title>Integer: iadd (0x5c10)</title></rect>
+<rect x="86.0" y="38.0" width="20" height="20" fill="#6e7681"><title>Integer: popc (0x5c08) (missing)</title></rect>
+<rect x="107.0" y="38.0" width="20" height="20" fill="#6e7681"><title>Integer: bfe (0x5c00) (missing)</title></rect>
+<rect x="128.0" y="38.0" width="20" height="20" fill="#6e7681"><title>Integer: shf (0x5bf8) (missing)</title></rect>
+<rect x="149.0" y="38.0" width="20" height="20" fill="#6e7681"><title>Integer: bfi (0x5bf0) (missing)</title></rect>
+<rect x="170.0" y="38.0" width="20" height="20" fill="#6e7681"><title>Integer: lop3 (0x5be0) (missing)</title></rect>
+<rect x="191.0" y="38.0" width="20" height="20" fill="#6e7681"><title>Integer: lea (0x5bd8) (missing)</title></rect>
+<rect x="2.0" y="59.0" width="20" height="20" fill="#6e7681"><title>Integer: lea (0x5bd0) (missing)</title></rect>
+<rect x="23.0" y="59.0" width="20" height="20" fill="#6e7681"><title>Integer: xmad (0x5b00) (missing)</title></rect>
+<rect x="44.0" y="59.0" width="20" height="20" fill="#6e7681"><title>Integer: imadsp (0x5a80) (missing)</title></rect>
+<rect x="65.0" y="59.0" width="20" height="20" fill="#6e7681"><title>Integer: imad (0x5a00) (missing)</title></rect>
+<rect x="86.0" y="59.0" width="20" height="20" fill="#6e7681"><title>Integer: vshl (0x5700) (missing)</title></rect>
+<rect x="107.0" y="59.0" width="20" height="20" fill="#6e7681"><title>Integer: vshr (0x5600) (missing)</title></rect>
+<rect x="128.0" y="59.0" width="20" height="20" fill="#6e7681"><title>Integer: vabsdiff (0x5400) (missing)</title></rect>
+<rect x="149.0" y="59.0" width="20" height="20" fill="#6e7681"><title>Integer: idp (0x53f8) (missing)</title></rect>
+<rect x="170.0" y="59.0" width="20" height="20" fill="#6e7681"><title>Integer: bfi (0x53f0) (missing)</title></rect>
+<rect x="191.0" y="59.0" width="20" height="20" fill="#6e7681"><title>Integer: idp (0x53d8) (missing)</title></rect>
+<rect x="2.0" y="80.0" width="20" height="20" fill="#6e7681"><title>Integer: imadsp (0x5280) (missing)</title></rect>
+<rect x="23.0" y="80.0" width="20" height="20" fill="#6e7681"><title>Integer: imad (0x5200) (missing)</title></rect>
+<rect x="44.0" y="80.0" width="20" height="20" fill="#6e7681"><title>Integer: xmad (0x5100) (missing)</title></rect>
+<rect x="65.0" y="80.0" width="20" height="20" fill="#6e7681"><title>Integer: vabsdiff4 (0x5000) (missing)</title></rect>
+<rect x="86.0" y="80.0" width="20" height="20" fill="#6e7681"><title>Integer: xmad (0x4e00) (missing)</title></rect>
+<rect x="107.0" y="80.0" width="20" height="20" fill="#6e7681"><title>Integer: iadd3 (0x4cc0) (missing)</title></rect>
+<rect x="128.0" y="80.0" width="20" height="20" fill="#2ea043"><title>Integer: shl (0x4c48)</title></rect>
+<rect x="149.0" y="80.0" width="20" height="20" fill="#2ea043"><title>Integer: lop (0x4c40)</title></rect>
+<rect x="170.0" y="80.0" width="20" height="20" fill="#6e7681"><title>Integer: imul (0x4c38) (missing)</title></rect>
+<rect x="191.0" y="80.0" width="20" height="20" fill="#2ea043"><title>Integer: shr (0x4c28)</title></rect>
+<rect x="2.0" y="101.0" width="20" height="20" fill="#6e7681"><title>Integer: imnmx (0x4c20) (missing)</title></rect>
+<rect x="23.0" y="101.0" width="20" height="20" fill="#2ea043"><title>Integer: iscadd (0x4c18)</title></rect>
+<rect x="44.0" y="101.0" width="20" height="20" fill="#2ea043"><title>Integer: iadd (0x4c10)</title></rect>
+<rect x="65.0" y="101.0" width="20" height="20" fill="#6e7681"><title>Integer: popc (0x4c08) (missing)</title></rect>
+<rect x="86.0" y="101.0" width="20" height="20" fill="#6e7681"><title>Integer: bfe (0x4c00) (missing)</title></rect>
+<rect x="107.0" y="101.0" width="20" height="20" fill="#6e7681"><title>Integer: bfi (0x4bf0) (missing)</title></rect>
+<rect x="128.0" y="101.0" width="20" height="20" fill="#6e7681"><title>Integer: lea (0x4bd0) (missing)</title></rect>
+<rect x="149.0" y="101.0" width="20" height="20" fill="#6e7681"><title>Integer: imadsp (0x4a80) (missing)</title></rect>
+<rect x="170.0" y="101.0" width="20" height="20" fill="#6e7681"><title>Integer: imad (0x4a00) (missing)</title></rect>
+<rect x="191.0" y="101.0" width="20" height="20" fill="#6e7681"><title>Integer: lop3 (0x3c00) (missing)</title></rect>
+<rect x="2.0" y="122.0" width="20" height="20" fill="#6e7681"><title>Integer: vmnmx (0x3a00) (missing)</title></rect>
+<rect x="23.0" y="122.0" width="20" height="20" fill="#6e7681"><title>Integer: shf (0x38f8) (missing)</title></rect>
+<rect x="44.0" y="122.0" width="20" height="20" fill="#6e7681"><title>Integer: iadd3 (0x38c0) (missing)</title></rect>
+<rect x="65.0" y="122.0" width="20" height="20" fill="#2ea043"><title>Integer: shl (0x3848)</title></rect>
+<rect x="86.0" y="122.0" width="20" height="20" fill="#2ea043"><title>Integer: lop (0x3840)</title></rect>
+<rect x="107.0" y="122.0" width="20" height="20" fill="#6e7681"><title>Integer: imul (0x3838) (missing)</title></rect>
+<rect x="128.0" y="122.0" width="20" height="20" fill="#2ea043"><title>Integer: shr (0x3828)</title></rect>
+<rect x="149.0" y="122.0" width="20" height="20" fill="#6e7681"><title>Integer: imnmx (0x3820) (missing)</title></rect>
+<rect x="170.0" y="122.0" width="20" height="20" fill="#2ea043"><title>Integer: iscadd (0x3818)</title></rect>
+<rect x="191.0" y="122.0" width="20" height="20" fill="#2ea043"><title>Integer: iadd (0x3810)</title></rect>
+<rect x="2.0" y="143.0" width="20" height="20" fill="#6e7681"><title>Integer: popc (0x3808) (missing)</title></rect>
+<rect x="23.0" y="143.0" width="20" height="20" fill="#6e7681"><title>Integer: bfe (0x3800) (missing)</title></rect>
+<rect x="44.0" y="143.0" width="20" height="20" fill="#6e7681"><title>Integer: shf (0x36f8) (missing)</title></rect>
+<rect x="65.0" y="143.0" width="20" height="20" fill="#6e7681"><title>Integer: bfi (0x36f0) (missing)</title></rect>
+<rect x="86.0" y="143.0" width="20" height="20" fill="#6e7681"><title>Integer: lea (0x36d0) (missing)</title></rect>
+<rect x="107.0" y="143.0" width="20" height="20" fill="#6e7681"><title>Integer: xmad (0x3600) (missing)</title></rect>
+<rect x="128.0" y="143.0" width="20" height="20" fill="#6e7681"><title>Integer: imadsp (0x3480) (missing)</title></rect>
+<rect x="149.0" y="143.0" width="20" height="20" fill="#6e7681"><title>Integer: imad (0x3400) (missing)</title></rect>
+<rect x="170.0" y="143.0" width="20" height="20" fill="#6e7681"><title>Integer: vadd (0x2000) (missing)</title></rect>
+<rect x="191.0" y="143.0" width="20" height="20" fill="#6e7681"><title>Integer: imul32i (0x1f00) (missing)</title></rect>
+<rect x="2.0" y="164.0" width="20" height="20" fill="#6e7681"><title>Integer: iadd32i (0x1d80) (missing)</title></rect>
+<rect x="23.0" y="164.0" width="20" height="20" fill="#6e7681"><title>Integer: iadd32i (0x1c00) (missing)</title></rect>
+<rect x="44.0" y="164.0" width="20" height="20" fill="#6e7681"><title>Integer: lea (0x1800) (missing)</title></rect>
+<rect x="65.0" y="164.0" width="20" height="20" fill="#6e7681"><title>Integer: iscadd32i (0x1400) (missing)</title></rect>
+<rect x="86.0" y="164.0" width="20" height="20" fill="#6e7681"><title>Integer: imad32i (0x1000) (missing)</title></rect>
+<rect x="107.0" y="164.0" width="20" height="20" fill="#2ea043"><title>Integer: lop32i (0x0400)</title></rect>
+<rect x="128.0" y="164.0" width="20" height="20" fill="#6e7681"><title>Integer: lop3 (0x0200) (missing)</title></rect>
+<text x="4.0" y="12.0" class="glabel">Integer</text>
+<rect x="0.0" y="189.3" width="214.3" height="110.7" class="group"/>
+<rect x="2.0" y="206.3" width="17" height="17" fill="#6e7681"><title>Float: hadd2 (0x7a00) (missing)</title></rect>
+<rect x="20.0" y="206.3" width="17" height="17" fill="#6e7681"><title>Float: hadd2 (0x7a80) (missing)</title></rect>
+<rect x="38.0" y="206.3" width="17" height="17" fill="#6e7681"><title>Float: hmul2 (0x7800) (missing)</title></rect>
+<rect x="56.0" y="206.3" width="17" height="17" fill="#6e7681"><title>Float: hmul2 (0x7880) (missing)</title></rect>
+<rect x="74.0" y="206.3" width="17" height="17" fill="#6e7681"><title>Float: hfma2 (0x7080) (missing)</title></rect>
+<rect x="92.0" y="206.3" width="17" height="17" fill="#6e7681"><title>Float: hfma2 (0x7000) (missing)</title></rect>
+<rect x="110.0" y="206.3" width="17" height="17" fill="#6e7681"><title>Float: hfma2 (0x6080) (missing)</title></rect>
+<rect x="128.0" y="206.3" width="17" height="17" fill="#6e7681"><title>Float: hadd2 (0x5d10) (missing)</title></rect>
+<rect x="146.0" y="206.3" width="17" height="17" fill="#6e7681"><title>Float: hmul2 (0x5d08) (missing)</title></rect>
+<rect x="164.0" y="206.3" width="17" height="17" fill="#6e7681"><title>Float: hfma2 (0x5d00) (missing)</title></rect>
+<rect x="182.0" y="206.3" width="17" height="17" fill="#6e7681"><title>Float: dmul (0x5c80) (missing)</title></rect>
+<rect x="2.0" y="224.3" width="17" height="17" fill="#6e7681"><title>Float: dadd (0x5c70) (missing)</title></rect>
+<rect x="20.0" y="224.3" width="17" height="17" fill="#2ea043"><title>Float: fmul (0x5c68)</title></rect>
+<rect x="38.0" y="224.3" width="17" height="17" fill="#2ea043"><title>Float: fmnmx (0x5c60)</title></rect>
+<rect x="56.0" y="224.3" width="17" height="17" fill="#2ea043"><title>Float: fadd (0x5c58)</title></rect>
+<rect x="74.0" y="224.3" width="17" height="17" fill="#6e7681"><title>Float: dmnmx (0x5c50) (missing)</title></rect>
+<rect x="92.0" y="224.3" width="17" height="17" fill="#6e7681"><title>Float: flo (0x5c30) (missing)</title></rect>
+<rect x="110.0" y="224.3" width="17" height="17" fill="#6e7681"><title>Float: dfma (0x5b70) (missing)</title></rect>
+<rect x="128.0" y="224.3" width="17" height="17" fill="#2ea043"><title>Float: ffma (0x5980)</title></rect>
+<rect x="146.0" y="224.3" width="17" height="17" fill="#6e7681"><title>Float: dfma (0x5370) (missing)</title></rect>
+<rect x="164.0" y="224.3" width="17" height="17" fill="#2ea043"><title>Float: ffma (0x5180)</title></rect>
+<rect x="182.0" y="224.3" width="17" height="17" fill="#6e7681"><title>Float: dmul (0x4c80) (missing)</title></rect>
+<rect x="2.0" y="242.3" width="17" height="17" fill="#6e7681"><title>Float: dadd (0x4c70) (missing)</title></rect>
+<rect x="20.0" y="242.3" width="17" height="17" fill="#2ea043"><title>Float: fmul (0x4c68)</title></rect>
+<rect x="38.0" y="242.3" width="17" height="17" fill="#2ea043"><title>Float: fmnmx (0x4c60)</title></rect>
+<rect x="56.0" y="242.3" width="17" height="17" fill="#2ea043"><title>Float: fadd (0x4c58)</title></rect>
+<rect x="74.0" y="242.3" width="17" height="17" fill="#6e7681"><title>Float: dmnmx (0x4c50) (missing)</title></rect>
+<rect x="92.0" y="242.3" width="17" height="17" fill="#6e7681"><title>Float: flo (0x4c30) (missing)</title></rect>
+<rect x="110.0" y="242.3" width="17" height="17" fill="#6e7681"><title>Float: dfma (0x4b70) (missing)</title></rect>
+<rect x="128.0" y="242.3" width="17" height="17" fill="#2ea043"><title>Float: ffma (0x4980)</title></rect>
+<rect x="146.0" y="242.3" width="17" height="17" fill="#6e7681"><title>Float: dmul (0x3880) (missing)</title></rect>
+<rect x="164.0" y="242.3" width="17" height="17" fill="#6e7681"><title>Float: dadd (0x3870) (missing)</title></rect>
+<rect x="182.0" y="242.3" width="17" height="17" fill="#2ea043"><title>Float: fmul (0x3868)</title></rect>
+<rect x="2.0" y="260.3" width="17" height="17" fill="#2ea043"><title>Float: fmnmx (0x3860)</title></rect>
+<rect x="20.0" y="260.3" width="17" height="17" fill="#2ea043"><title>Float: fadd (0x3858)</title></rect>
+<rect x="38.0" y="260.3" width="17" height="17" fill="#6e7681"><title>Float: dmnmx (0x3850) (missing)</title></rect>
+<rect x="56.0" y="260.3" width="17" height="17" fill="#6e7681"><title>Float: flo (0x3830) (missing)</title></rect>
+<rect x="74.0" y="260.3" width="17" height="17" fill="#6e7681"><title>Float: dfma (0x3670) (missing)</title></rect>
+<rect x="92.0" y="260.3" width="17" height="17" fill="#2ea043"><title>Float: ffma (0x3280)</title></rect>
+<rect x="110.0" y="260.3" width="17" height="17" fill="#6e7681"><title>Float: hadd2_32i (0x2c00) (missing)</title></rect>
+<rect x="128.0" y="260.3" width="17" height="17" fill="#6e7681"><title>Float: hmul2_32i (0x2a00) (missing)</title></rect>
+<rect x="146.0" y="260.3" width="17" height="17" fill="#6e7681"><title>Float: hfma2_32i (0x2800) (missing)</title></rect>
+<rect x="164.0" y="260.3" width="17" height="17" fill="#2ea043"><title>Float: fmul32i (0x1e00)</title></rect>
+<rect x="182.0" y="260.3" width="17" height="17" fill="#2ea043"><title>Float: ffma32i (0x0c00)</title></rect>
+<rect x="2.0" y="278.3" width="17" height="17" fill="#2ea043"><title>Float: fadd32i (0x0800)</title></rect>
+<text x="4.0" y="201.3" class="glabel">Float</text>
+<rect x="214.3" y="0.0" width="147.6" height="153.6" class="group"/>
+<rect x="216.3" y="17.0" width="18" height="18" fill="#2ea043"><title>Control: sync (0xf0f8)</title></rect>
+<rect x="235.3" y="17.0" width="18" height="18" fill="#6e7681"><title>Control: depbar (0xf0f0) (missing)</title></rect>
+<rect x="254.3" y="17.0" width="18" height="18" fill="#6e7681"><title>Control: bar (0xf0a8) (missing)</title></rect>
+<rect x="273.3" y="17.0" width="18" height="18" fill="#6e7681"><title>Control: membar (0xef98) (missing)</title></rect>
+<rect x="292.3" y="17.0" width="18" height="18" fill="#6e7681"><title>Control: stp (0xeea0) (missing)</title></rect>
+<rect x="311.3" y="17.0" width="18" height="18" fill="#6e7681"><title>Control: bpt (0xe3a0) (missing)</title></rect>
+<rect x="330.3" y="17.0" width="18" height="18" fill="#6e7681"><title>Control: ide (0xe390) (missing)</title></rect>
+<rect x="216.3" y="36.0" width="18" height="18" fill="#6e7681"><title>Control: ram (0xe380) (missing)</title></rect>
+<rect x="235.3" y="36.0" width="18" height="18" fill="#6e7681"><title>Control: sam (0xe370) (missing)</title></rect>
+<rect x="254.3" y="36.0" width="18" height="18" fill="#6e7681"><title>Control: rtt (0xe360) (missing)</title></rect>
+<rect x="273.3" y="36.0" width="18" height="18" fill="#2ea043"><title>Control: cont (0xe350)</title></rect>
+<rect x="292.3" y="36.0" width="18" height="18" fill="#2ea043"><title>Control: brk (0xe340)</title></rect>
+<rect x="311.3" y="36.0" width="18" height="18" fill="#6e7681"><title>Control: kil (0xe330) (missing)</title></rect>
+<rect x="330.3" y="36.0" width="18" height="18" fill="#6e7681"><title>Control: ret (0xe320) (missing)</title></rect>
+<rect x="216.3" y="55.0" width="18" height="18" fill="#6e7681"><title>Control: longjmp (0xe310) (missing)</title></rect>
+<rect x="235.3" y="55.0" width="18" height="18" fill="#2ea043"><title>Control: exit (0xe300)</title></rect>
+<rect x="254.3" y="55.0" width="18" height="18" fill="#6e7681"><title>Control: pcnt (0xe2b0) (missing)</title></rect>
+<rect x="273.3" y="55.0" width="18" height="18" fill="#2ea043"><title>Control: pcnt (0xe2b0)</title></rect>
+<rect x="292.3" y="55.0" width="18" height="18" fill="#6e7681"><title>Control: pbk (0xe2a0) (missing)</title></rect>
+<rect x="311.3" y="55.0" width="18" height="18" fill="#2ea043"><title>Control: pbk (0xe2a0)</title></rect>
+<rect x="330.3" y="55.0" width="18" height="18" fill="#6e7681"><title>Control: ssy (0xe290) (missing)</title></rect>
+<rect x="216.3" y="74.0" width="18" height="18" fill="#2ea043"><title>Control: ssy (0xe290)</title></rect>
+<rect x="235.3" y="74.0" width="18" height="18" fill="#6e7681"><title>Control: plongjmp (0xe280) (missing)</title></rect>
+<rect x="254.3" y="74.0" width="18" height="18" fill="#6e7681"><title>Control: plongjmp (0xe280) (missing)</title></rect>
+<rect x="273.3" y="74.0" width="18" height="18" fill="#6e7681"><title>Control: pret (0xe270) (missing)</title></rect>
+<rect x="292.3" y="74.0" width="18" height="18" fill="#6e7681"><title>Control: pret (0xe270) (missing)</title></rect>
+<rect x="311.3" y="74.0" width="18" height="18" fill="#6e7681"><title>Control: cal (0xe260) (missing)</title></rect>
+<rect x="330.3" y="74.0" width="18" height="18" fill="#6e7681"><title>Control: cal (0xe260) (missing)</title></rect>
+<rect x="216.3" y="93.0" width="18" height="18" fill="#6e7681"><title>Control: brx (0xe250) (missing)</title></rect>
+<rect x="235.3" y="93.0" width="18" height="18" fill="#6e7681"><title>Control: brx (0xe250) (missing)</title></rect>
+<rect x="254.3" y="93.0" width="18" height="18" fill="#6e7681"><title>Control: bra (0xe240) (missing)</title></rect>
+<rect x="273.3" y="93.0" width="18" height="18" fill="#2ea043"><title>Control: bra (0xe240)</title></rect>
+<rect x="292.3" y="93.0" width="18" height="18" fill="#6e7681"><title>Control: pexit (0xe230) (missing)</title></rect>
+<rect x="311.3" y="93.0" width="18" height="18" fill="#6e7681"><title>Control: jcal (0xe220) (missing)</title></rect>
+<rect x="330.3" y="93.0" width="18" height="18" fill="#6e7681"><title>Control: jcal (0xe220) (missing)</title></rect>
+<rect x="216.3" y="112.0" width="18" height="18" fill="#6e7681"><title>Control: jmp (0xe210) (missing)</title></rect>
+<rect x="235.3" y="112.0" width="18" height="18" fill="#6e7681"><title>Control: jmp (0xe210) (missing)</title></rect>
+<rect x="254.3" y="112.0" width="18" height="18" fill="#6e7681"><title>Control: jmx (0xe200) (missing)</title></rect>
+<rect x="273.3" y="112.0" width="18" height="18" fill="#6e7681"><title>Control: jmx (0xe200) (missing)</title></rect>
+<rect x="292.3" y="112.0" width="18" height="18" fill="#6e7681"><title>Control: vote (0x50e0) (missing)</title></rect>
+<rect x="311.3" y="112.0" width="18" height="18" fill="#6e7681"><title>Control: vote (0x50d8) (missing)</title></rect>
+<rect x="330.3" y="112.0" width="18" height="18" fill="#6e7681"><title>Control: lepc (0x50d0) (missing)</title></rect>
+<rect x="216.3" y="131.0" width="18" height="18" fill="#2ea043"><title>Control: nop (0x50b0)</title></rect>
+<text x="218.3" y="12.0" class="glabel">Control</text>
+<rect x="214.3" y="153.6" width="147.6" height="146.4" class="group"/>
+<rect x="216.3" y="170.6" width="19" height="19" fill="#6e7681"><title>Predicates: hsetp2 (0x7e80) (missing)</title></rect>
+<rect x="236.3" y="170.6" width="19" height="19" fill="#6e7681"><title>Predicates: hsetp2 (0x7e00) (missing)</title></rect>
+<rect x="256.3" y="170.6" width="19" height="19" fill="#6e7681"><title>Predicates: hset2 (0x7c80) (missing)</title></rect>
+<rect x="276.3" y="170.6" width="19" height="19" fill="#6e7681"><title>Predicates: hset2 (0x7c00) (missing)</title></rect>
+<rect x="296.3" y="170.6" width="19" height="19" fill="#6e7681"><title>Predicates: hsetp2 (0x5d20) (missing)</title></rect>
+<rect x="316.3" y="170.6" width="19" height="19" fill="#6e7681"><title>Predicates: hset2 (0x5d18) (missing)</title></rect>
+<rect x="336.3" y="170.6" width="19" height="19" fill="#6e7681"><title>Predicates: fchk (0x5c88) (missing)</title></rect>
+<rect x="216.3" y="190.6" width="19" height="19" fill="#2ea043"><title>Predicates: fsetp (0x5bb0)</title></rect>
+<rect x="236.3" y="190.6" width="19" height="19" fill="#6e7681"><title>Predicates: fcmp (0x5ba0) (missing)</title></rect>
+<rect x="256.3" y="190.6" width="19" height="19" fill="#6e7681"><title>Predicates: dsetp (0x5b80) (missing)</title></rect>
+<rect x="276.3" y="190.6" width="19" height="19" fill="#2ea043"><title>Predicates: isetp (0x5b60)</title></rect>
+<rect x="296.3" y="190.6" width="19" height="19" fill="#6e7681"><title>Predicates: iset (0x5b50) (missing)</title></rect>
+<rect x="316.3" y="190.6" width="19" height="19" fill="#6e7681"><title>Predicates: icmp (0x5b40) (missing)</title></rect>
+<rect x="336.3" y="190.6" width="19" height="19" fill="#6e7681"><title>Predicates: dset (0x5900) (missing)</title></rect>
+<rect x="216.3" y="210.6" width="19" height="19" fill="#6e7681"><title>Predicates: fset (0x5800) (missing)</title></rect>
+<rect x="236.3" y="210.6" width="19" height="19" fill="#6e7681"><title>Predicates: fcmp (0x53a0) (missing)</title></rect>
+<rect x="256.3" y="210.6" width="19" height="19" fill="#6e7681"><title>Predicates: icmp (0x5340) (missing)</title></rect>
+<rect x="276.3" y="210.6" width="19" height="19" fill="#6e7681"><title>Predicates: vsetp (0x50f0) (missing)</title></rect>
+<rect x="296.3" y="210.6" width="19" height="19" fill="#6e7681"><title>Predicates: csetp (0x50a0) (missing)</title></rect>
+<rect x="316.3" y="210.6" width="19" height="19" fill="#6e7681"><title>Predicates: cset (0x5098) (missing)</title></rect>
+<rect x="336.3" y="210.6" width="19" height="19" fill="#6e7681"><title>Predicates: psetp (0x5090) (missing)</title></rect>
+<rect x="216.3" y="230.6" width="19" height="19" fill="#6e7681"><title>Predicates: pset (0x5088) (missing)</title></rect>
+<rect x="236.3" y="230.6" width="19" height="19" fill="#6e7681"><title>Predicates: fchk (0x4c88) (missing)</title></rect>
+<rect x="256.3" y="230.6" width="19" height="19" fill="#2ea043"><title>Predicates: fsetp (0x4bb0)</title></rect>
+<rect x="276.3" y="230.6" width="19" height="19" fill="#6e7681"><title>Predicates: fcmp (0x4ba0) (missing)</title></rect>
+<rect x="296.3" y="230.6" width="19" height="19" fill="#6e7681"><title>Predicates: dsetp (0x4b80) (missing)</title></rect>
+<rect x="316.3" y="230.6" width="19" height="19" fill="#2ea043"><title>Predicates: isetp (0x4b60)</title></rect>
+<rect x="336.3" y="230.6" width="19" height="19" fill="#6e7681"><title>Predicates: iset (0x4b50) (missing)</title></rect>
+<rect x="216.3" y="250.6" width="19" height="19" fill="#6e7681"><title>Predicates: icmp (0x4b40) (missing)</title></rect>
+<rect x="236.3" y="250.6" width="19" height="19" fill="#6e7681"><title>Predicates: dset (0x4900) (missing)</title></rect>
+<rect x="256.3" y="250.6" width="19" height="19" fill="#2ea043"><title>Predicates: fset (0x4800)</title></rect>
+<rect x="276.3" y="250.6" width="19" height="19" fill="#6e7681"><title>Predicates: vset (0x4000) (missing)</title></rect>
+<rect x="296.3" y="250.6" width="19" height="19" fill="#6e7681"><title>Predicates: fchk (0x3888) (missing)</title></rect>
+<rect x="316.3" y="250.6" width="19" height="19" fill="#2ea043"><title>Predicates: fsetp (0x36b0)</title></rect>
+<rect x="336.3" y="250.6" width="19" height="19" fill="#6e7681"><title>Predicates: fcmp (0x36a0) (missing)</title></rect>
+<rect x="216.3" y="270.6" width="19" height="19" fill="#6e7681"><title>Predicates: dsetp (0x3680) (missing)</title></rect>
+<rect x="236.3" y="270.6" width="19" height="19" fill="#2ea043"><title>Predicates: isetp (0x3660)</title></rect>
+<rect x="256.3" y="270.6" width="19" height="19" fill="#6e7681"><title>Predicates: iset (0x3650) (missing)</title></rect>
+<rect x="276.3" y="270.6" width="19" height="19" fill="#6e7681"><title>Predicates: icmp (0x3640) (missing)</title></rect>
+<rect x="296.3" y="270.6" width="19" height="19" fill="#6e7681"><title>Predicates: dset (0x3200) (missing)</title></rect>
+<rect x="316.3" y="270.6" width="19" height="19" fill="#6e7681"><title>Predicates: fset (0x3000) (missing)</title></rect>
+<text x="218.3" y="165.6" class="glabel">Predicates</text>
+<rect x="361.9" y="0.0" width="158.1" height="126.7" class="group"/>
+<rect x="363.9" y="17.0" width="18" height="18" fill="#2ea043"><title>Move and convert: mov (0xf0c8)</title></rect>
+<rect x="382.9" y="17.0" width="18" height="18" fill="#6e7681"><title>Move and convert: r2b (0xf0c0) (missing)</title></rect>
+<rect x="401.9" y="17.0" width="18" height="18" fill="#6e7681"><title>Move and convert: b2r (0xf0b8) (missing)</title></rect>
+<rect x="420.9" y="17.0" width="18" height="18" fill="#6e7681"><title>Move and convert: r2p (0x5cf0) (missing)</title></rect>
+<rect x="439.9" y="17.0" width="18" height="18" fill="#6e7681"><title>Move and convert: p2r (0x5ce8) (missing)</title></rect>
+<rect x="458.9" y="17.0" width="18" height="18" fill="#6e7681"><title>Move and convert: i2i (0x5ce0) (missing)</title></rect>
+<rect x="477.9" y="17.0" width="18" height="18" fill="#2ea043"><title>Move and convert: i2f (0x5cb8)</title></rect>
+<rect x="496.9" y="17.0" width="18" height="18" fill="#2ea043"><title>Move and convert: f2i (0x5cb0)</title></rect>
+<rect x="363.9" y="36.0" width="18" height="18" fill="#6e7681"><title>Move and convert: f2f (0x5ca8) (missing)</title></rect>
+<rect x="382.9" y="36.0" width="18" height="18" fill="#2ea043"><title>Move and convert: sel (0x5ca0)</title></rect>
+<rect x="401.9" y="36.0" width="18" height="18" fill="#2ea043"><title>Move and convert: mov (0x5c98)</title></rect>
+<rect x="420.9" y="36.0" width="18" height="18" fill="#2ea043"><title>Move and convert: rro (0x5c90)</title></rect>
+<rect x="439.9" y="36.0" width="18" height="18" fill="#6e7681"><title>Move and convert: prmt (0x5bc0) (missing)</title></rect>
+<rect x="458.9" y="36.0" width="18" height="18" fill="#6e7681"><title>Move and convert: prmt (0x53c0) (missing)</title></rect>
+<rect x="477.9" y="36.0" width="18" height="18" fill="#6e7681"><title>Move and convert: fswzadd (0x50f8) (missing)</title></rect>
+<rect x="496.9" y="36.0" width="18" height="18" fill="#6e7681"><title>Move and convert: cs2r (0x50c8) (missing)</title></rect>
+<rect x="363.9" y="55.0" width="18" height="18" fill="#2ea043"><title>Move and convert: mufu (0x5080)</title></rect>
+<rect x="382.9" y="55.0" width="18" height="18" fill="#6e7681"><title>Move and convert: r2p (0x4cf0) (missing)</title></rect>
+<rect x="401.9" y="55.0" width="18" height="18" fill="#6e7681"><title>Move and convert: p2r (0x4ce8) (missing)</title></rect>
+<rect x="420.9" y="55.0" width="18" height="18" fill="#6e7681"><title>Move and convert: i2i (0x4ce0) (missing)</title></rect>
+<rect x="439.9" y="55.0" width="18" height="18" fill="#2ea043"><title>Move and convert: i2f (0x4cb8)</title></rect>
+<rect x="458.9" y="55.0" width="18" height="18" fill="#2ea043"><title>Move and convert: f2i (0x4cb0)</title></rect>
+<rect x="477.9" y="55.0" width="18" height="18" fill="#6e7681"><title>Move and convert: f2f (0x4ca8) (missing)</title></rect>
+<rect x="496.9" y="55.0" width="18" height="18" fill="#2ea043"><title>Move and convert: sel (0x4ca0)</title></rect>
+<rect x="363.9" y="74.0" width="18" height="18" fill="#2ea043"><title>Move and convert: mov (0x4c98)</title></rect>
+<rect x="382.9" y="74.0" width="18" height="18" fill="#2ea043"><title>Move and convert: rro (0x4c90)</title></rect>
+<rect x="401.9" y="74.0" width="18" height="18" fill="#6e7681"><title>Move and convert: prmt (0x4bc0) (missing)</title></rect>
+<rect x="420.9" y="74.0" width="18" height="18" fill="#6e7681"><title>Move and convert: r2p (0x38f0) (missing)</title></rect>
+<rect x="439.9" y="74.0" width="18" height="18" fill="#6e7681"><title>Move and convert: p2r (0x38e8) (missing)</title></rect>
+<rect x="458.9" y="74.0" width="18" height="18" fill="#6e7681"><title>Move and convert: i2i (0x38e0) (missing)</title></rect>
+<rect x="477.9" y="74.0" width="18" height="18" fill="#2ea043"><title>Move and convert: i2f (0x38b8)</title></rect>
+<rect x="496.9" y="74.0" width="18" height="18" fill="#2ea043"><title>Move and convert: f2i (0x38b0)</title></rect>
+<rect x="363.9" y="93.0" width="18" height="18" fill="#6e7681"><title>Move and convert: f2f (0x38a8) (missing)</title></rect>
+<rect x="382.9" y="93.0" width="18" height="18" fill="#2ea043"><title>Move and convert: sel (0x38a0)</title></rect>
+<rect x="401.9" y="93.0" width="18" height="18" fill="#2ea043"><title>Move and convert: mov (0x3898)</title></rect>
+<rect x="420.9" y="93.0" width="18" height="18" fill="#2ea043"><title>Move and convert: rro (0x3890)</title></rect>
+<rect x="439.9" y="93.0" width="18" height="18" fill="#6e7681"><title>Move and convert: prmt (0x36c0) (missing)</title></rect>
+<rect x="458.9" y="93.0" width="18" height="18" fill="#2ea043"><title>Move and convert: mov32i (0x0100)</title></rect>
+<text x="365.9" y="12.0" class="glabel">Move and convert</text>
+<rect x="361.9" y="126.7" width="158.1" height="120.0" class="group"/>
+<rect x="363.9" y="143.7" width="18" height="18" fill="#6e7681"><title>Memory: out (0xfbe0) (missing)</title></rect>
+<rect x="382.9" y="143.7" width="18" height="18" fill="#6e7681"><title>Memory: out (0xf6e0) (missing)</title></rect>
+<rect x="401.9" y="143.7" width="18" height="18" fill="#2ea043"><title>Memory: st (0xeff0)</title></rect>
+<rect x="420.9" y="143.7" width="18" height="18" fill="#6e7681"><title>Memory: pixld (0xefe8) (missing)</title></rect>
+<rect x="439.9" y="143.7" width="18" height="18" fill="#2ea043"><title>Memory: ld (0xefd8)</title></rect>
+<rect x="458.9" y="143.7" width="18" height="18" fill="#6e7681"><title>Memory: isberd (0xefd0) (missing)</title></rect>
+<rect x="477.9" y="143.7" width="18" height="18" fill="#6e7681"><title>Memory: al2p (0xefa0) (missing)</title></rect>
+<rect x="496.9" y="143.7" width="18" height="18" fill="#2ea043"><title>Memory: ld (0xef90)</title></rect>
+<rect x="363.9" y="162.7" width="18" height="18" fill="#2ea043"><title>Memory: cctll (0xef80)</title></rect>
+<rect x="382.9" y="162.7" width="18" height="18" fill="#6e7681"><title>Memory: cctl (0xef60) (missing)</title></rect>
+<rect x="401.9" y="162.7" width="18" height="18" fill="#6e7681"><title>Memory: st (0xef58) (missing)</title></rect>
+<rect x="420.9" y="162.7" width="18" height="18" fill="#6e7681"><title>Memory: st (0xef50) (missing)</title></rect>
+<rect x="439.9" y="162.7" width="18" height="18" fill="#6e7681"><title>Memory: ld (0xef48) (missing)</title></rect>
+<rect x="458.9" y="162.7" width="18" height="18" fill="#6e7681"><title>Memory: ld (0xef40) (missing)</title></rect>
+<rect x="477.9" y="162.7" width="18" height="18" fill="#6e7681"><title>Memory: shfl (0xef10) (missing)</title></rect>
+<rect x="496.9" y="162.7" width="18" height="18" fill="#6e7681"><title>Memory: atom (0xeef0) (missing)</title></rect>
+<rect x="363.9" y="181.7" width="18" height="18" fill="#2ea043"><title>Memory: stg (0xeed8)</title></rect>
+<rect x="382.9" y="181.7" width="18" height="18" fill="#2ea043"><title>Memory: ldg (0xeed0)</title></rect>
+<rect x="401.9" y="181.7" width="18" height="18" fill="#6e7681"><title>Memory: ldg (0xeec8) (missing)</title></rect>
+<rect x="420.9" y="181.7" width="18" height="18" fill="#6e7681"><title>Memory: atoms (0xee00) (missing)</title></rect>
+<rect x="439.9" y="181.7" width="18" height="18" fill="#6e7681"><title>Memory: atom (0xed00) (missing)</title></rect>
+<rect x="458.9" y="181.7" width="18" height="18" fill="#6e7681"><title>Memory: atoms (0xec00) (missing)</title></rect>
+<rect x="477.9" y="181.7" width="18" height="18" fill="#6e7681"><title>Memory: red (0xebf8) (missing)</title></rect>
+<rect x="496.9" y="181.7" width="18" height="18" fill="#6e7681"><title>Memory: cctlt (0xebf0) (missing)</title></rect>
+<rect x="363.9" y="200.7" width="18" height="18" fill="#6e7681"><title>Memory: out (0xebe0) (missing)</title></rect>
+<rect x="382.9" y="200.7" width="18" height="18" fill="#6e7681"><title>Memory: sured (0xeb40) (missing)</title></rect>
+<rect x="401.9" y="200.7" width="18" height="18" fill="#6e7681"><title>Memory: sust (0xeb20) (missing)</title></rect>
+<rect x="420.9" y="200.7" width="18" height="18" fill="#6e7681"><title>Memory: suld (0xeb00) (missing)</title></rect>
+<rect x="439.9" y="200.7" width="18" height="18" fill="#6e7681"><title>Memory: suatom (0xeac0) (missing)</title></rect>
+<rect x="458.9" y="200.7" width="18" height="18" fill="#6e7681"><title>Memory: suatom (0xea80) (missing)</title></rect>
+<rect x="477.9" y="200.7" width="18" height="18" fill="#6e7681"><title>Memory: suatom (0xea60) (missing)</title></rect>
+<rect x="496.9" y="200.7" width="18" height="18" fill="#6e7681"><title>Memory: suatom (0xea00) (missing)</title></rect>
+<rect x="363.9" y="219.7" width="18" height="18" fill="#2ea043"><title>Memory: ipa (0xe000)</title></rect>
+<rect x="382.9" y="219.7" width="18" height="18" fill="#6e7681"><title>Memory: ipa (0xe000) (missing)</title></rect>
+<rect x="401.9" y="219.7" width="18" height="18" fill="#6e7681"><title>Memory: st (0xa000) (missing)</title></rect>
+<rect x="420.9" y="219.7" width="18" height="18" fill="#6e7681"><title>Memory: ld (0x8000) (missing)</title></rect>
+<text x="365.9" y="138.7" class="glabel">Memory</text>
+<rect x="361.9" y="246.7" width="158.1" height="53.3" class="group"/>
+<rect x="363.9" y="263.7" width="16" height="16" fill="#6e7681"><title>Texture: tmml (0xdf60) (missing)</title></rect>
+<rect x="380.9" y="263.7" width="16" height="16" fill="#6e7681"><title>Texture: tmml (0xdf58) (missing)</title></rect>
+<rect x="397.9" y="263.7" width="16" height="16" fill="#6e7681"><title>Texture: txq (0xdf50) (missing)</title></rect>
+<rect x="414.9" y="263.7" width="16" height="16" fill="#6e7681"><title>Texture: txq (0xdf48) (missing)</title></rect>
+<rect x="431.9" y="263.7" width="16" height="16" fill="#6e7681"><title>Texture: txa (0xdf40) (missing)</title></rect>
+<rect x="448.9" y="263.7" width="16" height="16" fill="#6e7681"><title>Texture: tld4s (0xdf00) (missing)</title></rect>
+<rect x="465.9" y="263.7" width="16" height="16" fill="#6e7681"><title>Texture: tld4 (0xdef8) (missing)</title></rect>
+<rect x="482.9" y="263.7" width="16" height="16" fill="#6e7681"><title>Texture: tex (0xdeb8) (missing)</title></rect>
+<rect x="499.9" y="263.7" width="16" height="16" fill="#6e7681"><title>Texture: txd (0xde78) (missing)</title></rect>
+<rect x="363.9" y="280.7" width="16" height="16" fill="#6e7681"><title>Texture: txd (0xde38) (missing)</title></rect>
+<rect x="380.9" y="280.7" width="16" height="16" fill="#6e7681"><title>Texture: tld (0xdd38) (missing)</title></rect>
+<rect x="397.9" y="280.7" width="16" height="16" fill="#6e7681"><title>Texture: tld (0xdc38) (missing)</title></rect>
+<rect x="414.9" y="280.7" width="16" height="16" fill="#2ea043"><title>Texture: tlds (0xd200)</title></rect>
+<rect x="431.9" y="280.7" width="16" height="16" fill="#2ea043"><title>Texture: texs (0xd000)</title></rect>
+<rect x="448.9" y="280.7" width="16" height="16" fill="#6e7681"><title>Texture: tld4 (0xc838) (missing)</title></rect>
+<rect x="465.9" y="280.7" width="16" height="16" fill="#2ea043"><title>Texture: tex (0xc038)</title></rect>
+<text x="365.9" y="258.7" class="glabel">Texture</text>
+</svg></section>
+</div>
+<p class="legendrow"><span class="sq" style="background:#2ea043"></span>implemented
+<span class="sq" style="background:#6e7681"></span>known, not implemented. Hover a square
+for its name. Shader encodings are envytools' gm107 table; an encoding counts once the
+interpreter decodes some form of it.</p>
+
+<h2>History</h2>
+<svg viewBox="0 0 900 220" class="history" role="img">
+<line x1="44" x2="750" y1="194.0" y2="194.0" class="gridline"/><text x="38" y="198.0" class="axis" text-anchor="end">0%</text>
+<line x1="44" x2="750" y1="148.5" y2="148.5" class="gridline"/><text x="38" y="152.5" class="axis" text-anchor="end">25%</text>
+<line x1="44" x2="750" y1="103.0" y2="103.0" class="gridline"/><text x="38" y="107.0" class="axis" text-anchor="end">50%</text>
+<line x1="44" x2="750" y1="57.5" y2="57.5" class="gridline"/><text x="38" y="61.5" class="axis" text-anchor="end">75%</text>
+<line x1="44" x2="750" y1="12.0" y2="12.0" class="gridline"/><text x="38" y="16.0" class="axis" text-anchor="end">100%</text>
+<polyline points="44.0,129.9 68.3,129.9 92.7,129.9 117.0,129.9 141.4,129.9 165.7,129.9 190.1,129.9 214.4,129.9 238.8,129.9 263.1,129.9 287.4,129.9 311.8,129.9 336.1,129.9 360.5,129.9 384.8,129.9 409.2,129.9 433.5,129.9 457.9,129.9 482.2,129.9 506.6,129.9 530.9,129.9 555.2,129.9 579.6,129.9 603.9,129.9 628.3,129.9 652.6,129.9 677.0,129.9 701.3,129.9 725.7,129.9 750.0,129.9" fill="none" stroke="#58a6ff" stroke-width="2"/>
+<circle cx="750.0" cy="129.9" r="3.5" fill="#58a6ff"/><text x="758.0" y="133.9" fill="#58a6ff" class="legend">Kernel calls 35.2%</text>
+<polyline points="44.0,194.0 68.3,194.0 92.7,194.0 117.0,194.0 141.4,194.0 165.7,194.0 190.1,194.0 214.4,194.0 238.8,194.0 263.1,194.0 287.4,194.0 311.8,194.0 336.1,194.0 360.5,160.2 384.8,160.2 409.2,160.2 433.5,160.2 457.9,159.0 482.2,149.1 506.6,149.1 530.9,149.1 555.2,149.1 579.6,149.1 603.9,149.1 628.3,147.3 652.6,147.3 677.0,147.3 701.3,147.3 725.7,147.3 750.0,147.3" fill="none" stroke="#2ea043" stroke-width="2"/>
+<circle cx="750.0" cy="147.3" r="3.5" fill="#2ea043"/><text x="758.0" y="151.3" fill="#2ea043" class="legend">Shaders 25.7%</text>
+<text x="44" y="214" class="axis">2026-10-09</text><text x="750" y="214" class="axis" text-anchor="end">2026-10-12 (30 commits)</text>
+</svg>
+
+<h2>IPC: 362 commands in 36 service interfaces</h2>
+<p class="sub">Each square is a command a service answers. HOS has thousands; the ones
+here are those homebrew has asked for so far.</p>
+<svg viewBox="0 0 1060 240" class="treemap" role="img">
+<rect x="0.0" y="0.0" width="474.4" height="240.0" class="group"/>
+<rect x="2.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:IProfile #0</title></rect>
+<rect x="26.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:IProfile #1</title></rect>
+<rect x="50.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:IProfile #2</title></rect>
+<rect x="74.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:IProfile #3</title></rect>
+<rect x="98.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #0</title></rect>
+<rect x="122.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #1</title></rect>
+<rect x="146.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #2</title></rect>
+<rect x="170.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #3</title></rect>
+<rect x="194.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #4</title></rect>
+<rect x="218.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #5</title></rect>
+<rect x="242.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #6</title></rect>
+<rect x="266.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #7</title></rect>
+<rect x="290.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #8</title></rect>
+<rect x="314.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #9</title></rect>
+<rect x="338.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #10</title></rect>
+<rect x="362.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #11</title></rect>
+<rect x="386.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: acc:u0 #12</title></rect>
+<rect x="410.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: apm:ISession #0</title></rect>
+<rect x="434.0" y="17.0" width="23" height="23" fill="#2ea043"><title>os: apm:ISession #1</title></rect>
+<rect x="2.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: apm:ISession #2</title></rect>
+<rect x="26.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: apm #0</title></rect>
+<rect x="50.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: apm #1</title></rect>
+<rect x="74.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: apm #2</title></rect>
+<rect x="98.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #0</title></rect>
+<rect x="122.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #1</title></rect>
+<rect x="146.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #2</title></rect>
+<rect x="170.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #3</title></rect>
+<rect x="194.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #4</title></rect>
+<rect x="218.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #5</title></rect>
+<rect x="242.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #6</title></rect>
+<rect x="266.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #7</title></rect>
+<rect x="290.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #8</title></rect>
+<rect x="314.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #9</title></rect>
+<rect x="338.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #10</title></rect>
+<rect x="362.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #11</title></rect>
+<rect x="386.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #12</title></rect>
+<rect x="410.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #13</title></rect>
+<rect x="434.0" y="41.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #14</title></rect>
+<rect x="2.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #15</title></rect>
+<rect x="26.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #16</title></rect>
+<rect x="50.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #17</title></rect>
+<rect x="74.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #18</title></rect>
+<rect x="98.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #19</title></rect>
+<rect x="122.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #20</title></rect>
+<rect x="146.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #21</title></rect>
+<rect x="170.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #22</title></rect>
+<rect x="194.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #23</title></rect>
+<rect x="218.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #24</title></rect>
+<rect x="242.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ICommonStateGetter #25</title></rect>
+<rect x="266.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ISelfController #0</title></rect>
+<rect x="290.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ISelfController #1</title></rect>
+<rect x="314.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ISelfController #2</title></rect>
+<rect x="338.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ISelfController #3</title></rect>
+<rect x="362.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ISelfController #4</title></rect>
+<rect x="386.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ISelfController #5</title></rect>
+<rect x="410.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ISelfController #6</title></rect>
+<rect x="434.0" y="65.0" width="23" height="23" fill="#2ea043"><title>os: applet:ISelfController #7</title></rect>
+<rect x="2.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:ISelfController #8</title></rect>
+<rect x="26.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:ISelfController #9</title></rect>
+<rect x="50.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:ISelfController #10</title></rect>
+<rect x="74.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IWindowController #0</title></rect>
+<rect x="98.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IWindowController #1</title></rect>
+<rect x="122.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IWindowController #2</title></rect>
+<rect x="146.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IWindowController #3</title></rect>
+<rect x="170.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IWindowController #4</title></rect>
+<rect x="194.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IWindowController #5</title></rect>
+<rect x="218.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IWindowController #6</title></rect>
+<rect x="242.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IAudioController #0</title></rect>
+<rect x="266.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IAudioController #1</title></rect>
+<rect x="290.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IAudioController #2</title></rect>
+<rect x="314.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IAudioController #3</title></rect>
+<rect x="338.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IAudioController #4</title></rect>
+<rect x="362.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #0</title></rect>
+<rect x="386.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #1</title></rect>
+<rect x="410.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #2</title></rect>
+<rect x="434.0" y="89.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #3</title></rect>
+<rect x="2.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #4</title></rect>
+<rect x="26.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #5</title></rect>
+<rect x="50.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #6</title></rect>
+<rect x="74.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #7</title></rect>
+<rect x="98.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #8</title></rect>
+<rect x="122.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #9</title></rect>
+<rect x="146.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #10</title></rect>
+<rect x="170.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #11</title></rect>
+<rect x="194.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #12</title></rect>
+<rect x="218.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #13</title></rect>
+<rect x="242.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #14</title></rect>
+<rect x="266.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #15</title></rect>
+<rect x="290.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #16</title></rect>
+<rect x="314.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #17</title></rect>
+<rect x="338.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationFunctions #18</title></rect>
+<rect x="362.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationProxy #0</title></rect>
+<rect x="386.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationProxy #1</title></rect>
+<rect x="410.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationProxy #2</title></rect>
+<rect x="434.0" y="113.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationProxy #3</title></rect>
+<rect x="2.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationProxy #4</title></rect>
+<rect x="26.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationProxy #5</title></rect>
+<rect x="50.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationProxy #6</title></rect>
+<rect x="74.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: applet:IApplicationProxy #7</title></rect>
+<rect x="98.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: appletOE #0</title></rect>
+<rect x="122.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: appletOE #1</title></rect>
+<rect x="146.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: appletOE #2</title></rect>
+<rect x="170.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: appletOE #3</title></rect>
+<rect x="194.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: appletOE #4</title></rect>
+<rect x="218.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: appletOE #5</title></rect>
+<rect x="242.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: psm #0</title></rect>
+<rect x="266.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: psm #1</title></rect>
+<rect x="290.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: psm #2</title></rect>
+<rect x="314.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: psm #3</title></rect>
+<rect x="338.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: psm #4</title></rect>
+<rect x="362.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: psm #5</title></rect>
+<rect x="386.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: psm #6</title></rect>
+<rect x="410.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: set:sys #0</title></rect>
+<rect x="434.0" y="137.0" width="23" height="23" fill="#2ea043"><title>os: set:sys #1</title></rect>
+<rect x="2.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set:sys #2</title></rect>
+<rect x="26.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set:sys #3</title></rect>
+<rect x="50.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set:sys #4</title></rect>
+<rect x="74.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set:sys #5</title></rect>
+<rect x="98.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set #0</title></rect>
+<rect x="122.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set #1</title></rect>
+<rect x="146.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set #2</title></rect>
+<rect x="170.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set #3</title></rect>
+<rect x="194.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set #4</title></rect>
+<rect x="218.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set #5</title></rect>
+<rect x="242.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set #6</title></rect>
+<rect x="266.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: set #7</title></rect>
+<rect x="290.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: time:ISystemClock #0</title></rect>
+<rect x="314.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: time:ISystemClock #1</title></rect>
+<rect x="338.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: time:ISystemClock #2</title></rect>
+<rect x="362.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: time:ISystemClock #3</title></rect>
+<rect x="386.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: time:ISystemClock #4</title></rect>
+<rect x="410.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: time:ISteadyClock #0</title></rect>
+<rect x="434.0" y="161.0" width="23" height="23" fill="#2ea043"><title>os: time:ISteadyClock #1</title></rect>
+<rect x="2.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ISteadyClock #2</title></rect>
+<rect x="26.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ISteadyClock #3</title></rect>
+<rect x="50.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ISteadyClock #4</title></rect>
+<rect x="74.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ISteadyClock #5</title></rect>
+<rect x="98.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ISteadyClock #6</title></rect>
+<rect x="122.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ITimeZoneService #0</title></rect>
+<rect x="146.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ITimeZoneService #1</title></rect>
+<rect x="170.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ITimeZoneService #2</title></rect>
+<rect x="194.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ITimeZoneService #3</title></rect>
+<rect x="218.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ITimeZoneService #4</title></rect>
+<rect x="242.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ITimeZoneService #5</title></rect>
+<rect x="266.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ITimeZoneService #6</title></rect>
+<rect x="290.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ITimeZoneService #7</title></rect>
+<rect x="314.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ITimeZoneService #8</title></rect>
+<rect x="338.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time:ITimeZoneService #9</title></rect>
+<rect x="362.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time #0</title></rect>
+<rect x="386.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time #1</title></rect>
+<rect x="410.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time #2</title></rect>
+<rect x="434.0" y="185.0" width="23" height="23" fill="#2ea043"><title>os: time #3</title></rect>
+<rect x="2.0" y="209.0" width="23" height="23" fill="#2ea043"><title>os: time #4</title></rect>
+<rect x="26.0" y="209.0" width="23" height="23" fill="#2ea043"><title>os: time #5</title></rect>
+<rect x="50.0" y="209.0" width="23" height="23" fill="#2ea043"><title>os: time #6</title></rect>
+<rect x="74.0" y="209.0" width="23" height="23" fill="#2ea043"><title>os: time #7</title></rect>
+<rect x="98.0" y="209.0" width="23" height="23" fill="#2ea043"><title>os: time #8</title></rect>
+<rect x="122.0" y="209.0" width="23" height="23" fill="#2ea043"><title>os: time #9</title></rect>
+<rect x="146.0" y="209.0" width="23" height="23" fill="#2ea043"><title>os: time #10</title></rect>
+<rect x="170.0" y="209.0" width="23" height="23" fill="#2ea043"><title>os: time #11</title></rect>
+<rect x="194.0" y="209.0" width="23" height="23" fill="#2ea043"><title>os: time #12</title></rect>
+<rect x="218.0" y="209.0" width="23" height="23" fill="#2ea043"><title>os: time #13</title></rect>
+<text x="4.0" y="12.0" class="glabel">os</text>
+<rect x="474.4" y="0.0" width="190.3" height="240.0" class="group"/>
+<rect x="476.4" y="17.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #0</title></rect>
+<rect x="499.4" y="17.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #1</title></rect>
+<rect x="522.4" y="17.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #2</title></rect>
+<rect x="545.4" y="17.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #3</title></rect>
+<rect x="568.4" y="17.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #4</title></rect>
+<rect x="591.4" y="17.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #5</title></rect>
+<rect x="614.4" y="17.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #6</title></rect>
+<rect x="637.4" y="17.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #7</title></rect>
+<rect x="476.4" y="40.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #8</title></rect>
+<rect x="499.4" y="40.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #9</title></rect>
+<rect x="522.4" y="40.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #10</title></rect>
+<rect x="545.4" y="40.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #11</title></rect>
+<rect x="568.4" y="40.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #12</title></rect>
+<rect x="591.4" y="40.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #13</title></rect>
+<rect x="614.4" y="40.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #14</title></rect>
+<rect x="637.4" y="40.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #15</title></rect>
+<rect x="476.4" y="63.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #16</title></rect>
+<rect x="499.4" y="63.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #17</title></rect>
+<rect x="522.4" y="63.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #18</title></rect>
+<rect x="545.4" y="63.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #19</title></rect>
+<rect x="568.4" y="63.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #20</title></rect>
+<rect x="591.4" y="63.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #21</title></rect>
+<rect x="614.4" y="63.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #22</title></rect>
+<rect x="637.4" y="63.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #23</title></rect>
+<rect x="476.4" y="86.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #24</title></rect>
+<rect x="499.4" y="86.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #25</title></rect>
+<rect x="522.4" y="86.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #26</title></rect>
+<rect x="545.4" y="86.0" width="22" height="22" fill="#2ea043"><title>net: bsd:u #27</title></rect>
+<rect x="568.4" y="86.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #0</title></rect>
+<rect x="591.4" y="86.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #1</title></rect>
+<rect x="614.4" y="86.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #2</title></rect>
+<rect x="637.4" y="86.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #3</title></rect>
+<rect x="476.4" y="109.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #4</title></rect>
+<rect x="499.4" y="109.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #5</title></rect>
+<rect x="522.4" y="109.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #6</title></rect>
+<rect x="545.4" y="109.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #7</title></rect>
+<rect x="568.4" y="109.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #8</title></rect>
+<rect x="591.4" y="109.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #9</title></rect>
+<rect x="614.4" y="109.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #10</title></rect>
+<rect x="637.4" y="109.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #11</title></rect>
+<rect x="476.4" y="132.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #12</title></rect>
+<rect x="499.4" y="132.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #13</title></rect>
+<rect x="522.4" y="132.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #14</title></rect>
+<rect x="545.4" y="132.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #15</title></rect>
+<rect x="568.4" y="132.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #16</title></rect>
+<rect x="591.4" y="132.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #17</title></rect>
+<rect x="614.4" y="132.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IRequest #18</title></rect>
+<rect x="637.4" y="132.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #0</title></rect>
+<rect x="476.4" y="155.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #1</title></rect>
+<rect x="499.4" y="155.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #2</title></rect>
+<rect x="522.4" y="155.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #3</title></rect>
+<rect x="545.4" y="155.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #4</title></rect>
+<rect x="568.4" y="155.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #5</title></rect>
+<rect x="591.4" y="155.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #6</title></rect>
+<rect x="614.4" y="155.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #7</title></rect>
+<rect x="637.4" y="155.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #8</title></rect>
+<rect x="476.4" y="178.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #9</title></rect>
+<rect x="499.4" y="178.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #10</title></rect>
+<rect x="522.4" y="178.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #11</title></rect>
+<rect x="545.4" y="178.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #12</title></rect>
+<rect x="568.4" y="178.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #13</title></rect>
+<rect x="591.4" y="178.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #14</title></rect>
+<rect x="614.4" y="178.0" width="22" height="22" fill="#2ea043"><title>net: nifm:IGeneralService #15</title></rect>
+<rect x="637.4" y="178.0" width="22" height="22" fill="#2ea043"><title>net: nifm #0</title></rect>
+<rect x="476.4" y="201.0" width="22" height="22" fill="#2ea043"><title>net: nifm #1</title></rect>
+<text x="478.4" y="12.0" class="glabel">net</text>
+<rect x="664.7" y="0.0" width="158.1" height="240.0" class="group"/>
+<rect x="666.7" y="17.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFile #0</title></rect>
+<rect x="690.7" y="17.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFile #1</title></rect>
+<rect x="714.7" y="17.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFile #2</title></rect>
+<rect x="738.7" y="17.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFile #3</title></rect>
+<rect x="762.7" y="17.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFile #4</title></rect>
+<rect x="786.7" y="17.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFile #5</title></rect>
+<rect x="666.7" y="41.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IDirectory #0</title></rect>
+<rect x="690.7" y="41.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IDirectory #1</title></rect>
+<rect x="714.7" y="41.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #0</title></rect>
+<rect x="738.7" y="41.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #1</title></rect>
+<rect x="762.7" y="41.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #2</title></rect>
+<rect x="786.7" y="41.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #3</title></rect>
+<rect x="666.7" y="65.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #4</title></rect>
+<rect x="690.7" y="65.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #5</title></rect>
+<rect x="714.7" y="65.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #6</title></rect>
+<rect x="738.7" y="65.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #7</title></rect>
+<rect x="762.7" y="65.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #8</title></rect>
+<rect x="786.7" y="65.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #9</title></rect>
+<rect x="666.7" y="89.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #10</title></rect>
+<rect x="690.7" y="89.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #11</title></rect>
+<rect x="714.7" y="89.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #12</title></rect>
+<rect x="738.7" y="89.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #13</title></rect>
+<rect x="762.7" y="89.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IFileSystem #14</title></rect>
+<rect x="786.7" y="89.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IStorage #0</title></rect>
+<rect x="666.7" y="113.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IStorage #1</title></rect>
+<rect x="690.7" y="113.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IStorage #2</title></rect>
+<rect x="714.7" y="113.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IStorage #3</title></rect>
+<rect x="738.7" y="113.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IStorage #4</title></rect>
+<rect x="762.7" y="113.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IStorage #5</title></rect>
+<rect x="786.7" y="113.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IDeviceOperator #0</title></rect>
+<rect x="666.7" y="137.0" width="23" height="23" fill="#2ea043"><title>fs: fs:IDeviceOperator #1</title></rect>
+<rect x="690.7" y="137.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #0</title></rect>
+<rect x="714.7" y="137.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #1</title></rect>
+<rect x="738.7" y="137.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #2</title></rect>
+<rect x="762.7" y="137.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #3</title></rect>
+<rect x="786.7" y="137.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #4</title></rect>
+<rect x="666.7" y="161.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #5</title></rect>
+<rect x="690.7" y="161.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #6</title></rect>
+<rect x="714.7" y="161.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #7</title></rect>
+<rect x="738.7" y="161.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #8</title></rect>
+<rect x="762.7" y="161.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #9</title></rect>
+<rect x="786.7" y="161.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #10</title></rect>
+<rect x="666.7" y="185.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #11</title></rect>
+<rect x="690.7" y="185.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #12</title></rect>
+<rect x="714.7" y="185.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #13</title></rect>
+<rect x="738.7" y="185.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #14</title></rect>
+<rect x="762.7" y="185.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #15</title></rect>
+<rect x="786.7" y="185.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #16</title></rect>
+<rect x="666.7" y="209.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #17</title></rect>
+<rect x="690.7" y="209.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #18</title></rect>
+<rect x="714.7" y="209.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #19</title></rect>
+<rect x="738.7" y="209.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #20</title></rect>
+<rect x="762.7" y="209.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #21</title></rect>
+<rect x="786.7" y="209.0" width="23" height="23" fill="#2ea043"><title>fs: fsp-srv #22</title></rect>
+<text x="668.7" y="12.0" class="glabel">fs</text>
+<rect x="822.8" y="0.0" width="237.2" height="121.5" class="group"/>
+<rect x="824.8" y="17.0" width="20" height="20" fill="#2ea043"><title>gpu: nvdrv #0</title></rect>
+<rect x="845.8" y="17.0" width="20" height="20" fill="#2ea043"><title>gpu: nvdrv #1</title></rect>
+<rect x="866.8" y="17.0" width="20" height="20" fill="#2ea043"><title>gpu: nvdrv #2</title></rect>
+<rect x="887.8" y="17.0" width="20" height="20" fill="#2ea043"><title>gpu: nvdrv #3</title></rect>
+<rect x="908.8" y="17.0" width="20" height="20" fill="#2ea043"><title>gpu: nvdrv #4</title></rect>
+<rect x="929.8" y="17.0" width="20" height="20" fill="#2ea043"><title>gpu: nvdrv #5</title></rect>
+<rect x="950.8" y="17.0" width="20" height="20" fill="#2ea043"><title>gpu: nvdrv #6</title></rect>
+<rect x="971.8" y="17.0" width="20" height="20" fill="#2ea043"><title>gpu: nvdrv #7</title></rect>
+<rect x="992.8" y="17.0" width="20" height="20" fill="#2ea043"><title>gpu: nvdrv #8</title></rect>
+<rect x="1013.8" y="17.0" width="20" height="20" fill="#2ea043"><title>gpu: nvdrv #9</title></rect>
+<rect x="1034.8" y="17.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IHOSBinderDriver #0</title></rect>
+<rect x="824.8" y="38.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IHOSBinderDriver #1</title></rect>
+<rect x="845.8" y="38.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IHOSBinderDriver #2</title></rect>
+<rect x="866.8" y="38.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IHOSBinderDriver #3</title></rect>
+<rect x="887.8" y="38.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #0</title></rect>
+<rect x="908.8" y="38.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #1</title></rect>
+<rect x="929.8" y="38.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #2</title></rect>
+<rect x="950.8" y="38.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #3</title></rect>
+<rect x="971.8" y="38.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #4</title></rect>
+<rect x="992.8" y="38.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #5</title></rect>
+<rect x="1013.8" y="38.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #6</title></rect>
+<rect x="1034.8" y="38.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #7</title></rect>
+<rect x="824.8" y="59.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #8</title></rect>
+<rect x="845.8" y="59.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #9</title></rect>
+<rect x="866.8" y="59.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #10</title></rect>
+<rect x="887.8" y="59.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #11</title></rect>
+<rect x="908.8" y="59.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #12</title></rect>
+<rect x="929.8" y="59.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #13</title></rect>
+<rect x="950.8" y="59.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #14</title></rect>
+<rect x="971.8" y="59.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #15</title></rect>
+<rect x="992.8" y="59.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IApplicationDisplayService #16</title></rect>
+<rect x="1013.8" y="59.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:ISystemDisplayService #0</title></rect>
+<rect x="1034.8" y="59.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:ISystemDisplayService #1</title></rect>
+<rect x="824.8" y="80.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:ISystemDisplayService #2</title></rect>
+<rect x="845.8" y="80.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:ISystemDisplayService #3</title></rect>
+<rect x="866.8" y="80.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:ISystemDisplayService #4</title></rect>
+<rect x="887.8" y="80.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:ISystemDisplayService #5</title></rect>
+<rect x="908.8" y="80.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IManagerDisplayService #0</title></rect>
+<rect x="929.8" y="80.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IManagerDisplayService #1</title></rect>
+<rect x="950.8" y="80.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IManagerDisplayService #2</title></rect>
+<rect x="971.8" y="80.0" width="20" height="20" fill="#2ea043"><title>gpu: vi:IManagerDisplayService #3</title></rect>
+<text x="826.8" y="12.0" class="glabel">gpu</text>
+<rect x="822.8" y="121.5" width="130.5" height="118.5" class="group"/>
+<rect x="824.8" y="138.5" width="20" height="20" fill="#2ea043"><title>input: hid #0</title></rect>
+<rect x="845.8" y="138.5" width="20" height="20" fill="#2ea043"><title>input: hid #1</title></rect>
+<rect x="866.8" y="138.5" width="20" height="20" fill="#2ea043"><title>input: hid #2</title></rect>
+<rect x="887.8" y="138.5" width="20" height="20" fill="#2ea043"><title>input: hid #3</title></rect>
+<rect x="908.8" y="138.5" width="20" height="20" fill="#2ea043"><title>input: hid #4</title></rect>
+<rect x="929.8" y="138.5" width="20" height="20" fill="#2ea043"><title>input: hid #5</title></rect>
+<rect x="824.8" y="159.5" width="20" height="20" fill="#2ea043"><title>input: hid #6</title></rect>
+<rect x="845.8" y="159.5" width="20" height="20" fill="#2ea043"><title>input: hid #7</title></rect>
+<rect x="866.8" y="159.5" width="20" height="20" fill="#2ea043"><title>input: hid #8</title></rect>
+<rect x="887.8" y="159.5" width="20" height="20" fill="#2ea043"><title>input: hid #9</title></rect>
+<rect x="908.8" y="159.5" width="20" height="20" fill="#2ea043"><title>input: hid #10</title></rect>
+<rect x="929.8" y="159.5" width="20" height="20" fill="#2ea043"><title>input: hid #11</title></rect>
+<rect x="824.8" y="180.5" width="20" height="20" fill="#2ea043"><title>input: hid #12</title></rect>
+<rect x="845.8" y="180.5" width="20" height="20" fill="#2ea043"><title>input: hid #13</title></rect>
+<rect x="866.8" y="180.5" width="20" height="20" fill="#2ea043"><title>input: hid #14</title></rect>
+<rect x="887.8" y="180.5" width="20" height="20" fill="#2ea043"><title>input: hid #15</title></rect>
+<rect x="908.8" y="180.5" width="20" height="20" fill="#2ea043"><title>input: hid #16</title></rect>
+<rect x="929.8" y="180.5" width="20" height="20" fill="#2ea043"><title>input: hid #17</title></rect>
+<rect x="824.8" y="201.5" width="20" height="20" fill="#2ea043"><title>input: hid #18</title></rect>
+<rect x="845.8" y="201.5" width="20" height="20" fill="#2ea043"><title>input: hid #19</title></rect>
+<rect x="866.8" y="201.5" width="20" height="20" fill="#2ea043"><title>input: hid #20</title></rect>
+<rect x="887.8" y="201.5" width="20" height="20" fill="#2ea043"><title>input: hid #21</title></rect>
+<text x="826.8" y="133.5" class="glabel">input</text>
+<rect x="953.3" y="121.5" width="106.7" height="118.5" class="group"/>
+<rect x="955.3" y="138.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #0</title></rect>
+<rect x="975.3" y="138.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #1</title></rect>
+<rect x="995.3" y="138.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #2</title></rect>
+<rect x="1015.3" y="138.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #3</title></rect>
+<rect x="1035.3" y="138.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #4</title></rect>
+<rect x="955.3" y="158.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #5</title></rect>
+<rect x="975.3" y="158.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #6</title></rect>
+<rect x="995.3" y="158.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #7</title></rect>
+<rect x="1015.3" y="158.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #8</title></rect>
+<rect x="1035.3" y="158.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #9</title></rect>
+<rect x="955.3" y="178.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #10</title></rect>
+<rect x="975.3" y="178.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #11</title></rect>
+<rect x="995.3" y="178.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #12</title></rect>
+<rect x="1015.3" y="178.5" width="19" height="19" fill="#2ea043"><title>audio: audout:IAudioOut #13</title></rect>
+<rect x="1035.3" y="178.5" width="19" height="19" fill="#2ea043"><title>audio: audout:u #0</title></rect>
+<rect x="955.3" y="198.5" width="19" height="19" fill="#2ea043"><title>audio: audout:u #1</title></rect>
+<rect x="975.3" y="198.5" width="19" height="19" fill="#2ea043"><title>audio: audout:u #2</title></rect>
+<rect x="995.3" y="198.5" width="19" height="19" fill="#2ea043"><title>audio: audout:u #3</title></rect>
+<text x="957.3" y="133.5" class="glabel">audio</text>
+</svg>
+
+<h2>Homebrew</h2>
+<table><thead><tr><th>Program</th><th>Kind</th><th>Status</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>DOOM (doomgeneric)</td><td>game</td><td><span class="st" style="background:#2ea043">playable</span></td><td>libnx framebuffer, keyboard, sound</td></tr>
+<tr><td>Quake (SDL2)</td><td>game</td><td><span class="st" style="background:#2ea043">playable</span></td><td>unmodified SDL2 port, sound</td></tr>
+<tr><td>OpenTyrian (SDL2)</td><td>game</td><td><span class="st" style="background:#2ea043">playable</span></td><td>unmodified SDL2 game</td></tr>
+<tr><td>SDL2 test app</td><td>sdl</td><td><span class="st" style="background:#238636">works</span></td><td>video, input, audio</td></tr>
+<tr><td>libnx hello</td><td>libnx</td><td><span class="st" style="background:#238636">works</span></td><td></td></tr>
+<tr><td>libnx console</td><td>libnx</td><td><span class="st" style="background:#238636">works</span></td><td></td></tr>
+<tr><td>libnx services</td><td>libnx</td><td><span class="st" style="background:#238636">works</span></td><td>account, set, time, psm</td></tr>
+<tr><td>libnx romfs</td><td>libnx</td><td><span class="st" style="background:#238636">works</span></td><td></td></tr>
+<tr><td>libnx input</td><td>libnx</td><td><span class="st" style="background:#238636">works</span></td><td></td></tr>
+<tr><td>libnx sockets</td><td>libnx</td><td><span class="st" style="background:#238636">works</span></td><td>bsd:u; no DNS yet (#41)</td></tr>
+<tr><td>deko3d clear (M0/M1)</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td></td></tr>
+<tr><td>deko3d triangle</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td>matches a reference</td></tr>
+<tr><td>deko3d cube</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td>matches a reference</td></tr>
+<tr><td>deko3d depth and blending</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td>matches a reference</td></tr>
+<tr><td>deko3d textures</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td>RGBA8 and BC1, matches a reference</td></tr>
+<tr><td>deko_examples 01 Simple Setup</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td></td></tr>
+<tr><td>deko_examples 02 Triangle</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td></td></tr>
+<tr><td>deko_examples 03 Cube</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td></td></tr>
+<tr><td>deko_examples 04 Textured Cube</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td></td></tr>
+<tr><td>deko_examples 05 Tessellation</td><td>gpu</td><td><span class="st" style="background:#da3633">broken</span></td><td>tessellation stages not implemented</td></tr>
+<tr><td>deko_examples 06 Multisampling</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td>4x MSAA, 2D-engine resolve</td></tr>
+<tr><td>deko_examples 07 Mesh and Lighting (sRGB)</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td></td></tr>
+<tr><td>deko_examples 08 Deferred Shading</td><td>gpu</td><td><span class="st" style="background:#238636">works</span></td><td>three render targets</td></tr>
+<tr><td>deko_examples 09 Compute Shader</td><td>gpu</td><td><span class="st" style="background:#d29922">partial</span></td><td>line smoothing not done</td></tr>
+</tbody></table>
+<footer>Kernel-call names follow switchbrew; shader encodings come from envytools
+(MIT). Homebrew status is kept by hand in docs/data/compat.json.</footer>
+</main></body></html>
