@@ -138,7 +138,8 @@ other feature in this repository.
    the clear colour shows through `vi`.
 3. **M2, a Vulkan backend for what M1 does (weeks).** Same results, on the
    host GPU. This is where window and GPU meet; the X11 window gets a
-   Vulkan swapchain.
+   Vulkan swapchain. The design, in verifiable steps, is in
+   [M2 design](#m2-design-a-vulkan-backend-behind-the-command-processor).
 4. **M3, shaders (months).** Decode Maxwell SASS for vertex and fragment
    stages (the instructions deko3d's compiler emits for simple GLSL), vertex
    fetch, constant buffers, rasterisation state; on the CPU first, then
@@ -160,6 +161,174 @@ other feature in this repository.
    Still open: BC6/BC7, 3D and cube textures, SDL2 through Mesa.
 6. **M5, the rest (open-ended).** Compute, queries, transform feedback,
    tessellation and geometry stages, as real homebrew needs them.
+
+## M2 design: a Vulkan backend behind the command processor
+
+Everything above the backend stays as it is. `nvgpu.c` walks the GPFIFO and
+feeds every method to `gpu_engines_method`; `gpu_engines.c` keeps one
+register file per engine (0x2000 words), runs the macro processor, and acts
+on the few methods that do something: a clear (`clear_surface`), a draw
+(`draw_method`, which hands a `gpu_draw_state` to `gpu_draw.c`), a DMA copy,
+an inline upload, a report semaphore, a compute launch. Those actions are the
+seam. M2 puts an interface behind them and a second implementation of it;
+the CPU path becomes the first implementation and the reference the second
+is tested against.
+
+### The seam
+
+```
+struct gpu_backend {
+    clear(regs, surface_bits)          draw(state, topology, indices, ...)
+    copy(regs)                         upload(va, data, len)
+    compute(regs)                      semaphore(va, payload, four_words)
+    flush()                            present(layer, va) -> host pixels
+};
+```
+
+`HOS_GPU=cpu` (the default while M2 is incomplete) selects today's code;
+`HOS_GPU=vulkan` the new one. Each call takes the register file it needs, as
+the CPU functions do now, so the state tracker does not change. Ordering is
+the backend's problem: the CPU backend executes a call when it is made, the
+Vulkan backend records it into the command buffer of the current submit and
+executes it at `flush()` (the end of `SUBMIT_GPFIFO`), which is also where a
+semaphore's payload must land in memory, and the syncpoint increment the
+game waits on, only after the GPU is done.
+
+### Memory
+
+Guest memory is host memory, and nvmap allocations are page-aligned, so the
+first choice is to import them (`VK_EXT_external_memory_host`) as
+`VkBuffer`s and let the GPU read vertex, index and constant buffers in
+place; where the driver lacks the extension (verify on lavapipe in M2.1), a
+staging buffer per allocation is uploaded at `flush()` for the ranges
+written since the last one, which the existing nvmap mapping code can track
+by page. Images are different: render targets and textures live in memory as
+block-linear surfaces, and the GPU needs `VkImage`s. A surface cache keyed
+by address, format, size and layout gives each one an image; uploads go
+through `swizzle.c` into a linear staging buffer and `vkCmdCopyBufferToImage`,
+and the way back (a frame for `vi`, a buffer the game reads) is the same in
+reverse, after the fence. A GPU-side swizzle in a compute shader can replace
+the CPU one later without changing the contract.
+
+Coherence between the paths is the one rule to keep: memory the GPU may have
+written is not read on the CPU (by `vi`, a DMA copy, `nvhost-ctrl` or the
+game after a semaphore) until that submit's fence has signalled. The Vulkan
+backend therefore keeps a list of surfaces written per submit and reads them
+back on the first CPU access, or at `flush()` for those `vi` presents.
+
+### Shaders: SASS to SPIR-V
+
+The interpreter already decodes a program once into `pinsn` entries
+(opcode, guard, registers, operand B resolved to register, constant buffer
+word or immediate; `gpu_shader_impl.h`). The translator walks that same
+form, so every instruction added for the CPU path has one more handler to
+write, and nothing is decoded twice. The output
+is SPIR-V built directly (a small writer: ids, types, decorations; no
+glslang or SPIRV-Tools at run time), one module per shader address, cached
+with the decoded program.
+
+- Registers become function-scope variables, written and read as the SASS
+  does, and SPIR-V's own passes in the driver clean them up; no SSA
+  construction on our side.
+- Predicates likewise; a guarded instruction is a conditional block.
+- Attributes, constant buffers, textures and outputs map by the addresses
+  the interpreter already knows (0x70 position, 0x80 + 16i attributes, IPA
+  addresses for fragment inputs, `TEXS`/`TEX`/`TLDS` texture indices into the
+  stage's texture constant buffer), onto SPIR-V locations, uniform buffers
+  and combined image samplers; the SPH output map picks fragment outputs.
+- Control flow is the hard part: SASS is unstructured (`BRA`, `SSY`/`SYNC`,
+  `PBK`/`BRK`) and SPIR-V must be structured. deko3d's compiler emits
+  reducible graphs from GLSL, so the translator recognises the `SSY`
+  reconvergence point as the merge block of an `if`, and a backward `BRA`
+  under a predicate as a loop with the `PBK` target as its merge. A shader
+  whose graph it cannot structure is reported, not guessed, and that draw
+  falls back to the CPU path (which, with the coherence rule above, costs a
+  readback of the targets but gives the right picture).
+- Arithmetic differs where the hardware does: `ftz` flags, `MUFU`
+  approximations, the canonical NaN. Tests compare the two paths at a
+  tolerance (1 in 255 per channel, as the reference checks do today) rather
+  than bit for bit.
+
+The translator's own test runs every compiled shader in the repository
+(`tests/test_shader_group` already enumerates them) through the interpreter
+and through lavapipe: the vertex and fragment programs each wrapped in a
+compute dispatch over a buffer of inputs, outputs compared. Rendering tests
+then cover what the wrapper cannot (interpolation, derivatives, blending).
+
+### State to pipelines
+
+A draw's Maxwell state is already in the register file; the backend hashes
+the words that select a `VkGraphicsPipeline` (shader addresses, vertex
+attribute formats 0x458, topology, cull and front face 0x646-0x648, depth
+test and function, blend enables and factors 0x4D8/0x780, colour write
+masks 0x680, target formats, sample count 0x574) and keeps a pipeline per
+hash. Everything Vulkan allows to be dynamic stays out of the hash:
+viewports, scissors, line width, depth bias, blend constants, and with
+`VK_EXT_extended_dynamic_state` the cull mode and depth settings too.
+Render passes are `VK_KHR_dynamic_rendering` (Vulkan 1.3; lavapipe has it)
+over the target images from 0x200 and the depth target from 0x3F8, so a
+change of targets is a new rendering scope, not a new object. Textures are a
+cache from TIC/TSC words to `VkImageView` and `VkSampler`; descriptor sets
+are allocated per draw from a pool reset at each submit, which is simple and
+enough for the hundreds of draws a frame has here. The 2D engine's resolve
+blit (MSAA, example 06) becomes `vkCmdResolveImage` or a blit; the DMA
+engine's copies between GPU-resident surfaces become `vkCmdCopyImage`.
+
+### What stays on the CPU
+
+The pushbuffer decoder, the macro processor, the state tracker, inline
+uploads (a `memcpy` into guest memory, followed by a staging upload if the
+range is GPU-resident), `vi` and its frame dump, and everything the Vulkan
+backend does not do yet: a draw it cannot translate, compute launches until
+compute shaders translate too, queries. The window keeps presenting through
+X11 from host pixels at first; a Vulkan swapchain for `HOS_WINDOW` is the
+last step, when the frame no longer needs to come back to the CPU.
+
+### lavapipe in CI
+
+The arm64 job (`ubuntu-24.04-arm`) installs `mesa-vulkan-drivers` and runs
+the Vulkan tests natively with `VK_DRIVER_FILES` pointing at lavapipe and no
+window; frames come back through the readback path, so the existing checks
+(`check_deko3d_*`) run unchanged against the Vulkan backend. The cross job
+keeps the CPU path: lavapipe under qemu-user would be an ARM64 driver JIT
+compiling under emulation, which is possible but not something CI should
+wait for. Vulkan is a build-time option (`S2PC_VULKAN`, on when `libvulkan`
+and the headers are found) so the WSL2 and Codespaces setups without a
+driver build as today.
+
+### Steps and exit criteria
+
+1. **M2.0, the seam.** `gpu_backend` with the CPU implementation behind it,
+   `HOS_GPU` honoured. Exit: every test passes unchanged; `scripts/bench_deko.sh`
+   shows no loss.
+2. **M2.1, device and memory.** Instance and device (lavapipe or a real
+   driver), the nvmap import or staging path, clears and copies through
+   Vulkan, readback for `vi`. Exit: `smoke_deko3d` (M0/M1: clears, inline
+   uploads, DMA copies, the image round trip) passes with `HOS_GPU=vulkan`
+   on lavapipe in the arm64 job, frames byte-identical to the CPU path.
+3. **M2.2, shaders.** The translator for the instructions the five reference
+   scenes use, the compute-dispatch comparison test over every `.dksh` in the
+   repository. Exit: the comparison test passes on lavapipe for the triangle,
+   cube, depth/blend and texture shaders, and the translator rejects (rather
+   than mistranslates) every other shader in the repository it does not
+   cover.
+4. **M2.3, pipelines, state, textures.** Exit: `check_deko3d_triangle`,
+   `check_deko3d_cube`, `check_deko3d_depthblend` and `check_deko3d_texture`
+   pass with `HOS_GPU=vulkan` at the same tolerance as today, and
+   deko_examples 02, 03 and 04 match the CPU path's frames within 1.
+5. **M2.4, synchronisation and the window.** Semaphore payloads and syncpoint
+   increments after the fence, the coherence rule, the swapchain for
+   `HOS_WINDOW`. Exit: `smoke_deko3d`'s 60 frames present without a stall
+   longer than a frame; on native ARM64 with a GPU, example 04 at 60 frames
+   per second under `HOS_VSYNC` (`scripts/bench_deko.sh`).
+6. **M2.5, the rest of the examples.** Multisampling and the resolve, three
+   render targets, RGBA16F, compute as SPIR-V compute, and the tessellation
+   stages through Vulkan's own once the CPU path has them. Exit: every
+   deko_example that renders on the CPU path matches it within 1 with
+   `HOS_GPU=vulkan`.
+
+Each step is a pull request on its own; the CPU path stays the default until
+M2.4, and stays available after it, since it is the reference.
 
 ## What M0 taught
 
