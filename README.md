@@ -53,7 +53,7 @@ DOOM, Quake and OpenTyrian (stock SDL2 ports) are playable with keyboard and
 sound; the libnx examples work; devkitPro's deko3d examples render, from a
 triangle to MSAA, sRGB lighting, deferred shading and compute shaders, all but
 tessellation. Kernel calls, shader instructions, IPC commands, the homebrew
-list and their history are on the [status page](docs/status.html), generated
+list and their history are on the [status page](https://ctj01.github.io/switch2pc/status.html), generated
 from the sources by `scripts/gen_status.py`.
 
 Contributions are welcome: grey squares on the status page are unimplemented
@@ -357,7 +357,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Good first targets, each self-contained
 with a test to write: #41 (DNS lookups for `sfdnsres` over the host resolver),
 #26 (vsync pacing), #11 (a libFuzzer harness for the NSO, MOD0 and HIPC
 parsers), #15 (priority-ordered wake-ups), and any grey square on the
-[status page](docs/status.html) under shader instructions: the interpreter's
+[status page](https://ctj01.github.io/switch2pc/status.html) under shader instructions: the interpreter's
 tests show how one is added and checked.
 
 ## Legal
