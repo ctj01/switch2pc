@@ -169,10 +169,10 @@
       "licence": "GPL-3.0",
       "category": "utility",
       "dkp_packages": [],
-      "build": "CFLAGS=-D_GNU_SOURCE make switch",
+      "build": "CFLAGS=-D_GNU_SOURCE LIBS=\"-Wl,--whole-archive -lharfbuzz -Wl,--no-whole-archive\" make switch",
       "nro": "appstore.nro",
       "duration_ms": 12000,
-      "notes": "Homebrew App Store: SDL2 (chesto), curl over TLS to the repository, fonts via SDL_ttf. Built with CFLAGS=-D_GNU_SOURCE: chesto's -D_XOPEN_SOURCE hides strdup and GCC 15 makes the implicit declaration an error."
+      "notes": "Homebrew App Store: SDL2 (chesto), curl over TLS to the repository, fonts via SDL_ttf. Build workarounds for current portlibs and GCC 15: -D_GNU_SOURCE (chesto's -D_XOPEN_SOURCE hides strdup, now an error), harfbuzz linked in (freetype 2.13 needs it, chesto's link line predates that), serial make (chesto's Makefile races under -j)."
     },
     {
       "name": "nx-shell",

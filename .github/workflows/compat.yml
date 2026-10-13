@@ -5,6 +5,8 @@
 name: compat
 
 on:
+  push:
+    branches: [compat-nightly]   # temporary: exercise the pipeline while it is developed on this branch
   schedule:
     - cron: '0 3 * * *'
   workflow_dispatch:
