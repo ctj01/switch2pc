@@ -115,6 +115,9 @@ HOS_EXPORT hos_result hos_cpu_init(const hos_cpu_params *p);
  */
 HOS_EXPORT void hos_svc_dispatch(uint32_t id, hos_svc_regs *r);
 
+/** Test hook: how many threads are parked on `key` (a mutex, condvar or arbiter address). */
+HOS_EXPORT int32_t hos_sync_waiters_on(uint64_t key);
+
 /**
  * Turn the calling thread into the HOS main thread and jump to `entry` with
  * x0 = 0, x1 = main thread handle and a fresh stack. Does not return; the game

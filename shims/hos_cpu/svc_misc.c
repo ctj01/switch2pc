@@ -105,7 +105,7 @@ void svc_get_thread_priority(hos_svc_regs *r) {
         return;
     }
     r->x[0] = HOS_RESULT_SUCCESS;
-    r->x[1] = (uint32_t)t->priority;
+    r->x[1] = (uint32_t)__atomic_load_n(&t->priority, __ATOMIC_RELAXED);
 }
 
 void svc_set_thread_priority(hos_svc_regs *r) {
@@ -116,6 +116,7 @@ void svc_set_thread_priority(hos_svc_regs *r) {
     }
     /* sync.c reads it when choosing which waiter to wake. */
     __atomic_store_n(&t->priority, (int32_t)r->x[1], __ATOMIC_RELAXED);
+    hos_sync_priority_changed(t);
     r->x[0] = HOS_RESULT_SUCCESS;
 }
 

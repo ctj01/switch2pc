@@ -119,7 +119,8 @@ removes it from the list first, so a timeout and a wake cannot both claim it.
 The list is in arrival order and a wake picks the highest-priority waiter on
 the key (lowest number, as the kernel does), the earliest arrival among equals,
 reading the thread's priority at that moment rather than at park time, so a
-`SetThreadPriority` on a parked thread moves it at once.
+`SetThreadPriority` on a parked thread moves it at once, behind the waiters
+of its new priority, as the kernel re-inserts it.
 Mutexes follow the kernel contract exactly: the user word holds the owner
 handle, bit 30 means "someone is parked", `ArbitrateUnlock` hands the word to
 the next waiter. `WaitProcessWideKeyAtomic` releases the mutex, parks on the

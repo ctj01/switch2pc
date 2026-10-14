@@ -133,10 +133,23 @@ __asm__(".text\n"
         "    mov x3, #-1\n"
         "    brk #0x1C\n" WAKE_RECORD "    brk #0x0A\n"
         "    b .\n"
-        ".size test_wake_condvar_entry, . - test_wake_condvar_entry\n");
+        ".size test_wake_condvar_entry, . - test_wake_condvar_entry\n"
+        ".globl test_wake_condvar_mutex_entry\n"
+        ".type test_wake_condvar_mutex_entry, %function\n"
+        "test_wake_condvar_mutex_entry:\n" WAKE_PROLOGUE
+        "    mov x0, x26\n" /* as above, then hand the (shared) mutex on */
+        "    mov x1, x20\n"
+        "    mov w2, w25\n"
+        "    mov x3, #-1\n"
+        "    brk #0x1C\n" WAKE_RECORD "    mov x0, x26\n"
+        "    brk #0x1B\n"
+        "    brk #0x0A\n"
+        "    b .\n"
+        ".size test_wake_condvar_mutex_entry, . - test_wake_condvar_mutex_entry\n");
 extern void test_wake_arbiter_entry(void);
 extern void test_wake_mutex_entry(void);
 extern void test_wake_condvar_entry(void);
+extern void test_wake_condvar_mutex_entry(void);
 
 static int g_inited;
 
@@ -431,8 +444,40 @@ static int poll_u32(volatile uint32_t *p, uint32_t want) {
     return 0;
 }
 
-/* Create and start the threads one at a time; each is parked before the next starts. */
-static int wake_fixture_start(wake_fixture *f, void (*entry)(void), volatile void *key) {
+/* Wait until `n` threads are parked on `key` (hos_cpu's test hook). */
+static int poll_parked(volatile void *key, int32_t n) {
+    for (int i = 0; i < 5000; i++) {
+        if (hos_sync_waiters_on((uint64_t)key) == n) {
+            return 1;
+        }
+        call(0x0B, 1000000, 0, 0, 0);
+    }
+    return 0;
+}
+
+/* After a failed start: release whatever parked on `key` so the threads can exit. */
+static void wake_fixture_abort(wake_fixture *f, volatile void *key, volatile uint32_t *mutex) {
+    call(0x35, (uint64_t)key, 0, 0, (uint64_t)(uint32_t)-1); /* SignalToAddress, all */
+    call(0x1D, (uint64_t)key, (uint64_t)(uint32_t)-1, 0, 0); /* SignalProcessWideKey, all */
+    for (int i = 0; i < WAKE_N; i++) {
+        call(0x1B, (uint64_t)&f->mutexes[i], 0, 0, 0); /* ArbitrateUnlock the own mutexes */
+    }
+    if (mutex) {
+        call(0x1B, (uint64_t)mutex, 0, 0, 0);
+    }
+    for (int i = 0; i < WAKE_N; i++) {
+        if (f->handles[i]) {
+            wait_one(f->handles[i], 1000000000ull);
+            call(0x16, f->handles[i], 0, 0, 0);
+        }
+    }
+}
+
+/* Create and start the threads one at a time; each is parked on `key` before the
+ * next starts, so arrival order is known. `mutex`, when given, is the condvar
+ * body's mutex, shared by all four and held by the test. */
+static int wake_fixture_start_on(wake_fixture *f, void (*entry)(void), volatile void *key,
+                                 volatile uint32_t *mutex) {
     memset(f, 0, sizeof(*f));
     for (int i = 0; i < WAKE_N; i++) {
         f->args[i].key = (uint64_t)key;
@@ -440,25 +485,27 @@ static int wake_fixture_start(wake_fixture *f, void (*entry)(void), volatile voi
         f->args[i].count = (uint64_t)&f->count;
         f->args[i].id = (uint64_t)(i + 1);
         f->args[i].flag = (uint64_t)&f->flags[i];
-        f->args[i].mutex = (uint64_t)&f->mutexes[i];
+        f->args[i].mutex = (uint64_t)(mutex ? mutex : &f->mutexes[i]);
         f->handles[i] = create_thread_prio(entry, &f->args[i], k_wake_prio[i], &f->stacks[i]);
         if (!f->handles[i]) {
+            wake_fixture_abort(f, key, mutex);
             return 0;
         }
         f->args[i].self = f->handles[i];
         f->mutexes[i] = f->handles[i];
     }
     for (int i = 0; i < WAKE_N; i++) {
-        if (call(0x09, f->handles[i], 0, 0, 0).x[0] != HOS_RESULT_SUCCESS) {
+        if (call(0x09, f->handles[i], 0, 0, 0).x[0] != HOS_RESULT_SUCCESS ||
+            !poll_parked(key, i + 1)) {
+            wake_fixture_abort(f, key, mutex);
             return 0;
         }
-        if (!poll_u32(&f->flags[i], 1)) {
-            return 0;
-        }
-        /* The flag goes up just before the svc; give the thread time to park. */
-        call(0x0B, 50000000, 0, 0, 0);
     }
     return 1;
+}
+
+static int wake_fixture_start(wake_fixture *f, void (*entry)(void), volatile void *key) {
+    return wake_fixture_start_on(f, entry, key, NULL);
 }
 
 static int wake_fixture_finish(wake_fixture *f) {
@@ -477,17 +524,36 @@ TEST(svc_wake_order_address_arbiter) {
     static volatile int32_t word;
     word = 0;
     ASSERT_TRUE(wake_fixture_start(&f, test_wake_arbiter_entry, &word));
-    /* A parked thread whose priority is raised moves to the front. */
-    ASSERT_EQ(call(0x0D, f.handles[0], 10, 0, 0).x[0], HOS_RESULT_SUCCESS);
+    /* A parked thread whose priority changes re-queues behind its new peers. */
+    ASSERT_EQ(call(0x0D, f.handles[0], 30, 0, 0).x[0], HOS_RESULT_SUCCESS);
     for (uint32_t n = 1; n <= WAKE_N; n++) {
         ASSERT_EQ(call(0x35, (uint64_t)&word, 0, 0, 1).x[0], HOS_RESULT_SUCCESS); /* one */
         ASSERT_TRUE(poll_u32(&f.count, n));
     }
     ASSERT_TRUE(wake_fixture_finish(&f));
-    ASSERT_EQ(f.order[0], 1); /* A, now prio 10 */
-    ASSERT_EQ(f.order[1], 2); /* B, 30, arrived before D */
-    ASSERT_EQ(f.order[2], 4); /* D, 30 */
+    ASSERT_EQ(f.order[0], 2); /* B, 30 */
+    ASSERT_EQ(f.order[1], 4); /* D, 30 */
+    ASSERT_EQ(f.order[2], 1); /* A, now 30, behind B and D */
     ASSERT_EQ(f.order[3], 3); /* C, 40 */
+}
+
+TEST(svc_wake_order_raised_priority_goes_first) {
+    init_once();
+    static wake_fixture f;
+    static volatile int32_t word;
+    word = 0;
+    ASSERT_TRUE(wake_fixture_start(&f, test_wake_arbiter_entry, &word));
+    ASSERT_EQ(call(0x0D, f.handles[2], 28, 0, 0).x[0], HOS_RESULT_SUCCESS); /* C to 28 */
+    for (uint32_t n = 1; n <= WAKE_N; n++) {
+        ASSERT_EQ(call(0x35, (uint64_t)&word, 0, 0, 1).x[0], HOS_RESULT_SUCCESS); /* one */
+        ASSERT_TRUE(poll_u32(&f.count, n));
+    }
+    ASSERT_TRUE(wake_fixture_finish(&f));
+    ASSERT_EQ(hos_sync_waiters_on((uint64_t)&word), 0);
+    ASSERT_EQ(f.order[0], 3); /* C, 28 */
+    ASSERT_EQ(f.order[1], 2); /* B, 30 */
+    ASSERT_EQ(f.order[2], 4); /* D, 30 */
+    ASSERT_EQ(f.order[3], 1); /* A, 50 */
 }
 
 TEST(svc_wake_order_mutex_handoff) {
@@ -529,6 +595,89 @@ TEST(svc_wake_order_condvar) {
     ASSERT_EQ(f.order[1], 4);
     ASSERT_EQ(f.order[2], 3);
     ASSERT_EQ(f.order[3], 1);
+}
+
+/* Condvar waiters whose mutex is held move onto it in priority order, and one
+ * unlock drains the chain; signalling everyone clears the key. */
+TEST(svc_wake_order_condvar_onto_contended_mutex) {
+    init_once();
+    static wake_fixture f;
+    static volatile uint32_t cv, mutex;
+    cv = 1;
+    mutex = 0;
+    ASSERT_TRUE(wake_fixture_start_on(&f, test_wake_condvar_mutex_entry, &cv, &mutex));
+    ASSERT_EQ(mutex, 0);                    /* each wait released it */
+    mutex = hos_cpu_adopt_current_thread(); /* now held by the test thread */
+    ASSERT_EQ(call(0x1D, (uint64_t)&cv, (uint64_t)(uint32_t)-1, 0, 0).x[0], HOS_RESULT_SUCCESS);
+    ASSERT_TRUE(poll_parked(&mutex, WAKE_N)); /* all moved onto the mutex */
+    ASSERT_EQ(cv, 0);
+    ASSERT_EQ(mutex & MUTEX_FLAG, MUTEX_FLAG);
+    ASSERT_EQ(f.count, 0);
+    ASSERT_EQ(call(0x1B, (uint64_t)&mutex, 0, 0, 0).x[0], HOS_RESULT_SUCCESS);
+    ASSERT_TRUE(poll_u32(&f.count, WAKE_N));
+    ASSERT_TRUE(wake_fixture_finish(&f));
+    ASSERT_EQ(mutex, 0);
+    ASSERT_EQ(f.order[0], 2);
+    ASSERT_EQ(f.order[1], 4);
+    ASSERT_EQ(f.order[2], 3);
+    ASSERT_EQ(f.order[3], 1);
+}
+
+/* SignalAndModifyByWaitingCountIfEqual (type 2) writes what the kernel would:
+ * one branch per test step. The word is 0 and `value` is 0 throughout. */
+static hos_svc_regs signal_modify(volatile int32_t *word, int32_t count) {
+    return call(0x35, (uint64_t)word, 2, 0, (uint64_t)(uint32_t)count);
+}
+
+TEST(svc_signal_modify_by_waiting_count_with_waiters) {
+    init_once();
+    static wake_fixture f;
+    static volatile int32_t word;
+    word = 0;
+    ASSERT_TRUE(wake_fixture_start(&f, test_wake_arbiter_entry, &word));
+    /* 4 waiting, count 1: three beyond the first, more than count: unchanged, one woken */
+    ASSERT_EQ(signal_modify(&word, 1).x[0], HOS_RESULT_SUCCESS);
+    ASSERT_EQ(word, 0);
+    ASSERT_TRUE(poll_u32(&f.count, 1));
+    word = 0;
+    /* 3 waiting, count 4: two beyond the first, within count: down by one, all woken */
+    ASSERT_EQ(signal_modify(&word, 4).x[0], HOS_RESULT_SUCCESS);
+    ASSERT_EQ(word, -1);
+    ASSERT_TRUE(poll_u32(&f.count, WAKE_N));
+    ASSERT_TRUE(wake_fixture_finish(&f));
+    word = 0;
+    /* nobody waiting: up by one, whatever the count */
+    ASSERT_EQ(signal_modify(&word, 1).x[0], HOS_RESULT_SUCCESS);
+    ASSERT_EQ(word, 1);
+    word = 0;
+    ASSERT_EQ(signal_modify(&word, 0).x[0], HOS_RESULT_SUCCESS);
+    ASSERT_EQ(word, 1);
+    /* the value must match */
+    ASSERT_EQ(signal_modify(&word, 1).x[0], HOS_KERNEL_INVALID_STATE);
+}
+
+TEST(svc_signal_modify_by_waiting_count_all_and_single) {
+    init_once();
+    static wake_fixture f;
+    static volatile int32_t word;
+    word = 0;
+    ASSERT_TRUE(wake_fixture_start(&f, test_wake_arbiter_entry, &word));
+    /* count <= 0 with waiters: down by two, everyone woken */
+    ASSERT_EQ(signal_modify(&word, -1).x[0], HOS_RESULT_SUCCESS);
+    ASSERT_EQ(word, -2);
+    ASSERT_TRUE(poll_u32(&f.count, WAKE_N));
+    ASSERT_TRUE(wake_fixture_finish(&f));
+    ASSERT_EQ(hos_sync_waiters_on((uint64_t)&word), 0);
+    word = 0;
+    ASSERT_TRUE(wake_fixture_start(&f, test_wake_arbiter_entry, &word));
+    /* leave one waiter (plain signal of three), then count 1: none beyond it, up by one */
+    ASSERT_EQ(call(0x35, (uint64_t)&word, 0, 0, 3).x[0], HOS_RESULT_SUCCESS);
+    ASSERT_TRUE(poll_u32(&f.count, 3));
+    ASSERT_TRUE(poll_parked(&word, 1));
+    ASSERT_EQ(signal_modify(&word, 1).x[0], HOS_RESULT_SUCCESS);
+    ASSERT_EQ(word, 1);
+    ASSERT_TRUE(poll_u32(&f.count, WAKE_N));
+    ASSERT_TRUE(wake_fixture_finish(&f));
 }
 
 TEST(svc_address_arbiter_fast_paths) {
