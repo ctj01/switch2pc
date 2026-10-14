@@ -41,8 +41,8 @@ typedef struct tess_output {
  * Segments an edge with tessellation level `level` is cut into under `spacing`
  * (TESS_*): the level rounded up and clamped to [1, 64], to the next even count
  * from 2 for fractional-even, to the next odd count for fractional-odd.
- * Fractional modes place their segments evenly here, where the hardware
- * shrinks two of them as the level grows: an approximation.
+ * FIXME(#44): fractional modes place their segments evenly here, where the
+ * hardware shrinks two of them as the level grows.
  */
 uint32_t tess_segments(float level, uint32_t spacing);
 
