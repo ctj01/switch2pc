@@ -16,6 +16,9 @@
  * Enter = Plus, Esc = Minus, WASD = left stick.
  */
 
+/** Whether HOS_WINDOW asks for a window (so frames are worth decoding for it). */
+int display_x11_wanted(void);
+
 /** Present one 8-bit RGB frame. Opens the window on first use; returns 0 if shown. */
 int display_x11_present(const uint8_t *rgb, uint32_t width, uint32_t height);
 

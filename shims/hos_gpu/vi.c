@@ -4,7 +4,8 @@
  * screen: a queued buffer is consumed on the spot (the "null compositor"),
  * and when HOS_FRAMES names a directory each frame is deswizzled from the
  * game's memory and written there as a PPM image. The presenting thread is
- * then held until the next 60 Hz refresh (vsync.h), unless HOS_VSYNC=0.
+ * then held while the previous frame waits for its 60 Hz refresh (vsync.h),
+ * unless HOS_VSYNC=0.
  */
 
 #include <inttypes.h>
@@ -64,6 +65,7 @@ typedef struct vi_layer {
     void *buffer_event;
     uint32_t buffer_event_handle;
     uint32_t frames;
+    uint64_t shown_at; /* the refresh the last queued frame goes up at (vsync.h) */
 } vi_layer;
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -73,6 +75,7 @@ static uint64_t g_next_layer_id = 1;
 static void *g_vsync_event;
 static uint32_t g_vsync_handle;
 static pthread_t g_vsync_thread;
+static uint32_t g_vsync_queued, g_vsync_held; /* paced frames, and those that waited */
 
 static uint8_t *g_linear;
 static size_t g_linear_size;
@@ -156,6 +159,9 @@ static void report_frames(void) {
     if (g_frame_counter) {
         HOS_LOGI(MOD, "frames presented: %u", g_frame_counter);
     }
+    if (g_vsync_queued) {
+        HOS_LOGI(MOD, "vsync: %u frames queued, %u held", g_vsync_queued, g_vsync_held);
+    }
 }
 
 static void dump_frame(vi_layer *layer, const uint8_t *gb) {
@@ -173,6 +179,14 @@ static void dump_frame(vi_layer *layer, const uint8_t *gb) {
 
     layer->frames++;
     g_frame_counter++;
+    /* Decoding a frame costs more than a refresh under emulation; do it only for a
+     * consumer: the window, a dump, the live view or the log line below. */
+    int noisy = g_frame_counter <= 10 || (g_frame_counter % 100) == 0;
+    const char *dir = getenv("HOS_FRAMES"), *live = getenv("HOS_FRAMES_LIVE");
+    if (!display_x11_wanted() && !(dir && *dir) && !(live && *live) &&
+        hos_log_get_level() < (noisy ? HOS_LOG_INFO : HOS_LOG_DEBUG)) {
+        return;
+    }
     if (!nv_map_lookup(nvmap_id, &addr, &size)) {
         HOS_LOGW(MOD, "frame %u: nvmap handle %u unknown", g_frame_counter, nvmap_id);
         return;
@@ -253,7 +267,6 @@ static void dump_frame(vi_layer *layer, const uint8_t *gb) {
     /* The window (HOS_WINDOW=1) opens on the first frame; see display_x11.h. */
     display_x11_present(g_rgb, width, height);
 
-    const char *dir = getenv("HOS_FRAMES");
     const char *every_s = getenv("HOS_FRAMES_EVERY");
     unsigned every = every_s ? (unsigned)strtoul(every_s, NULL, 10) : 1;
     if (dir && *dir && every && (g_frame_counter % every) == 0) {
@@ -268,11 +281,9 @@ static void dump_frame(vi_layer *layer, const uint8_t *gb) {
             fclose(f);
         }
     }
-    const char *live = getenv("HOS_FRAMES_LIVE");
     if (live && *live) {
         write_bmp(live, g_rgb, width, height);
     }
-    int noisy = g_frame_counter <= 10 || (g_frame_counter % 100) == 0;
     hos_log(noisy ? HOS_LOG_INFO : HOS_LOG_DEBUG, MOD,
             "frame %u: %ux%u format %u, %zu non-black pixels", g_frame_counter, width, height,
             format, lit);
@@ -303,6 +314,7 @@ static int32_t bq_transact(vi_layer *layer, uint32_t code, parcel_reader *in, pa
         (void)listener;
         (void)controlled;
         layer->connected = 1;
+        layer->shown_at = 0;
         uint32_t output[4] = {DISPLAY_WIDTH, DISPLAY_HEIGHT, 0, 0};
         parcel_write_data(out, output, sizeof(output));
         HOS_LOGD(MOD, "layer %" PRIu64 ": connect api %d", layer->id, api);
@@ -382,17 +394,33 @@ static int32_t bq_transact(vi_layer *layer, uint32_t code, parcel_reader *in, pa
         /* QueueBufferInput follows (timestamp, crop, scaling, transform, fence); consumed now */
         dump_frame(layer, layer->slots[slot].buffer);
         if (vsync_enabled()) {
-            /* Hold the presenter until the refresh that shows this frame, with
-             * neither our lock nor the IPC request lock held: other threads keep
-             * talking to vi and to every other service meanwhile. The slot stays
-             * DEQUEUED, so nothing else hands it out. */
-            pthread_mutex_unlock(&g_lock);
-            hos_ipc_blocking_begin();
-            vsync_wait_next();
-            hos_ipc_blocking_end();
-            pthread_mutex_lock(&g_lock);
+            /* One frame may wait for its refresh: hold the presenter while the previous
+             * one does, with neither our lock nor the IPC request lock held, so other
+             * threads keep talking to vi and to every other service meanwhile. The slot
+             * is QUEUED during the hold: nothing hands it out, queues or cancels it. */
+            uint64_t now = vsync_now_ns(), hold = vsync_hold_until(layer->shown_at, now);
+            layer->slots[slot].state = SLOT_QUEUED;
+            g_vsync_queued++;
+            if (hold) {
+                g_vsync_held++;
+                pthread_mutex_unlock(&g_lock);
+                hos_ipc_blocking_begin();
+                vsync_sleep_until(hold);
+                hos_ipc_blocking_end();
+                pthread_mutex_lock(&g_lock);
+                now = vsync_now_ns();
+            }
+            layer->shown_at = vsync_advance(layer->shown_at, now);
+            if (layer->slots[slot].state == SLOT_QUEUED && layer->connected) {
+                layer->slots[slot].state = SLOT_FREE; /* a disconnect meanwhile emptied it */
+            }
+        } else {
+            layer->slots[slot].state = SLOT_FREE;
+            if (g_vsync_event) {
+                /* Unpaced: a game that waits for vsync between frames is not held to 60 Hz. */
+                hos_ipc_event_signal(g_vsync_event);
+            }
         }
-        layer->slots[slot].state = SLOT_FREE;
         signal_buffer_event(layer);
         uint32_t output[4] = {DISPLAY_WIDTH, DISPLAY_HEIGHT, 0, 0};
         parcel_write_data(out, output, sizeof(output));

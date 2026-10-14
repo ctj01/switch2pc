@@ -230,6 +230,10 @@ static int window_wanted(void) {
     return w && (strcmp(w, "1") == 0 || strcmp(w, "x11") == 0);
 }
 
+int display_x11_wanted(void) {
+    return window_wanted();
+}
+
 /* First frame: open the display and the window at frame size x scale. */
 static int open_window(uint32_t fw, uint32_t fh) {
     if (!window_wanted()) {
@@ -342,6 +346,11 @@ void display_x11_quit(void) {
 }
 
 #else /* !HAVE_X11: built without libX11 for the target */
+
+int display_x11_wanted(void) {
+    const char *w = getenv("HOS_WINDOW"); /* so present() can say there is no X11 */
+    return w && *w && strcmp(w, "0") != 0;
+}
 
 int display_x11_present(const uint8_t *rgb, uint32_t width, uint32_t height) {
     static int warned;

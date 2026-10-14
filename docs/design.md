@@ -227,15 +227,20 @@ unused pair, so buffer lookups must skip null entries; and `DequeueBuffer` must
 always return a flattened `NvMultiFence` (with zero fences), because the client
 does not initialise its copy when the reply says there is none.
 
-Vsync (#26): the console's compositor shows one frame per 60 Hz refresh, so
-`QueueBuffer` holds the presenting thread until the next refresh, with both the
-vi lock and the IPC request lock released meanwhile, and the vsync event
-(`GetDisplayVsyncEvent`) fires on the same grid. Refreshes are absolute
-deadlines on the monotonic clock, anchored at first use, so a late wake never
-shifts the next one. A game faster than 60 fps runs at 60; a slower one lands
-on the refresh after it finishes, as on hardware. `HOS_VSYNC=0` turns the
-pacing off, which is how the tests, `scripts/action_run.sh` and the
-benchmarks run, since there a frame is worth presenting as soon as it exists.
+Vsync (#26): the console's compositor shows one frame per 60 Hz refresh and a
+layer's queue is one frame deep, so `QueueBuffer` holds the presenting thread
+only while the previous frame still waits for its refresh (`vi_layer.shown_at`),
+with both the vi lock and the IPC request lock released meanwhile and the slot
+marked QUEUED; the vsync event (`GetDisplayVsyncEvent`) fires on the same grid.
+Refreshes are absolute deadlines on the monotonic clock, anchored once, so a
+late wake never shifts the next one. A game faster than 60 fps runs at 60; a
+slower one is never held and its frame goes up on the refresh after it is
+queued, as on hardware, so a 17 ms frame does not become 33. With
+`HOS_WINDOW=1` the window shows a frame when it is queued, up to one refresh
+before the console would. `HOS_VSYNC=0` turns the pacing off, which is how the
+tests, `scripts/action_run.sh` and the benchmarks run, since there a frame is
+worth presenting as soon as it exists; the vsync event then also fires per
+presented frame, so waiting for it does not hold a game to 60 Hz either.
 
 ### Window
 
