@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "nso/mod0.h"
 #include "nso/nro.h"
@@ -320,21 +322,33 @@ static void add_dyn(uint8_t *img, int64_t tag, uint64_t value) {
 }
 
 /*
- * A one-page image between two PROT_NONE pages: test_nso has no sanitizers, so
- * a read or write just outside the image must fault rather than pass. An image
- * shorter than a page sits at the end of its page, against the upper guard.
+ * An image between two PROT_NONE pages: test_nso has no sanitizers, so a read
+ * or write just outside the image must fault rather than pass. The image ends
+ * at the upper guard; with 4 KiB pages a one-page image also starts at the
+ * lower one, with larger pages only reads past the end fault.
  */
+static size_t page_size(void) {
+    long p = sysconf(_SC_PAGESIZE);
+    return p > 0 ? (size_t)p : 4096;
+}
+
 static uint8_t *guarded_image(size_t size) {
-    uint8_t *m = mmap(NULL, 3 * 0x1000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (m == MAP_FAILED || mprotect(m, 0x1000, PROT_NONE) != 0 ||
-        mprotect(m + 2 * 0x1000, 0x1000, PROT_NONE) != 0) {
+    size_t page = page_size(), span = (size + page - 1) / page * page;
+    uint8_t *m =
+        mmap(NULL, span + 2 * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (m == MAP_FAILED) {
         return NULL;
     }
-    return m + 2 * 0x1000 - size;
+    if (mprotect(m, page, PROT_NONE) != 0 || mprotect(m + page + span, page, PROT_NONE) != 0) {
+        munmap(m, span + 2 * page);
+        return NULL;
+    }
+    return m + page + span - size;
 }
 
 static void guarded_free(uint8_t *img, size_t size) {
-    munmap(img + size - 2 * 0x1000, 3 * 0x1000);
+    size_t page = page_size(), span = (size + page - 1) / page * page;
+    munmap(img + size - span - page, span + 2 * page);
 }
 
 /*
@@ -420,28 +434,37 @@ TEST(mod0_hash_tables_near_top_of_address_space) {
 }
 
 /* A GNU hash bucket table whose chains never terminate is walked once, not
- * once per bucket: the symbol count comes from the highest chain alone. */
+ * once per bucket: 16384 buckets into an unterminated chain of a quarter of a
+ * million words cost a quarter of a million reads, where a walk per bucket
+ * (four billion reads) ran for minutes. */
 TEST(mod0_gnu_hash_unterminated_chains_cost_one_walk) {
-    uint8_t *img = guarded_image(0x1000);
+    enum { SIZE = 0x100000, NBUCKETS = 16384 };
+    uint8_t *img = malloc(SIZE);
     ASSERT_TRUE(img != NULL);
+    memset(img, 0, SIZE);
     build_mod0_image(img);
-    /* header at 0x800: nbuckets 64, symoffset 1, bloom 0, shift 0; buckets all 1;
-     * chains (from 0x810 + 256) are zeros to the end of the image: no terminator */
-    put32(img + 0x800, 64);
-    put32(img + 0x804, 1);
-    put32(img + 0x808, 0);
-    put32(img + 0x80C, 0);
-    for (int b = 0; b < 64; b++) {
-        put32(img + 0x810 + 4 * b, 1);
+    /* header at 0x1000: nbuckets, symoffset 1, bloom 0, shift 0; every bucket starts
+     * chain 1; the chain words (from 0x1010 + 4 * NBUCKETS) are zeros to the end */
+    put32(img + 0x1000, NBUCKETS);
+    put32(img + 0x1004, 1);
+    for (int b = 0; b < NBUCKETS; b++) {
+        put32(img + 0x1010 + 4 * b, 1);
     }
-    memset(img + 0x910, 0, 0x1000 - 0x910);
-    add_dyn(img, DT_GNU_HASH, 0x800);
+    add_dyn(img, DT_GNU_HASH, 0x1000);
     mod0_info mi;
-    ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
-    mod0_module m = {.image = img, .size = 0x1000, .base = 0x10000, .info = mi};
+    ASSERT_EQ(mod0_find(img, SIZE, &mi), HOS_RESULT_SUCCESS);
+    mod0_module m = {.image = img, .size = SIZE, .base = 0x10000, .info = mi};
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
     uint64_t v = 0;
-    mod0_lookup(&m, "foo", &v); /* one walk to the end of the image, then done */
-    guarded_free(img, 0x1000);
+    ASSERT_EQ(mod0_lookup(&m, "foo", &v), 1); /* chain 1 starts at symbol 1, "foo" */
+    ASSERT_EQ(v, 0x10700);
+    mod0_reloc_stats st;
+    ASSERT_EQ(mod0_relocate(img, SIZE, 0x10000, &mi, &st), HOS_RESULT_SUCCESS);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double seconds = (double)(t1.tv_sec - t0.tv_sec) + (double)(t1.tv_nsec - t0.tv_nsec) / 1e9;
+    ASSERT_TRUE(seconds < 20.0); /* generous for qemu; the old walk takes minutes */
+    free(img);
 }
 
 /* Entry sizes other than the ones the walkers read are refused, not misparsed. */
