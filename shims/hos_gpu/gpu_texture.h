@@ -12,15 +12,21 @@
  * coordinate derivatives give. Field layouts follow the public Maxwell texture
  * header documentation (envytools gm200_texture.xml), as deko3d encodes them:
  *
- *   TIC word 0 format [6:0], swizzle [30:19]; words 1-2 address; word 2
+ *   TIC word 0 format [6:0], component types [18:7] (3 bits each, R first: 1
+ *   snorm, 2 unorm, 7 float), swizzle [30:19]; words 1-2 address; word 2
  *   [23:21] layout (2 pitch, 3 block-linear); word 3 block height [5:3] or
- *   pitch >> 5 [15:0], mip levels - 1 [31:28]; word 4 width - 1 [15:0] and
- *   texture type [26:23] (7: no mipmaps); word 5 height - 1 [15:0]; word 6 lod
- *   bias [18:6] (s8.5 in 1/256); word 7 view min level [3:0], max level [7:4].
+ *   pitch >> 5 [15:0], mip levels - 1 [31:28]; word 4 width - 1 [15:0], sRGB
+ *   [22] and texture type [26:23] (7: no mipmaps); word 5 height - 1 [15:0];
+ *   word 6 lod bias [18:6] (13 bits, s4.8); word 7 view min level [3:0], max
+ *   level [7:4], min lod clamp [23:12] (u4.8).
  *   TSC word 0 wrap u [2:0], v [5:3]; word 1 mag [1:0], min [5:4], mip [7:6]
  *   filters (1 nearest, 2 linear; mip 1 none, 2 nearest, 3 linear) and lod
  *   bias [24:12] (s4.8); word 2 min [11:0] and max [23:12] lod (u4.8); words
  *   4-7 the border colour.
+ *
+ * The level of detail follows OpenGL: the instruction's base (derivatives,
+ * .LL's level, 0 for .LZ) plus the .LB bias and the sampler's and image's
+ * biases, then clamped to the sampler's range (and the image's minimum).
  *
  * Mip levels follow level 0 in memory, each a block-linear surface of its own
  * whose block height shrinks with the level the way deko3d lays them out
@@ -36,6 +42,8 @@ typedef struct gpu_texture {
     int valid;           /* decoded, every level mapped */
     uint32_t format;     /* TIC format code */
     uint32_t swizzle;    /* TIC component sources, 3 bits per output */
+    int snorm;           /* component type 1: 8-bit and BC4/BC5 texels decode to -1..1 */
+    int srgb;            /* TIC sRGB: RGB of 8-bit and BC1-BC3 texels decode to linear */
     uint32_t block;      /* texels per side of a compressed block, else 1 */
     uint32_t unit_bytes; /* bytes per texel, or per block */
     int pitch_layout;
@@ -87,5 +95,12 @@ void gpu_tex_fetch(const gpu_texture *t, uint32_t level, int32_t x, int32_t y, f
  * green), unsigned. `tx`, `ty` in 0..3. Colours as floats in 0..1.
  */
 void gpu_bc_texel(uint32_t format, const uint8_t *block, uint32_t tx, uint32_t ty, float c[4]);
+
+/**
+ * BC4 and BC5 with signed endpoints (int8, -128 reads as -127): texels in -1..1,
+ * the six or four interpolated values between the endpoints, else -1 and 1.
+ */
+void gpu_bc_texel_snorm(uint32_t format, const uint8_t *block, uint32_t tx, uint32_t ty,
+                        float c[4]);
 
 #endif /* HOS_GPU_TEXTURE_H */

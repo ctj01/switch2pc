@@ -206,14 +206,24 @@ typedef struct tex_form {
 
 static inline tex_form texs_form(uint32_t f) {
     static const tex_form t[16] = {
-        [0] = {TEXC_A, SHADER_LOD_ZERO},       [1] = {TEXC_A_B, SHADER_LOD_IMPLICIT},
-        [2] = {TEXC_A_B, SHADER_LOD_ZERO},     [3] = {TEXC_A_A1, SHADER_LOD_EXPLICIT},
-        [4] = {TEXC_A_B, SHADER_LOD_IMPLICIT}, [5] = {TEXC_A_A1, SHADER_LOD_EXPLICIT},
-        [6] = {TEXC_A_B, SHADER_LOD_ZERO},     [7] = {TEXC_A1_B, SHADER_LOD_IMPLICIT},
-        [8] = {TEXC_A1_B, SHADER_LOD_ZERO},    [9] = {TEXC_A1_B, SHADER_LOD_ZERO},
-        [10] = {TEXC_UNSUPPORTED, 0},          [11] = {TEXC_UNSUPPORTED, 0},
-        [12] = {TEXC_UNSUPPORTED, 0},          [13] = {TEXC_UNSUPPORTED, 0},
-        [14] = {TEXC_UNSUPPORTED, 0},          [15] = {TEXC_UNSUPPORTED, 0},
+        [0] = {TEXC_A, SHADER_LOD_ZERO},
+        [1] = {TEXC_A_B, SHADER_LOD_IMPLICIT},
+        [2] = {TEXC_A_B, SHADER_LOD_ZERO},
+        [3] = {TEXC_A_A1, SHADER_LOD_EXPLICIT},
+        /* 4, 5, 6 and 9 compare depth (.DC): u = A, v = A+1 and the reference in B,
+         * against a sampler compare mode not implemented; the shader stops. */
+        [4] = {TEXC_UNSUPPORTED, 0},
+        [5] = {TEXC_UNSUPPORTED, 0},
+        [6] = {TEXC_UNSUPPORTED, 0},
+        [7] = {TEXC_A1_B, SHADER_LOD_IMPLICIT},
+        [8] = {TEXC_A1_B, SHADER_LOD_ZERO},
+        [9] = {TEXC_UNSUPPORTED, 0},
+        [10] = {TEXC_UNSUPPORTED, 0},
+        [11] = {TEXC_UNSUPPORTED, 0},
+        [12] = {TEXC_UNSUPPORTED, 0},
+        [13] = {TEXC_UNSUPPORTED, 0},
+        [14] = {TEXC_UNSUPPORTED, 0},
+        [15] = {TEXC_UNSUPPORTED, 0},
     };
     return t[f & 15];
 }
@@ -277,7 +287,8 @@ struct shader_prog {
     uint64_t *words;      /* copy of the decoded words */
     pinsn *ins;
     uint32_t n;
-    uint32_t refs; /* under g_progs_lock */
+    int implicit_lod; /* samples with derivatives: fragments must run as quads */
+    uint32_t refs;    /* under g_progs_lock */
     struct shader_prog *next;
 };
 

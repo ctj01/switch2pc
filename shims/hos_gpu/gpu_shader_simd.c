@@ -108,6 +108,7 @@ static int run_lanes(const shader_prog *prog, shader_group *g, uint32_t live,
             e->p[k] = (uint8_t)((g->p[k] >> l) & 1);
         }
         e->carry = (g->carry >> l) & 1;
+        e->helper = (g->helper >> l) & 1;
         lane_ipa t = {g, l};
         e->ipa = lane_ipa_fn;
         e->user = &t;
@@ -134,7 +135,7 @@ static int run_lanes(const shader_prog *prog, shader_group *g, uint32_t live,
  * derivatives the 2x2 quad gives: lanes 4q..4q+3 are the quad's pixels in
  * reading order, so a lane's x neighbour is the other lane of its row and its y
  * neighbour the lane two below or above. A quad with a lane missing from `m`
- * (one that left the group) has no derivatives.
+ * (one that left the group), or a group not packed as quads, has none.
  */
 static void quad_coords(const shader_group *g, uint32_t m, uint32_t ru, uint32_t rv, int lod_mode,
                         shader_tex_coord tc[SHADER_LANES]) {
@@ -146,7 +147,7 @@ static void quad_coords(const shader_group *g, uint32_t m, uint32_t ru, uint32_t
         tc[l].has_grad = 0;
         tc[l].dudx = tc[l].dvdx = tc[l].dudy = tc[l].dvdy = 0.0f;
     }
-    for (uint32_t q = 0; q < SHADER_LANES; q += 4) {
+    for (uint32_t q = 0; g->quads && q < SHADER_LANES; q += 4) {
         if (((m >> q) & 0xF) != 0xF) {
             continue;
         }

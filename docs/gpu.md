@@ -273,6 +273,31 @@ Each point below cost a failed run and is now in `nvgpu.c`:
   half a block still covers it, which is deko3d's `calcLevelOffset` and
   what the hardware addresses.
 
+- Mipmaps need derivatives, so fragments of a shader that samples with an
+  implicit level of detail (`TEX`/`TEXS` without `.LZ`/`.LL`, flagged at
+  predecode) run in 2x2 quads, uncovered pixels included as helper lanes;
+  every other shader packs covered pixels only, as before. Helper lanes never
+  store (`STG` is masked, an unmapped `LDG` reads zeros) and their
+  extrapolated coordinates can make the level of detail NaN, which counts as
+  0. Measured with `scripts/bench_deko.sh` under qemu on a shared x86-64 host
+  (10 s rounds, noise about 10% between rounds): the textured cube went from
+  41 to 37 frames on average over three rounds; the cube, the teapot, the
+  deferred scene and the compute lines stayed within noise, since they do not
+  sample implicitly.
+- The level of detail follows OpenGL 8.14.1 in one place (`gpu_tex_lambda`):
+  the instruction's base (derivatives, `.LL`'s level, 0 for `.LZ`), plus the
+  `.LB` bias and the sampler's and image's biases, then the sampler's clamps
+  and the image's minimum. `TEXS`'s depth-compare forms (4, 5, 6, 9) put the
+  reference in B and need a sampler compare mode: they stop the shader rather
+  than sample wrongly. A lane that samples without derivatives (its quad
+  diverged) uses the base level and says so once.
+- TIC component type 1 is SNORM: 8-bit texels and BC4/BC5 endpoints decode as
+  int8 over 127 (with -128 as -127); the TIC sRGB bit linearises the RGB of
+  8-bit and BC1-BC3 texels before filtering. The tests place texels through
+  a block-linear swizzle written from the GOB definition and write
+  descriptors through deko3d's own field layout, so they do not share the
+  decoder's assumptions.
+
 ## What deko_examples taught
 
 - Indexed draws: the index count at 0x5F8 (first index 0x5F7) replaces the

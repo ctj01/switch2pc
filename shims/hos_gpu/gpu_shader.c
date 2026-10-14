@@ -335,11 +335,22 @@ static shader_prog *prog_build(const uint64_t *code, uint32_t n) {
             p->ins[pc].guard = PT;
         } else {
             predecode(code[pc], &p->ins[pc]);
+            const pinsn *in = &p->ins[pc];
+            if (in->op == OP_TEX) {
+                uint32_t mode = tex_lod_mode(bits(code[pc], 37, 3));
+                p->implicit_lod |= mode == SHADER_LOD_IMPLICIT || mode == SHADER_LOD_BIAS;
+            } else if (in->op == OP_TEXS) {
+                p->implicit_lod |= texs_form(bits(code[pc], 53, 4)).lod == SHADER_LOD_IMPLICIT;
+            }
         }
     }
     p->code = code;
     p->n = n;
     return p;
+}
+
+int shader_prog_needs_quads(const shader_prog *prog) {
+    return prog->implicit_lod;
 }
 
 static void prog_free(shader_prog *p) {
@@ -830,6 +841,19 @@ int shader_exec_from(const shader_prog *prog, shader_env *e, uint32_t pc, shader
             va += (uint64_t)(int64_t)((int32_t)(bits(i, 20, 24) << 8) >> 8);
             uint8_t *p = e->mem ? e->mem(va, n) : NULL;
             int store = is(i, 0xeed8000000000000ull, 0xfff8000000000000ull);
+            if (e->helper) {
+                /* A helper pixel's address is extrapolated: it stores nothing, and
+                 * an unmapped load gives it zeros rather than stopping the quad. */
+                if (store) {
+                    break;
+                }
+                if (!p) {
+                    for (uint32_t k = 0; k < (n + 3) / 4; k++) {
+                        set_reg(e, d == RZ ? RZ : d + k, 0);
+                    }
+                    break;
+                }
+            }
             if (!p) {
                 *bad_insn = i; /* unmapped: stop rather than drop the access */
                 return -1;
