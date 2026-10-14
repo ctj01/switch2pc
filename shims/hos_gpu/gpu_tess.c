@@ -175,14 +175,16 @@ static void gen_quads(builder *b, uint32_t spacing, int cw, const float outer[4]
     for (uint32_t e = 0; e < 4; e++) {
         so[e] = tess_segments(outer[e], spacing);
     }
-    int finer_edge = so[0] > 1 || so[1] > 1 || so[2] > 1 || so[3] > 1;
-    if (nu == 1 && finer_edge) {
+    /* One quad only when all six levels are one; otherwise an inner level of one
+     * counts as one plus epsilon, so the edges stay cut as their outer levels say. */
+    int all_one = nu == 1 && nv == 1 && so[0] == 1 && so[1] == 1 && so[2] == 1 && so[3] == 1;
+    if (nu == 1 && !all_one) {
         nu = spacing == TESS_FRACTIONAL_ODD ? 3 : 2;
     }
-    if (nv == 1 && finer_edge) {
+    if (nv == 1 && !all_one) {
         nv = spacing == TESS_FRACTIONAL_ODD ? 3 : 2;
     }
-    if (nu < 2 || nv < 2) { /* every level is one: the patch as a grid of nu x nv cells */
+    if (all_one) { /* the patch as one cell */
         uint32_t first = b->o->ncoords;
         for (uint32_t j = 0; j <= nv; j++) {
             for (uint32_t i = 0; i <= nu; i++) {

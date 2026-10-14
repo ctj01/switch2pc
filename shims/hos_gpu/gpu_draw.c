@@ -1273,6 +1273,22 @@ void gpu_draw_indexed(const gpu_draw_state *s, uint32_t topology, uint32_t first
     free(idx);
 }
 
+#define LINE_CHUNK 2048 /* line segments rasterised per batch */
+
+/* Shade `tris` with the job's state on the worker pool and add up the statistics. */
+static void run_frag_job(frag_job *job, const frag_tri *tris, uint32_t ntris, gpu_draw_stats *st) {
+    job->tris = tris;
+    job->ntris = ntris;
+    job->errors = st->shader_errors;
+    memset(job->st, 0, sizeof(job->st));
+    pool_run(frag_worker, job);
+    for (uint32_t w = 0; w < MAX_WORKERS; w++) {
+        st->triangles += job->st[w].triangles;
+        st->pixels += job->st[w].pixels;
+        st->shader_errors += job->st[w].shader_errors;
+    }
+}
+
 typedef struct programs {
     program vs, tcs, tes, fs; /* tcs and tes are optional: prog is NULL when not bound */
 } programs;
@@ -1329,7 +1345,12 @@ static int tessellate(const gpu_draw_state *s, const programs *pg, const vertex 
     const uint32_t *in_ptrs[TESS_PATCH_MAX], *tcs_ptrs[TESS_PATCH_MAX];
     vertex *tv = NULL;
     uint32_t *tidx = NULL, nv = 0, ni = 0, cap_v = 0, cap_i = 0;
-    int lines = 0, ok = tcs_out && patch;
+    int lines = domain == TESS_ISOLINES, ok = tcs_out && patch;
+    if (domain != TESS_ISOLINES && !(mode & 0x200)) {
+        /* [9] clear is point mode for triangles and quads (Mesa sets CONNECTED for
+         * every other output primitive); points are not generated yet. */
+        HOS_LOGW(MOD, "tessellation point mode not supported; drawing triangles");
+    }
     for (uint32_t k = 0; k < nout; k++) {
         tcs_ptrs[k] = tcs_out + (size_t)k * SHADER_ATTR_WORDS;
     }
@@ -1439,7 +1460,6 @@ static int tessellate(const gpu_draw_state *s, const programs *pg, const vertex 
         for (uint32_t i = 0; i < to.nindices && ok; i++) {
             tidx[ni++] = base + to.indices[i];
         }
-        lines = to.lines;
         tess_free(&to);
     }
     env->in_vertices = NULL;
@@ -1661,7 +1681,9 @@ static void draw_programs(const gpu_draw_state *s, uint32_t topology, const uint
         break;
     }
     /* Polygon mode line (0x1B01, by facing): a triangle's three edges instead of
-     * its area. Point mode (0x1B00) still fills. */
+     * its area. Point mode (0x1B00) still fills. Unlike the hardware, an edge two
+     * triangles share is drawn twice (and blended twice), a triangle without area
+     * loses its edges, and the polygon offset for lines is not applied. */
     if (nt && (r[M3D_POLYGON_MODE_FRONT] == 0x1B01 || r[M3D_POLYGON_MODE_BACK] == 0x1B01)) {
         const vertex **esegs = calloc(6 * (size_t)nt, sizeof(*esegs));
         if (esegs) {
@@ -1687,20 +1709,6 @@ static void draw_programs(const gpu_draw_state *s, uint32_t topology, const uint
             segs = esegs;
         }
     }
-    if (ns) {
-        lv = calloc(4 * (size_t)ns, sizeof(*lv));
-        frag_tri *grown = realloc(tris, (nt + 2 * (size_t)ns) * sizeof(*tris));
-        if (lv && grown) {
-            tris = grown;
-            for (uint32_t k = 0; k < ns; k++) {
-                nt += 2 * line_rect(r, segs[2 * k], segs[2 * k + 1], &lv[4 * k], &tris[nt]);
-            }
-        } else if (grown) {
-            tris = grown;
-        }
-    }
-    free(segs);
-
     /* The fragment stage. */
     bind_cbufs(s, 4, env);
     tex_ctx *tc = calloc(1, sizeof(*tc));
@@ -1726,27 +1734,30 @@ static void draw_programs(const gpu_draw_state *s, uint32_t topology, const uint
         env->texel = tex_texel;
         env->tex_user = tc;
     }
-    if (nt) {
-        frag_job *job = calloc(1, sizeof(*job));
-        if (job) {
-            *job = (frag_job){.r = r,
-                              .fs = &fs,
-                              .env = env,
-                              .tc = tc,
-                              .ts = &ts,
-                              .dt = &dt,
-                              .tris = tris,
-                              .ntris = nt,
-                              .errors = st->shader_errors};
-            pool_run(frag_worker, job);
-            for (uint32_t w = 0; w < MAX_WORKERS; w++) {
-                st->triangles += job->st[w].triangles;
-                st->pixels += job->st[w].pixels;
-                st->shader_errors += job->st[w].shader_errors;
-            }
-            free(job);
+    frag_job *job = calloc(1, sizeof(*job));
+    if (job) {
+        *job = (frag_job){.r = r, .fs = &fs, .env = env, .tc = tc, .ts = &ts, .dt = &dt};
+        if (nt) {
+            run_frag_job(job, tris, nt, st);
         }
+        /* Lines in chunks: each needs four vertex copies, and a tessellated draw in
+         * line polygon mode can have hundreds of thousands of them. */
+        lv = ns ? calloc(4 * (size_t)LINE_CHUNK, sizeof(*lv)) : NULL;
+        frag_tri *ltris = ns ? calloc(2 * (size_t)LINE_CHUNK, sizeof(*ltris)) : NULL;
+        for (uint32_t k0 = 0; k0 < ns && lv && ltris; k0 += LINE_CHUNK) {
+            uint32_t n = ns - k0 < LINE_CHUNK ? ns - k0 : LINE_CHUNK, lt = 0;
+            for (uint32_t k = 0; k < n; k++) {
+                lt += 2 * line_rect(r, segs[2 * (k0 + k)], segs[2 * (k0 + k) + 1], &lv[4 * k],
+                                    &ltris[lt]);
+            }
+            if (lt) {
+                run_frag_job(job, ltris, lt, st);
+            }
+        }
+        free(ltris);
+        free(job);
     }
+    free(segs);
     free(tris);
     free(lv);
     free(tc);

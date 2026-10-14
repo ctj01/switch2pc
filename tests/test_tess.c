@@ -172,6 +172,24 @@ TEST(tess_quads) {
     ASSERT_EQ(right, 5);  /* outer 2: u = 1 */
     ASSERT_EQ(top, 6);    /* outer 3: v = 1 */
     tess_free(&o);
+    /* an inner level of one with any other level above one counts as one plus
+     * epsilon, so edges with outer level one keep two points (no T-junctions) */
+    const float inner41[2] = {4, 1};
+    ASSERT_EQ(tess_generate(TESS_QUADS, TESS_EQUAL, 0, ones, inner41, &o), 0);
+    ASSERT_TRUE(check_tiling(&o, 1.0f, 0) > 0);
+    left = bottom = right = top = 0;
+    for (uint32_t i = 0; i < o.ncoords; i++) {
+        const tess_coord *c = &o.coords[i];
+        left += c->u == 0.0f;
+        bottom += c->v == 0.0f;
+        right += c->u == 1.0f;
+        top += c->v == 1.0f;
+    }
+    ASSERT_EQ(left, 2);
+    ASSERT_EQ(bottom, 2);
+    ASSERT_EQ(right, 2);
+    ASSERT_EQ(top, 2);
+    tess_free(&o);
     /* an inner level of two leaves a degenerate inner ring (a line) */
     const float inner2[2] = {2, 5};
     ASSERT_EQ(tess_generate(TESS_QUADS, TESS_EQUAL, 1, outer, inner2, &o), 0);

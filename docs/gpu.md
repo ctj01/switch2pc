@@ -299,6 +299,14 @@ Each point below cost a failed run and is now in `nvgpu.c`:
   quads as an outer ring around an inner grid; isolines as line segments.
   Fractional spacing rounds the segment count up but places segments evenly,
   where the hardware shrinks two of them.
+- Control shader invocations run one after another, each with its own output
+  space, and the hardware's cooperation between them is not modelled: `BAR` is
+  not an instruction the interpreter knows (the shader stops with a log), an
+  output-space `ALD` reads only the invocation's own outputs and `AST` ignores
+  the vertex index. A `BAR` must not become a no-op without running the
+  invocations in lock step, or `gl_out[other]` reads return stale zeros.
+  Point mode (TessellationMode [9] clear) is logged and drawn as triangles;
+  fractional spacing is #44.
 - Line polygon mode (0x36B/0x36C = 0x1B01) draws a triangle's three edges
   through the line path, after culling the triangle itself; the example's
   polygon smoothing (0x36D) is not done, so its lines are aliased rectangles.
