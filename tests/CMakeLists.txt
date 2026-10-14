@@ -271,16 +271,20 @@ if(S2PC_ARM64)
             TIMEOUT 120
             PASS_REGULAR_EXPRESSION "deko3d: device created.*swapchain created.*queue created.*clears.*frame 40 presented.*push data ok.*copy buffer ok.*image round trip ok.*deko3d: done"
             FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|does not parse|not mapped|deko3d: .*: result [1-9]")
-        # Vsync pacing (#26): the same 60 frames, paced, cannot finish within a second.
-        # Every other test runs with HOS_VSYNC=0 (set below).
+        # Vsync pacing (#26): 180 frames presented without being drawn ("light"), so the
+        # program is faster than a refresh even under qemu and is held every frame but
+        # the first; vi counts the held frames at exit, and 180 frames at 60 Hz cannot
+        # finish in 2.5 s. Every other test runs with HOS_VSYNC=0 (set below).
+        file(MAKE_DIRECTORY ${fixture_dir}/vsync/sdmc)
+        file(WRITE ${fixture_dir}/vsync/sdmc/deko3d_frames.txt "180 light\n")
         add_test(NAME smoke_deko3d_vsync
-                 COMMAND sh ${CMAKE_SOURCE_DIR}/tests/min_duration.sh 950
+                 COMMAND sh ${CMAKE_SOURCE_DIR}/tests/min_duration.sh 2500
                          ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:hosrun>
-                         --sdmc ${fixture_dir}/sdmc ${libnx_deko3d_nso})
+                         --sdmc ${fixture_dir}/vsync/sdmc ${libnx_deko3d_nso})
         set_tests_properties(smoke_deko3d_vsync PROPERTIES
             TIMEOUT 120
             ENVIRONMENT "HOS_VSYNC=1"
-            PASS_REGULAR_EXPRESSION "frame 40 presented.*deko3d: done.*min_duration: elapsed [0-9]+ ms"
+            PASS_REGULAR_EXPRESSION "frame 160 presented.*deko3d: done.*vsync: 18[0-9] frames queued, 1[0-9][0-9] held.*min_duration: elapsed [0-9]+ ms"
             FAIL_REGULAR_EXPRESSION "FAIL|fatal|Panic|too fast|deko3d: .*: result [1-9]")
     endif()
 

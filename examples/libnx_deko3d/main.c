@@ -99,14 +99,29 @@ int main(int argc, char **argv) {
     DkQueue queue = dkQueueCreate(&qm);
     say("deko3d: queue %s", queue ? "created" : "FAIL");
 
-    for (int frame = 0; frame < DEKO_FRAMES && appletMainLoop(); frame++) {
+    /* The vsync test asks for a longer run through sdmc:/deko3d_frames.txt: a frame
+     * count and, with "light", frames that are presented without being drawn, so
+     * the program is faster than a refresh even under emulation. */
+    int frames = DEKO_FRAMES, light = 0;
+    FILE *wanted = fopen("sdmc:/deko3d_frames.txt", "r");
+    if (wanted) {
+        char mode[16] = "";
+        if (fscanf(wanted, "%d %15s", &frames, mode) < 1 || frames < 1) {
+            frames = DEKO_FRAMES;
+        }
+        light = strcmp(mode, "light") == 0;
+        fclose(wanted);
+    }
+    for (int frame = 0; frame < frames && appletMainLoop(); frame++) {
         int slot = dkQueueAcquireImage(queue, swapchain);
-        DkImageView view;
-        dkImageViewDefaults(&view, &fbs[slot]);
-        dkCmdBufBindRenderTarget(cmdbuf, &view, NULL);
-        float t = (float)(frame % 60) / 60.0f;
-        dkCmdBufClearColorFloat(cmdbuf, 0, DkColorMask_RGBA, t, 0.25f, 1.0f - t, 1.0f);
-        dkQueueSubmitCommands(queue, dkCmdBufFinishList(cmdbuf));
+        if (!light) {
+            DkImageView view;
+            dkImageViewDefaults(&view, &fbs[slot]);
+            dkCmdBufBindRenderTarget(cmdbuf, &view, NULL);
+            float t = (float)(frame % 60) / 60.0f;
+            dkCmdBufClearColorFloat(cmdbuf, 0, DkColorMask_RGBA, t, 0.25f, 1.0f - t, 1.0f);
+            dkQueueSubmitCommands(queue, dkCmdBufFinishList(cmdbuf));
+        }
         dkQueuePresentImage(queue, swapchain, slot);
         if (frame % 20 == 0) {
             say("deko3d: frame %d presented on slot %d", frame, slot);

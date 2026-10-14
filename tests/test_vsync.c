@@ -30,6 +30,49 @@ TEST(vsync_grid_is_absolute) {
     ASSERT_EQ(vsync_next_boundary(b + 5 * VSYNC_PERIOD_NS + 3), b + 6 * VSYNC_PERIOD_NS);
 }
 
+/* The one-deep queue: a fast presenter waits for the previous frame's refresh
+ * and takes one refresh per frame; a slow one is never held. */
+TEST(vsync_one_deep_queue) {
+    uint64_t t0 = vsync_now_ns(), b1 = vsync_next_boundary(t0);
+    /* fast: queued 1 ms apart */
+    uint64_t shown = 0, now = t0;
+    ASSERT_EQ(vsync_hold_until(shown, now), 0); /* the first frame never waits */
+    shown = vsync_advance(shown, now);
+    ASSERT_EQ(shown, b1);
+    for (int i = 1; i < 10; i++) {
+        now += 1000000;
+        uint64_t hold = vsync_hold_until(shown, now);
+        ASSERT_EQ(hold, shown); /* until the previous frame is up */
+        shown = vsync_advance(shown, hold);
+        ASSERT_EQ(shown, b1 + (uint64_t)i * VSYNC_PERIOD_NS); /* one refresh per frame */
+    }
+    /* slow: 25 ms per frame, never held, each frame on the refresh after it */
+    shown = 0;
+    now = t0;
+    for (int i = 0; i < 10; i++) {
+        ASSERT_EQ(vsync_hold_until(shown, now), 0);
+        shown = vsync_advance(shown, now);
+        ASSERT_TRUE(shown > now && shown - now <= VSYNC_PERIOD_NS);
+        ASSERT_EQ((shown - b1) % VSYNC_PERIOD_NS, 0);
+        now += 25000000;
+    }
+    /* a late wake (woken a period after its refresh) skips to the next refresh */
+    shown = b1;
+    now = b1 + 2 * VSYNC_PERIOD_NS + 5;
+    ASSERT_EQ(vsync_hold_until(shown, now), 0);
+    ASSERT_EQ(vsync_advance(shown, now), b1 + 3 * VSYNC_PERIOD_NS);
+}
+
+TEST(vsync_grid_anchor_does_not_move) {
+    uint64_t b = vsync_next_boundary(vsync_now_ns());
+    /* A `now` before the anchor (another thread read the clock earlier) gets the
+     * first refresh after it on the existing grid; the grid itself stays put. */
+    uint64_t early = vsync_next_boundary(b - 3 * VSYNC_PERIOD_NS);
+    ASSERT_TRUE(early > b - 3 * VSYNC_PERIOD_NS && early <= b);
+    ASSERT_EQ((b - early) % VSYNC_PERIOD_NS, 0);
+    ASSERT_EQ(vsync_next_boundary(b), b + VSYNC_PERIOD_NS);
+}
+
 TEST(vsync_thirty_frames_take_half_a_second) {
     enum { FRAMES = 30 };
     uint64_t t0 = vsync_now_ns();

@@ -37,13 +37,24 @@ uint64_t vsync_now_ns(void) {
 
 uint64_t vsync_next_boundary(uint64_t now_ns) {
     pthread_mutex_lock(&g_lock);
-    if (!g_epoch || now_ns < g_epoch) {
-        g_epoch = now_ns;
+    if (!g_epoch) {
+        g_epoch = now_ns; /* anchored once: a second thread's earlier `now` keeps it */
     }
-    uint64_t k = (now_ns - g_epoch) / VSYNC_PERIOD_NS + 1;
-    uint64_t boundary = g_epoch + k * VSYNC_PERIOD_NS;
+    uint64_t boundary = g_epoch;
+    if (now_ns >= g_epoch) {
+        boundary = g_epoch + ((now_ns - g_epoch) / VSYNC_PERIOD_NS + 1) * VSYNC_PERIOD_NS;
+    }
     pthread_mutex_unlock(&g_lock);
     return boundary;
+}
+
+uint64_t vsync_hold_until(uint64_t shown_at, uint64_t now) {
+    return shown_at > now ? shown_at : 0;
+}
+
+uint64_t vsync_advance(uint64_t shown_at, uint64_t now) {
+    uint64_t next = vsync_next_boundary(now);
+    return shown_at + VSYNC_PERIOD_NS > next ? shown_at + VSYNC_PERIOD_NS : next;
 }
 
 void vsync_sleep_until(uint64_t deadline_ns) {
