@@ -8,6 +8,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         gcc-aarch64-linux-gnu libc6-dev-arm64-cross binutils-aarch64-linux-gnu \
         qemu-user qemu-user-static cmake ninja-build gdb-multiarch lld \
+        clang libclang-rt-18-dev \
         fonts-dejavu-core python3 python3-pip git \
     && rm -rf /var/lib/apt/lists/*
 

@@ -15,7 +15,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 int LLVMFuzzerInitialize(int *argc, char ***argv) {
     (void)argc;
     (void)argv;
-    hos_log_set_level(HOS_LOG_ERROR + 1);
+    hos_log_set_level(HOS_LOG_OFF); /* every rejected input would log otherwise */
     return 0;
 }
 

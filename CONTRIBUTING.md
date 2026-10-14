@@ -18,8 +18,10 @@ with zero warnings. The compiler flags are `-Wall -Wextra -Werror -Wshadow -Wvla
 -Wformat=2 -Wundef`; do not weaken them, fix the code.
 
 A change to a parser that reads untrusted bytes (the NSO loader, MOD0, HIPC)
-also runs `scripts/fuzz.sh` (clang and `libclang-rt-dev`; a minute per harness
-by default), which is what the `fuzz` job in CI does on every push.
+also runs `scripts/fuzz.sh` (clang and `libclang-rt-18-dev`, both in the dev
+container; a minute per harness by default). The `fuzz` job in CI runs a
+deterministic, bounded pass on pull requests and branches and the minute per
+harness on main, with the corpus kept between runs.
 
 ## Where to start
 

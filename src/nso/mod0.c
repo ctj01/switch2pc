@@ -86,6 +86,7 @@ typedef struct dyn_view {
 static hos_result read_dynamic(const uint8_t *image, size_t size, uint64_t dyn_off, dyn_view *d) {
     memset(d, 0, sizeof(*d));
     d->pltrel_type = DT_RELA;
+    int bad_ent = 0; /* an entry size other than the one the walkers assume */
     for (uint64_t off = dyn_off; off + sizeof(Elf64_Dyn) <= size; off += sizeof(Elf64_Dyn)) {
         Elf64_Dyn e;
         memcpy(&e, image + off, sizeof(e));
@@ -143,6 +144,15 @@ static hos_result read_dynamic(const uint8_t *image, size_t size, uint64_t dyn_o
         case DT_RELRSZ:
             d->relr_size = e.d_un.d_val;
             break;
+        case DT_RELAENT:
+            bad_ent |= e.d_un.d_val != sizeof(Elf64_Rela);
+            break;
+        case DT_RELENT:
+            bad_ent |= e.d_un.d_val != sizeof(Elf64_Rel);
+            break;
+        case DT_SYMENT:
+            bad_ent |= e.d_un.d_val != sizeof(Elf64_Sym);
+            break;
         default:
             break;
         }
@@ -151,6 +161,10 @@ static hos_result read_dynamic(const uint8_t *image, size_t size, uint64_t dyn_o
     return S2PC_ERR_CORRUPT;
 
 done:
+    if (bad_ent) {
+        HOS_LOGE(MOD, ".dynamic declares an entry size this loader does not read");
+        return S2PC_ERR_CORRUPT;
+    }
     /* Symbol count: DT_HASH says it outright; DT_GNU_HASH needs a walk. */
     if (d->hash_off && in_image(d->hash_off, 8, size)) {
         d->sym_count = rd32(image + d->hash_off + 4); /* nchain */
@@ -160,21 +174,22 @@ done:
         uint32_t bloom_size = rd32(image + d->gnu_hash_off + 8);
         uint64_t buckets = d->gnu_hash_off + 16 + (uint64_t)bloom_size * 8;
         uint64_t chains = buckets + (uint64_t)nbuckets * 4;
-        uint32_t max = 0;
+        /* Chains are ascending runs of symbol indices, so the one that starts highest
+         * ends highest: walk only that one (a bucket table of unterminated chains
+         * would otherwise cost a walk per bucket). */
+        uint32_t top = 0, max = 0;
         for (uint32_t b = 0; b < nbuckets && in_image(buckets + (uint64_t)b * 4, 4, size); b++) {
             uint32_t idx = rd32(image + buckets + (uint64_t)b * 4);
-            if (idx < symoffset) {
-                continue;
+            if (idx >= symoffset && idx > top) {
+                top = idx;
             }
-            while (in_image(chains + (uint64_t)(idx - symoffset) * 4, 4, size)) {
-                uint32_t c = rd32(image + chains + (uint64_t)(idx - symoffset) * 4);
-                if (idx + 1 > max) {
-                    max = idx + 1;
-                }
-                if (c & 1) {
-                    break;
-                }
-                idx++;
+        }
+        for (uint32_t idx = top; top && in_image(chains + (uint64_t)(idx - symoffset) * 4, 4, size);
+             idx++) {
+            uint32_t c = rd32(image + chains + (uint64_t)(idx - symoffset) * 4);
+            max = idx + 1;
+            if (c & 1) {
+                break;
             }
         }
         d->sym_count = max ? max : symoffset;
