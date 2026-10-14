@@ -185,7 +185,7 @@ struct gpu_backend {
     blit2d(regs)                    copy(regs)
     upload(va, data, len)           cb_write(va, word)      cb_bind(stage, slot, va, size)
     compute(regs)                   semaphore(va, payload, four_words)
-    host_semaphore(va, payload)     syncpoint(id)
+    host_semaphore(va, payload, four_words)   syncpoint(id)
     flush()                         present(layer, va) -> host pixels
 };
 ```
@@ -217,11 +217,14 @@ every draw of the cube would see the last push constants and every textured
 quad the last sampler (the bug "What M4 taught" describes). So nothing is
 read in place from memory the stream writes:
 
-- `cb_write` records a `vkCmdUpdateBuffer` (at most 64 KiB per call) into a
-  GPU-side copy of the bound constant buffer, with a barrier before the next
-  draw; `cb_bind` of a buffer the CPU wrote since the last submit uploads it
-  the same way first. A ring of per-draw snapshots is the alternative if the
-  updates turn out too many.
+- Constant buffers reach the GPU through a per-draw snapshot ring: a
+  host-visible buffer the CPU writes, bound with a dynamic offset. `cb_bind`
+  copies the bound range into the ring (or re-uses the last snapshot when a
+  hash says it is unchanged) and `cb_write` patches the current snapshot; a
+  draw records the offset of the snapshot it saw. No command touches the
+  ring, so a dynamic-rendering scope stays open across draws: a
+  `vkCmdUpdateBuffer` or `vkCmdCopyBuffer` per write would have to end and
+  restart the scope, which the pipeline section forbids between draws.
 - `upload` (inline-to-memory) writes guest memory as today and records the
   same bytes into the staging ring for the GPU copy of that range.
 - Texture handles are resolved at record time from the CPU shadow of c0
@@ -230,8 +233,10 @@ read in place from memory the stream writes:
 ### Memory
 
 Guest memory is host memory, and nvmap allocations are page-aligned, so
-vertex, index and constant buffers can be imported
-(`VK_EXT_external_memory_host`) or staged; images cannot: render targets and
+vertex and index buffers can be imported (`VK_EXT_external_memory_host`) or
+staged; constant buffers never are (they go through the ring above), nor is
+any range the stream itself writes (inline uploads), which is staged from the
+mirror. Images cannot be imported either: render targets and
 textures are block-linear surfaces and the GPU needs `VkImage`s. A surface
 cache keyed by address, format, size, layout and multisample mode gives each
 one an image; uploads go through `swizzle.c` into a linear staging buffer
@@ -244,18 +249,19 @@ addresses (`nv_gpu_va_to_host`), the game writes its buffers directly with no
 ioctl in between, and the only possible trigger, `mprotect` plus `SIGSEGV`,
 belongs to `hos_cpu/trap.c`. So M2.1-M2.3 assume the worst at every submit:
 
-- every CPU-visible source a submit references (vertex, index and constant
-  buffers, textures, the inputs of a copy or blit) is possibly dirty: it is
-  re-uploaded, or hashed and compared with what the GPU copy holds, before
-  the first command that reads it;
+- every CPU-visible source a submit references (vertex and index buffers,
+  textures, the inputs of a copy or blit, a constant buffer at its first bind
+  in the submit) is possibly dirty: it is re-uploaded, or hashed and compared
+  with what the GPU copy holds, before the first command that reads it;
 - every surface and buffer the submit writes (targets, depth, blit and copy
   destinations, compute stores) is read back into guest memory before
   `flush()` returns, so `vi`, the game and the CPU path see it as they do
   today;
 - a `VkImage` is valid for the submit that uploaded or wrote it; the next
-  submit re-validates it by hash, and a DMA copy or 2D blit into a
-  block-linear surface (deko3d's usual texture upload) marks the entry stale
-  like any CPU write.
+  submit re-validates it by hash, and a copy or blit that ran on the CPU
+  path into a block-linear surface (deko3d's usual texture upload, while
+  those still run there) marks the entry stale like any CPU write, whereas
+  a `vkCmdCopyImage` between resident surfaces leaves both valid.
 
 Page-protection tracking, which would make all three incremental, is a later
 optimisation and must chain its handler with `trap.c`'s.
@@ -420,12 +426,15 @@ named `compare_deko3d_vulkan_<scene>`.
    pass `compare_deko3d_vulkan_*` against the CPU path at tolerance 1.
 5. **M2.4, asynchronous execution and the window.** Fences behind
    `nv_syncpt_reach` and the semaphore payloads, the readback moved to where
-   the CPU needs it, the swapchain for `HOS_WINDOW`. Exit: `smoke_deko3d`'s
-   60 frames present with a 99th-percentile interval between consecutive
-   `vi` frame log lines below 2 refresh periods on the arm64 job; and, outside
+   the CPU needs it, the swapchain for `HOS_WINDOW`, and the instruments for
+   the criterion: `HOS_LOG_TIMESTAMPS=1` puts a monotonic timestamp on every
+   log line, and `tools/frame_intervals.py` reads the per-frame `vi` lines of
+   a `HOS_LOG_LEVEL=debug` run and prints the percentiles of the interval
+   between presents. Exit: over `smoke_deko3d`'s 60 frames that script's
+   99th percentile is below 2 refresh periods on the arm64 job; and, outside
    CI, on an ARM64 host with a Vulkan driver (AWS g5g, Graviton2 with a T4G),
-   example 04 at 60 frames per second with pacing on (`HOS_VSYNC` once #9
-   lands; until then `scripts/bench_deko.sh` at or above 60).
+   example 04 at 60 frames per second with pacing on (`HOS_VSYNC`, from
+   PR #9 (#26); until that lands, `scripts/bench_deko.sh` at or above 60).
 6. **M2.5, the rest of the examples.** Multisampling as above, three render
    targets, RGBA16F, compute as SPIR-V compute, and the tessellation stages
    through Vulkan's own once the CPU path has them. Exit: every deko_example
