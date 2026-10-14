@@ -100,7 +100,7 @@ hos_gpu: nvdrv
   - syncpoints: fences returned by submit, waited on by nvhost-ctrl
   |
   v
-command processor (new, CPU thread per channel)
+command processor (runs inside SUBMIT_GPFIFO, gpu_submit)
   - pushbuffer decoder: method headers (incrementing, non-incrementing,
     increment-once, immediate), subchannel -> bound class
   - engines: 3D (0xB197), compute (0xB1C0), DMA copy (0xB0B5),
@@ -164,57 +164,117 @@ other feature in this repository.
 
 ## M2 design: a Vulkan backend behind the command processor
 
-Everything above the backend stays as it is. `nvgpu.c` walks the GPFIFO and
-feeds every method to `gpu_engines_method`; `gpu_engines.c` keeps one
-register file per engine (0x2000 words), runs the macro processor, and acts
-on the few methods that do something: a clear (`clear_surface`), a draw
-(`draw_method`, which hands a `gpu_draw_state` to `gpu_draw.c`), a DMA copy,
-an inline upload, a report semaphore, a compute launch. Those actions are the
-seam. M2 puts an interface behind them and a second implementation of it;
-the CPU path becomes the first implementation and the reference the second
-is tested against.
+Everything above the backend stays as it is. `SUBMIT_GPFIFO` runs the
+pushbuffers inside the ioctl (`gpu_submit` in `nvgpu.c`): host methods
+(semaphores 0x04-0x07, syncpoints 0x1C-0x1D) are acted on there as they are
+decoded, every other method goes to `gpu_engines_method`; `gpu_engines.c`
+keeps one register file per engine (0x2000 words), runs the macro processor,
+and acts on the few methods that do something: a clear (`clear_surface`), a
+draw (`draw_method`, which hands a `gpu_draw_state` to `gpu_draw.c`), the 2D
+engine's blit (0x237), a DMA copy, an inline upload, a constant buffer
+write (0x8E4) or binding (0x904), a report semaphore, a compute launch. Those
+actions are the seam. M2 puts an interface behind them and a second
+implementation of it; the CPU path becomes the first implementation and the
+reference the second is tested against.
 
 ### The seam
 
 ```
 struct gpu_backend {
-    clear(regs, surface_bits)          draw(state, topology, indices, ...)
-    copy(regs)                         upload(va, data, len)
-    compute(regs)                      semaphore(va, payload, four_words)
-    flush()                            present(layer, va) -> host pixels
+    clear(regs, surface_bits)       draw(state, topology, indices, ...)
+    blit2d(regs)                    copy(regs)
+    upload(va, data, len)           cb_write(va, word)      cb_bind(stage, slot, va, size)
+    compute(regs)                   semaphore(va, payload, four_words)
+    host_semaphore(va, payload)     syncpoint(id)
+    flush()                         present(layer, va) -> host pixels
 };
 ```
 
 `HOS_GPU=cpu` (the default while M2 is incomplete) selects today's code;
 `HOS_GPU=vulkan` the new one. Each call takes the register file it needs, as
-the CPU functions do now, so the state tracker does not change. Ordering is
-the backend's problem: the CPU backend executes a call when it is made, the
-Vulkan backend records it into the command buffer of the current submit and
-executes it at `flush()` (the end of `SUBMIT_GPFIFO`), which is also where a
-semaphore's payload must land in memory, and the syncpoint increment the
-game waits on, only after the GPU is done.
+the CPU functions do now, so the state tracker does not change. The host
+methods go through the seam too, in stream order, rather than being acted
+on in `nvgpu.c` ahead of the engine work that precedes them.
+
+Ordering is the backend's problem, and until M2.4 it is solved the simple
+way: `flush()` is synchronous. The Vulkan backend records a submit's actions
+into one command buffer, submits it at `flush()` (the end of
+`SUBMIT_GPFIFO`), waits for its fence, reads back what the GPU wrote (below)
+and only then performs the semaphore releases and syncpoint increments of
+that submit, in order. Nothing another guest thread can observe changes
+before the work it depends on is done, exactly as today. Asynchronous
+execution, with `nv_syncpt_reach` and the semaphore payloads backed by
+fences instead of performed at `flush()`, is M2.4.
+
+### Writes inside a submit
+
+The CPU state tracker writes guest memory while it decodes:
+`LOAD_CONSTANT_BUFFER` (0x8E4) into the bound constant buffer, inline uploads
+(the compute QMD among them), and deko3d's texture handles into c0. A draw
+recorded earlier in the same submit must see the values of its own time, not
+the last ones: with constant buffers read in place from imported memory,
+every draw of the cube would see the last push constants and every textured
+quad the last sampler (the bug "What M4 taught" describes). So nothing is
+read in place from memory the stream writes:
+
+- `cb_write` records a `vkCmdUpdateBuffer` (at most 64 KiB per call) into a
+  GPU-side copy of the bound constant buffer, with a barrier before the next
+  draw; `cb_bind` of a buffer the CPU wrote since the last submit uploads it
+  the same way first. A ring of per-draw snapshots is the alternative if the
+  updates turn out too many.
+- `upload` (inline-to-memory) writes guest memory as today and records the
+  same bytes into the staging ring for the GPU copy of that range.
+- Texture handles are resolved at record time from the CPU shadow of c0
+  (the engine has just written them), into the draw's descriptor set.
 
 ### Memory
 
-Guest memory is host memory, and nvmap allocations are page-aligned, so the
-first choice is to import them (`VK_EXT_external_memory_host`) as
-`VkBuffer`s and let the GPU read vertex, index and constant buffers in
-place; where the driver lacks the extension (verify on lavapipe in M2.1), a
-staging buffer per allocation is uploaded at `flush()` for the ranges
-written since the last one, which the existing nvmap mapping code can track
-by page. Images are different: render targets and textures live in memory as
-block-linear surfaces, and the GPU needs `VkImage`s. A surface cache keyed
-by address, format, size and layout gives each one an image; uploads go
-through `swizzle.c` into a linear staging buffer and `vkCmdCopyBufferToImage`,
-and the way back (a frame for `vi`, a buffer the game reads) is the same in
-reverse, after the fence. A GPU-side swizzle in a compute shader can replace
-the CPU one later without changing the contract.
+Guest memory is host memory, and nvmap allocations are page-aligned, so
+vertex, index and constant buffers can be imported
+(`VK_EXT_external_memory_host`) or staged; images cannot: render targets and
+textures are block-linear surfaces and the GPU needs `VkImage`s. A surface
+cache keyed by address, format, size, layout and multisample mode gives each
+one an image; uploads go through `swizzle.c` into a linear staging buffer
+and `vkCmdCopyBufferToImage`, the way back is the same in reverse. Imported
+or staged memory must outlive the fence of every submit that references it:
+an nvmap free waits for the last such fence.
 
-Coherence between the paths is the one rule to keep: memory the GPU may have
-written is not read on the CPU (by `vi`, a DMA copy, `nvhost-ctrl` or the
-game after a semaphore) until that submit's fence has signalled. The Vulkan
-backend therefore keeps a list of surfaces written per submit and reads them
-back on the first CPU access, or at `flush()` for those `vi` presents.
+Nothing tracks CPU writes to guest memory: `nvgpu.c` only translates
+addresses (`nv_gpu_va_to_host`), the game writes its buffers directly with no
+ioctl in between, and the only possible trigger, `mprotect` plus `SIGSEGV`,
+belongs to `hos_cpu/trap.c`. So M2.1-M2.3 assume the worst at every submit:
+
+- every CPU-visible source a submit references (vertex, index and constant
+  buffers, textures, the inputs of a copy or blit) is possibly dirty: it is
+  re-uploaded, or hashed and compared with what the GPU copy holds, before
+  the first command that reads it;
+- every surface and buffer the submit writes (targets, depth, blit and copy
+  destinations, compute stores) is read back into guest memory before
+  `flush()` returns, so `vi`, the game and the CPU path see it as they do
+  today;
+- a `VkImage` is valid for the submit that uploaded or wrote it; the next
+  submit re-validates it by hash, and a DMA copy or 2D blit into a
+  block-linear surface (deko3d's usual texture upload) marks the entry stale
+  like any CPU write.
+
+Page-protection tracking, which would make all three incremental, is a later
+optimisation and must chain its handler with `trap.c`'s.
+
+### Multisampling
+
+The CPU path stores a 4x target as a single-sample surface of 2W x 2H with an
+ordered 2x2 grid of samples per pixel, shades once per pixel with per-sample
+coverage, and the 2D engine then reads the surface as a single-sample image
+for the resolve blit (0x237). Vulkan renders into a `VK_SAMPLE_COUNT_4_BIT`
+image, which `vkCmdCopyImageToBuffer` cannot read: the readback is an unpack
+compute shader writing the 2W x 2H layout. The same memory is therefore two
+cache entries, the multisampled image for draws and the 2W x 2H single-sample
+image the blit reads, and a write through either invalidates the other.
+Vulkan's standard 4x sample positions are a rotated grid, not the CPU path's
+ordered one, so edge pixels differ unless `VK_EXT_sample_locations` sets the
+positions (whether lavapipe offers it is checked in M2.5); the M2.5 criterion
+for multisampled scenes compares interiors at the usual tolerance and edges
+by coverage count only when the extension is missing.
 
 ### Shaders: SASS to SPIR-V
 
@@ -222,10 +282,11 @@ The interpreter already decodes a program once into `pinsn` entries
 (opcode, guard, registers, operand B resolved to register, constant buffer
 word or immediate; `gpu_shader_impl.h`). The translator walks that same
 form, so every instruction added for the CPU path has one more handler to
-write, and nothing is decoded twice. The output
-is SPIR-V built directly (a small writer: ids, types, decorations; no
-glslang or SPIRV-Tools at run time), one module per shader address, cached
-with the decoded program.
+write, and nothing is decoded twice. The output is SPIR-V built directly (a
+small writer: ids, types, decorations; no glslang or SPIRV-Tools at run
+time), one module per program, cached with the decoded program and keyed
+like it: address plus a hash of the words, since code memory is reused
+(`shader_prog_get` compares contents for that reason).
 
 - Registers become function-scope variables, written and read as the SASS
   does, and SPIR-V's own passes in the driver clean them up; no SSA
@@ -234,98 +295,142 @@ with the decoded program.
 - Attributes, constant buffers, textures and outputs map by the addresses
   the interpreter already knows (0x70 position, 0x80 + 16i attributes, IPA
   addresses for fragment inputs, `TEXS`/`TEX`/`TLDS` texture indices into the
-  stage's texture constant buffer), onto SPIR-V locations, uniform buffers
-  and combined image samplers; the SPH output map picks fragment outputs.
-- Control flow is the hard part: SASS is unstructured (`BRA`, `SSY`/`SYNC`,
-  `PBK`/`BRK`) and SPIR-V must be structured. deko3d's compiler emits
-  reducible graphs from GLSL, so the translator recognises the `SSY`
-  reconvergence point as the merge block of an `if`, and a backward `BRA`
-  under a predicate as a loop with the `PBK` target as its merge. A shader
-  whose graph it cannot structure is reported, not guessed, and that draw
-  falls back to the CPU path (which, with the coherence rule above, costs a
-  readback of the targets but gives the right picture).
+  stage's texture constant buffer), onto SPIR-V locations, buffers and
+  combined image samplers; the SPH output map picks fragment outputs. A
+  constant buffer can be 64 KiB and Vulkan guarantees only 16 KiB for a
+  uniform buffer, so they are bound as storage buffers (read-only), which
+  lavapipe and every real driver allow at that size.
+- Control flow is the hard part: SASS is unstructured and SPIR-V must be
+  structured. What nouveau's and uam's compilers emit from GLSL is a small
+  set of idioms: an `if` is a predicated forward `BRA`, with or without an
+  `SSY` naming the merge point, and `@P SYNC` is a conditional jump to that
+  merge; a loop opens with `PBK` (its exit) and `PCNT` (its continue point),
+  leaves with a predicated `BRK`, continues with `CONT`, and closes with an
+  unconditional backward `BRA`; `KIL` and `EXIT` occur inside both. The
+  translator recognises these idioms and builds the selection and loop
+  merges from them. A program that fits none of them is not guessed at: it
+  is compiled as a dispatcher, one `switch` on the program counter inside a
+  loop, with every basic block a case, which runs any control flow at the
+  cost of the driver's optimisations, and the log says which program took
+  that path. The CPU fallback (below) stays for instructions the translator
+  lacks.
 - Arithmetic differs where the hardware does: `ftz` flags, `MUFU`
-  approximations, the canonical NaN. Tests compare the two paths at a
-  tolerance (1 in 255 per channel, as the reference checks do today) rather
-  than bit for bit.
+  approximations, the canonical NaN. Rendering tests compare pictures at a
+  tolerance (1 in 255 per channel, as the reference checks do today).
 
 The translator's own test runs every compiled shader in the repository
 (`tests/test_shader_group` already enumerates them) through the interpreter
-and through lavapipe: the vertex and fragment programs each wrapped in a
-compute dispatch over a buffer of inputs, outputs compared. Rendering tests
-then cover what the wrapper cannot (interpolation, derivatives, blending).
+and through lavapipe, each program's ALU and control flow wrapped in a
+compute dispatch over a buffer of register inputs (the graphics stages'
+attribute, interpolation and output lowering is not what this tests): integer
+results compared exactly, floats within an ULP bound per instruction, wider
+for `MUFU`. Rendering tests then cover the rest (interpolation, derivatives,
+blending).
+
+### Falling back to the CPU
+
+A draw or compute launch the translator cannot take (an instruction it
+lacks) runs on the CPU path, and the cost of that inside a submit is spelled
+out: submit what has been recorded so far, wait for it, read back every
+surface and buffer the fallback reads, run the CPU draw or kernel on guest
+memory, mark everything it wrote as dirty for re-upload, and continue
+recording. Compute takes this path until M2.5 translates it, and example 09
+(a kernel writing the vertices a draw then fetches) exercises exactly this
+sequence, so it is the test for it. A fallback is logged once per program;
+a frame that falls back every submit is a program to translate, not a mode
+to live in.
 
 ### State to pipelines
 
 A draw's Maxwell state is already in the register file; the backend hashes
-the words that select a `VkGraphicsPipeline` (shader addresses, vertex
-attribute formats 0x458, topology, cull and front face 0x646-0x648, depth
-test and function, blend enables and factors 0x4D8/0x780, colour write
-masks 0x680, target formats, sample count 0x574) and keeps a pipeline per
-hash. Everything Vulkan allows to be dynamic stays out of the hash:
-viewports, scissors, line width, depth bias, blend constants, and with
+the words that select a `VkGraphicsPipeline` (the programs' address-and-hash
+keys, vertex attribute formats 0x458, topology, cull and front face
+0x646-0x648, depth test and function, blend enables and factors 0x4D8/0x780,
+colour write masks 0x680, target formats, sample count 0x574) and keeps a
+pipeline per hash. Everything Vulkan allows to be dynamic stays out of the
+hash: viewports, scissors, line width, depth bias, blend constants, and with
 `VK_EXT_extended_dynamic_state` the cull mode and depth settings too.
 Render passes are `VK_KHR_dynamic_rendering` (Vulkan 1.3; lavapipe has it)
 over the target images from 0x200 and the depth target from 0x3F8, so a
 change of targets is a new rendering scope, not a new object. Textures are a
 cache from TIC/TSC words to `VkImageView` and `VkSampler`; descriptor sets
-are allocated per draw from a pool reset at each submit, which is simple and
-enough for the hundreds of draws a frame has here. The 2D engine's resolve
-blit (MSAA, example 06) becomes `vkCmdResolveImage` or a blit; the DMA
-engine's copies between GPU-resident surfaces become `vkCmdCopyImage`.
+are allocated per draw from a pool reset at each submit, which costs nothing
+at the draw counts here (the deko examples issue one to three draws per
+frame, 99 per 99 frames in example 09). Mappings Vulkan does not have
+directly: quads, line loops and polygons are drawn through rewritten index
+buffers (a triangle list, a line list with the closing segment, a fan); the
+-1..1 clip depth range needs `VK_EXT_depth_clip_control`; wide lines are
+rectangles on the CPU path and need `VK_EXT_line_rasterization`'s
+rectangular mode to match. The 2D engine's resolve blit (MSAA, example 06)
+becomes a blit from the unpacked 2W x 2H image; the DMA engine's copies
+between GPU-resident surfaces become `vkCmdCopyImage`.
 
 ### What stays on the CPU
 
 The pushbuffer decoder, the macro processor, the state tracker, inline
-uploads (a `memcpy` into guest memory, followed by a staging upload if the
-range is GPU-resident), `vi` and its frame dump, and everything the Vulkan
-backend does not do yet: a draw it cannot translate, compute launches until
-compute shaders translate too, queries. The window keeps presenting through
-X11 from host pixels at first; a Vulkan swapchain for `HOS_WINDOW` is the
-last step, when the frame no longer needs to come back to the CPU.
+uploads (a `memcpy` into guest memory, mirrored into the staging ring), `vi`
+and its frame dump, and everything the Vulkan backend does not do yet: a
+program it cannot translate, compute until M2.5, queries. The window keeps
+presenting through X11 from host pixels at first; a Vulkan swapchain for
+`HOS_WINDOW` is the last step, when the frame no longer needs to come back
+to the CPU.
 
 ### lavapipe in CI
 
-The arm64 job (`ubuntu-24.04-arm`) installs `mesa-vulkan-drivers` and runs
-the Vulkan tests natively with `VK_DRIVER_FILES` pointing at lavapipe and no
-window; frames come back through the readback path, so the existing checks
-(`check_deko3d_*`) run unchanged against the Vulkan backend. The cross job
-keeps the CPU path: lavapipe under qemu-user would be an ARM64 driver JIT
-compiling under emulation, which is possible but not something CI should
-wait for. Vulkan is a build-time option (`S2PC_VULKAN`, on when `libvulkan`
-and the headers are found) so the WSL2 and Codespaces setups without a
-driver build as today.
+The arm64 job (`ubuntu-24.04-arm`) installs `mesa-vulkan-drivers`, builds
+with `-DS2PC_VULKAN=ON` and runs the Vulkan tests natively with
+`VK_DRIVER_FILES` pointing at lavapipe and no window; frames come back
+through the readback path, so the existing checks (`check_deko3d_*`) run
+unchanged against the Vulkan backend. `S2PC_VULKAN` is off unless asked for:
+turning it on by detection would run lavapipe under qemu-user in WSL2 and
+Codespaces, an ARM64 driver JIT compiling under emulation, which works but
+is not something a contributor's test run should wait for. The cross job
+keeps the CPU path.
+
+Comparing two runs is `tools/compare_frames.py <frames> <reference>
+[tolerance]`, the tool `scripts/action_run.sh --reference` already uses; the
+Vulkan criteria below are ctest entries that run a scene twice
+(`HOS_GPU=cpu`, then `vulkan`, frames dumped) and compare them with it,
+named `compare_deko3d_vulkan_<scene>`.
 
 ### Steps and exit criteria
 
 1. **M2.0, the seam.** `gpu_backend` with the CPU implementation behind it,
-   `HOS_GPU` honoured. Exit: every test passes unchanged; `scripts/bench_deko.sh`
-   shows no loss.
+   the host methods routed through it, `HOS_GPU` honoured. Exit: every test
+   passes unchanged, and `scripts/bench_deko.sh 10 3 4 7 9` on one fixed host
+   is within 3% of the previous commit over three runs.
 2. **M2.1, device and memory.** Instance and device (lavapipe or a real
-   driver), the nvmap import or staging path, clears and copies through
-   Vulkan, readback for `vi`. Exit: `smoke_deko3d` (M0/M1: clears, inline
-   uploads, DMA copies, the image round trip) passes with `HOS_GPU=vulkan`
-   on lavapipe in the arm64 job, frames byte-identical to the CPU path.
+   driver), the import-or-stage path with the re-upload rule, clears, copies
+   and the 2D blit through Vulkan, synchronous `flush()` with the eager
+   readback. Exit: `smoke_deko3d` (M0/M1: clears, inline uploads, DMA copies,
+   the image round trip) passes with `HOS_GPU=vulkan` on lavapipe in the
+   arm64 job, frames byte-identical to the CPU path
+   (`compare_deko3d_vulkan_clears`, tolerance 0).
 3. **M2.2, shaders.** The translator for the instructions the five reference
-   scenes use, the compute-dispatch comparison test over every `.dksh` in the
-   repository. Exit: the comparison test passes on lavapipe for the triangle,
-   cube, depth/blend and texture shaders, and the translator rejects (rather
-   than mistranslates) every other shader in the repository it does not
-   cover.
-4. **M2.3, pipelines, state, textures.** Exit: `check_deko3d_triangle`,
-   `check_deko3d_cube`, `check_deko3d_depthblend` and `check_deko3d_texture`
-   pass with `HOS_GPU=vulkan` at the same tolerance as today, and
-   deko_examples 02, 03 and 04 match the CPU path's frames within 1.
-5. **M2.4, synchronisation and the window.** Semaphore payloads and syncpoint
-   increments after the fence, the coherence rule, the swapchain for
-   `HOS_WINDOW`. Exit: `smoke_deko3d`'s 60 frames present without a stall
-   longer than a frame; on native ARM64 with a GPU, example 04 at 60 frames
-   per second under `HOS_VSYNC` (`scripts/bench_deko.sh`).
-6. **M2.5, the rest of the examples.** Multisampling and the resolve, three
-   render targets, RGBA16F, compute as SPIR-V compute, and the tessellation
-   stages through Vulkan's own once the CPU path has them. Exit: every
-   deko_example that renders on the CPU path matches it within 1 with
-   `HOS_GPU=vulkan`.
+   scenes use, the idioms above, the dispatcher fallback, the oracle test
+   over every `.dksh` in the repository. Exit: the oracle passes on lavapipe
+   for the triangle, cube, depth/blend and texture shaders, and every other
+   program in the repository either passes it or is reported as untranslated
+   (never mistranslated).
+4. **M2.3, pipelines, state, textures, in-stream writes.** Exit:
+   `check_deko3d_triangle`, `check_deko3d_cube`, `check_deko3d_depthblend`
+   and `check_deko3d_texture` pass with `HOS_GPU=vulkan` at the same
+   tolerance as today (the cube's push constants and the texture scene's
+   handles go through the recorded updates), and deko_examples 02, 03 and 04
+   pass `compare_deko3d_vulkan_*` against the CPU path at tolerance 1.
+5. **M2.4, asynchronous execution and the window.** Fences behind
+   `nv_syncpt_reach` and the semaphore payloads, the readback moved to where
+   the CPU needs it, the swapchain for `HOS_WINDOW`. Exit: `smoke_deko3d`'s
+   60 frames present with a 99th-percentile interval between consecutive
+   `vi` frame log lines below 2 refresh periods on the arm64 job; and, outside
+   CI, on an ARM64 host with a Vulkan driver (AWS g5g, Graviton2 with a T4G),
+   example 04 at 60 frames per second with pacing on (`HOS_VSYNC` once #9
+   lands; until then `scripts/bench_deko.sh` at or above 60).
+6. **M2.5, the rest of the examples.** Multisampling as above, three render
+   targets, RGBA16F, compute as SPIR-V compute, and the tessellation stages
+   through Vulkan's own once the CPU path has them. Exit: every deko_example
+   that renders on the CPU path passes `compare_deko3d_vulkan_*` at
+   tolerance 1, multisampled scenes with the edge rule above.
 
 Each step is a pull request on its own; the CPU path stays the default until
 M2.4, and stays available after it, since it is the reference.
@@ -475,9 +580,11 @@ Each point below cost a failed run and is now in `nvgpu.c`:
   format (u8, u16, u32) at 0x5F6, and 0x50D adds the base vertex.
 - A multisampled target is allocated in samples (2560x1440 for 4x at 720p)
   while viewports and scissors stay in pixels; the multisample mode at 0x574
-  gives the sample grid, and the clear scissor scales by it too. We shade
-  every sample, which is supersampling, and deko3d's resolve is a 2D engine
-  (0x902D) scaled blit from the sample image, started by method 0x237.
+  gives the sample grid, and the clear scissor scales by it too. The shader
+  runs once per pixel and its colour goes to every sample of the pixel that
+  is covered and passes the depth test, as on hardware; deko3d's resolve is
+  a 2D engine (0x902D) scaled blit from the sample image, started by method
+  0x237.
 - Fragment outputs follow the SPH output map (word 18, four component bits
   per target): enabled components take consecutive registers from R0.
 - Compiled GLSL brings control flow and instructions our test shaders never
