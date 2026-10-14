@@ -96,6 +96,8 @@ int gpu_tex_init(gpu_texture *t, const uint32_t tic[8], const uint32_t tsc[8], g
                  void *user) {
     memset(t, 0, sizeof(*t));
     t->format = tic[0] & 0x7F;
+    t->snorm = ((tic[0] >> 7) & 7) == 1; /* R's component type speaks for all */
+    t->srgb = (tic[4] >> 22) & 1;
     t->swizzle = (tic[0] >> 19) & 0xFFF;
     t->unit_bytes = gpu_tex_unit_bytes(t->format);
     t->block = t->format >= FMT_BC1 && t->format <= FMT_BC5 ? 4 : 1;
@@ -121,6 +123,8 @@ int gpu_tex_init(gpu_texture *t, const uint32_t tic[8], const uint32_t tsc[8], g
     t->mip_filter = (tsc[1] >> 6) & 3;
     t->lod_bias = fixed_s13((tsc[1] >> 12) & 0x1FFF) + fixed_s13((tic[6] >> 6) & 0x1FFF);
     t->lod_min = (float)(tsc[2] & 0xFFF) / 256.0f;
+    float image_min = (float)((tic[7] >> 12) & 0xFFF) / 256.0f; /* TIC min lod clamp */
+    t->lod_min = image_min > t->lod_min ? image_min : t->lod_min;
     t->lod_max = (float)((tsc[2] >> 12) & 0xFFF) / 256.0f;
     memcpy(t->border, tsc + 4, 16);
     if (!t->unit_bytes || (layout != 2 && layout != 3)) {
@@ -146,6 +150,11 @@ int gpu_tex_init(gpu_texture *t, const uint32_t tic[8], const uint32_t tsc[8], g
     t->base = map(user, va, t->size);
     t->valid = t->base != NULL;
     return t->valid;
+}
+
+/* The sRGB transfer function, encoded 0..1 to linear (as gpu_engines.c's tables). */
+static float srgb_to_linear(float v) {
+    return v <= 0.04045f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
 }
 
 /* ---- block compression ------------------------------------------------------------- */
@@ -188,28 +197,51 @@ static void bc1_colors(const uint8_t *b, uint32_t tx, uint32_t ty, int four_only
 
 /* The BC3/BC4/BC5 8-byte channel block: two 8-bit endpoints and 3-bit indices
  * (LSB first); a0 > a1 interpolates six values, otherwise four plus 0 and 1. */
-static float bc3_channel(const uint8_t *b, uint32_t tx, uint32_t ty) {
-    uint32_t a0 = b[0], a1 = b[1];
+static uint32_t bc3_index(const uint8_t *b, uint32_t tx, uint32_t ty) {
     uint64_t bits = 0;
     for (int k = 5; k >= 0; k--) {
         bits = (bits << 8) | b[2 + k];
     }
-    uint32_t idx = (uint32_t)(bits >> (3 * (ty * 4 + tx))) & 7;
-    float v;
+    return (uint32_t)(bits >> (3 * (ty * 4 + tx))) & 7;
+}
+
+/* The eight-value scheme shared by BC3's alpha, BC4 and BC5: endpoints a0 and a1,
+ * six interpolated values between them when a0 > a1, else four plus `lo` and `hi`. */
+static float bc3_value(int32_t a0, int32_t a1, uint32_t idx, float lo, float hi) {
     if (idx == 0) {
-        v = (float)a0;
-    } else if (idx == 1) {
-        v = (float)a1;
-    } else if (a0 > a1) {
-        v = (float)((8 - idx) * a0 + (idx - 1) * a1) / 7.0f;
-    } else if (idx == 6) {
-        v = 0.0f;
-    } else if (idx == 7) {
-        v = 255.0f;
-    } else {
-        v = (float)((6 - idx) * a0 + (idx - 1) * a1) / 5.0f;
+        return (float)a0;
     }
-    return v / 255.0f;
+    if (idx == 1) {
+        return (float)a1;
+    }
+    if (a0 > a1) {
+        return (float)((8 - (int32_t)idx) * a0 + ((int32_t)idx - 1) * a1) / 7.0f;
+    }
+    if (idx == 6) {
+        return lo;
+    }
+    if (idx == 7) {
+        return hi;
+    }
+    return (float)((6 - (int32_t)idx) * a0 + ((int32_t)idx - 1) * a1) / 5.0f;
+}
+
+static float bc3_channel(const uint8_t *b, uint32_t tx, uint32_t ty) {
+    return bc3_value(b[0], b[1], bc3_index(b, tx, ty), 0.0f, 255.0f) / 255.0f;
+}
+
+static float bc3_channel_snorm(const uint8_t *b, uint32_t tx, uint32_t ty) {
+    int32_t a0 = (int8_t)b[0], a1 = (int8_t)b[1];
+    a0 = a0 < -127 ? -127 : a0;
+    a1 = a1 < -127 ? -127 : a1;
+    return bc3_value(a0, a1, bc3_index(b, tx, ty), -127.0f, 127.0f) / 127.0f;
+}
+
+void gpu_bc_texel_snorm(uint32_t format, const uint8_t *b, uint32_t tx, uint32_t ty, float c[4]) {
+    c[0] = bc3_channel_snorm(b, tx, ty);
+    c[1] = format == FMT_BC5 ? bc3_channel_snorm(b + 8, tx, ty) : 0.0f;
+    c[2] = 0.0f;
+    c[3] = 1.0f;
 }
 
 void gpu_bc_texel(uint32_t format, const uint8_t *b, uint32_t tx, uint32_t ty, float c[4]) {
@@ -281,10 +313,14 @@ static void fetch_level(const gpu_texture *t, uint32_t level, int32_t ix, int32_
     float c[4] = {0, 0, 0, 1};
     if (off + t->unit_bytes <= t->size) {
         const uint8_t *p = t->base + off;
+        /* 8-bit unorm, or snorm: -128 reads as -127 */
+        const float scale = t->snorm ? 1.0f / 127.0f : 1.0f / 255.0f;
+#define BYTE(v)                                                                                    \
+    (t->snorm ? ((int8_t)(v) < -127 ? -127.0f : (float)(int8_t)(v)) : (float)(v)) * scale
         switch (t->format) {
         case 0x08:
             for (int k = 0; k < 4; k++) {
-                c[k] = p[k] / 255.0f;
+                c[k] = BYTE(p[k]);
             }
             break;
         case 0x15: {
@@ -295,11 +331,11 @@ static void fetch_level(const gpu_texture *t, uint32_t level, int32_t ix, int32_
             break;
         }
         case 0x18:
-            c[0] = p[0] / 255.0f;
-            c[1] = p[1] / 255.0f;
+            c[0] = BYTE(p[0]);
+            c[1] = BYTE(p[1]);
             break;
         case 0x1D:
-            c[0] = p[0] / 255.0f;
+            c[0] = BYTE(p[0]);
             break;
         case 0x0F:
             memcpy(&c[0], p, 4);
@@ -316,10 +352,19 @@ static void fetch_level(const gpu_texture *t, uint32_t level, int32_t ix, int32_
             }
             break;
         default:
-            if (t->block == 4) {
+            if (t->block == 4 && t->snorm && t->format >= FMT_BC4) {
+                gpu_bc_texel_snorm(t->format, p, (uint32_t)ix & 3, (uint32_t)iy & 3, c);
+            } else if (t->block == 4) {
                 gpu_bc_texel(t->format, p, (uint32_t)ix & 3, (uint32_t)iy & 3, c);
             }
             break;
+        }
+#undef BYTE
+        if (t->srgb && (t->format == 0x08 || t->format == 0x18 || t->format == 0x1D ||
+                        (t->format >= FMT_BC1 && t->format <= FMT_BC3))) {
+            for (int k = 0; k < 3; k++) { /* alpha stays linear */
+                c[k] = srgb_to_linear(c[k]);
+            }
         }
     }
     /* Swizzle: per destination component, 0 zero, 2-5 R G B A, 6/7 one. */
@@ -330,8 +375,9 @@ static void fetch_level(const gpu_texture *t, uint32_t level, int32_t ix, int32_
 }
 
 void gpu_tex_fetch(const gpu_texture *t, uint32_t level, int32_t x, int32_t y, float out[4]) {
-    uint32_t l = t->min_level + level;
-    fetch_level(t, l > t->max_level ? t->max_level : l, x, y, out);
+    /* compared before adding: a negative level in the register is a huge one */
+    uint32_t l = level > t->max_level - t->min_level ? t->max_level : t->min_level + level;
+    fetch_level(t, l, x, y, out);
 }
 
 /* ---- sampling ----------------------------------------------------------------------- */
@@ -359,25 +405,24 @@ static void sample_level(const gpu_texture *t, uint32_t level, float u, float v,
 }
 
 float gpu_tex_lambda(const gpu_texture *t, const shader_tex_coord *c) {
+    /* OpenGL 4.6 8.14.1: the base from the instruction, the biases, then the clamps. */
     float lambda = 0.0f;
-    if (c->lod_mode == SHADER_LOD_ZERO) {
-        return 0.0f;
-    }
     if (c->lod_mode == SHADER_LOD_EXPLICIT) {
         lambda = c->lod;
-    } else {
-        if (c->has_grad) {
-            /* The footprint's longer axis in texels of the view's first level. */
-            float w = (float)level_dim(t->width, t->min_level);
-            float h = (float)level_dim(t->height, t->min_level);
-            float dx = hypotf(c->dudx * w, c->dvdx * h), dy = hypotf(c->dudy * w, c->dvdy * h);
-            float rho = dx > dy ? dx : dy;
-            lambda = rho > 0.0f ? log2f(rho) : -16.0f;
-        }
-        if (c->lod_mode == SHADER_LOD_BIAS) {
-            lambda += c->lod;
-        }
-        lambda += t->lod_bias;
+    } else if (c->lod_mode != SHADER_LOD_ZERO && c->has_grad) {
+        /* The footprint's longer axis in texels of the view's first level. */
+        float w = (float)level_dim(t->width, t->min_level);
+        float h = (float)level_dim(t->height, t->min_level);
+        float dx = hypotf(c->dudx * w, c->dvdx * h), dy = hypotf(c->dudy * w, c->dvdy * h);
+        float rho = dx > dy ? dx : dy;
+        lambda = rho > 0.0f ? log2f(rho) : -16.0f;
+    }
+    if (c->lod_mode == SHADER_LOD_BIAS) {
+        lambda += c->lod;
+    }
+    lambda += t->lod_bias;
+    if (lambda != lambda) {
+        lambda = 0.0f; /* a helper pixel's extrapolated coordinates can be NaN */
     }
     if (lambda < t->lod_min) {
         lambda = t->lod_min;

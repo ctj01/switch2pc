@@ -83,6 +83,7 @@ struct shader_env {
     uint32_t r[260]; /* r255 (RZ) reads as zero; writes to it land in r[256] */
     uint8_t p[9];    /* p7 (PT) is always true; writes to it land in p[8] */
     int killed;      /* fragment discarded */
+    int helper;      /* an uncovered pixel run for its quad's derivatives: no memory writes */
 };
 
 /**
@@ -96,6 +97,10 @@ void shader_prog_release(shader_prog *prog);
 
 /** Run a decoded shader; results as shader_run. Safe from several threads at once. */
 int shader_exec(const shader_prog *prog, shader_env *env, uint64_t *bad_insn);
+
+/** Whether the program samples with an implicit level of detail (TEX/TEXS without
+ * .LZ or .LL), so its fragments must run in 2x2 quads for the derivatives. */
+int shader_prog_needs_quads(const shader_prog *prog);
 
 /**
  * Decode and run a shader from its first instruction (just after the 0x50-byte
@@ -114,6 +119,7 @@ int shader_run(const uint64_t *code, uint32_t code_words, shader_env *env, uint6
  * masks; IPA asks for a lane. Results equal running each lane with shader_exec.
  */
 #define SHADER_LANES 8
+_Static_assert(SHADER_LANES % 4 == 0, "lanes are packed in 2x2 quads");
 
 typedef float (*shader_ipa_lane_fn)(void *user, uint32_t lane, uint32_t addr, uint32_t mode);
 
@@ -121,6 +127,8 @@ typedef struct shader_group {
     uint32_t r[260][SHADER_LANES]; /* as shader_env.r, per lane */
     uint32_t p[9];                 /* as shader_env.p, one bit per lane */
     uint32_t carry;
+    uint32_t helper; /* lanes that are helpers: they run but store nothing (STG) */
+    int quads;       /* lanes 4q..4q+3 are a 2x2 pixel quad: texture derivatives exist */
     shader_ipa_lane_fn ipa;
     void *user;
 } shader_group;

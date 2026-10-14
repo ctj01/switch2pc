@@ -176,6 +176,17 @@ static void tex_sample(void *user, uint32_t index, const shader_tex_coord *c, fl
         out[3] = 1.0f;
         return;
     }
+    if (!c->has_grad && x->t.max_level > x->t.min_level &&
+        (c->lod_mode == SHADER_LOD_IMPLICIT || c->lod_mode == SHADER_LOD_BIAS)) {
+        /* The lane ran alone (its quad diverged, or an instruction groups do not
+         * run came first): no derivatives, so the base level. Said once. */
+        static int warned;
+        if (!__atomic_exchange_n(&warned, 1, __ATOMIC_RELAXED)) {
+            HOS_LOGW(MOD,
+                     "texture %u sampled without derivatives (divergent lanes): base level used",
+                     index);
+        }
+    }
     gpu_tex_sample(&x->t, c, out);
 }
 
@@ -671,9 +682,11 @@ void gpu_ms_grid(uint32_t mode, uint32_t *gx, uint32_t *gy) {
 
 /*
  * Pixels are shaded in 2x2 quads, two quads per group of SHADER_LANES, as the
- * hardware does: a quad with any covered pixel runs all four lanes, so the
- * texture units get the coordinate derivatives across the quad, and the
- * uncovered lanes (helpers) write nothing. Each quad waits with its coverage,
+ * hardware does, when the shader samples with an implicit level of detail: a
+ * quad with any covered pixel runs all four lanes, so the texture units get the
+ * coordinate derivatives across the quad, and the uncovered lanes (helpers)
+ * write nothing, neither pixels nor global memory. Other shaders pack covered
+ * pixels only, SHADER_LANES at a time. Each pixel waits with its coverage,
  * depth and interpolation state until the group is full or the triangle ends,
  * then the group runs and its colours and depths are written in the order the
  * pixels were found. Pixels of one triangle never overlap, so deferring their
@@ -695,6 +708,7 @@ typedef struct frag_batch {
     gpu_draw_stats *st;
     uint32_t omap, first_reg[8], gx, ns;
     int depth_write_on;
+    int quads; /* lanes are 2x2 pixel quads (helpers included), else covered pixels */
     uint32_t n;
     pending_frag frag[SHADER_LANES];
     raster_ctx ctx[SHADER_LANES];
@@ -716,6 +730,11 @@ static int flush_batch(frag_batch *b) {
     uint64_t bad = 0;
     uint32_t n = b->n;
     b->n = 0;
+    g->helper = 0;
+    for (uint32_t q = 0; q < n; q++) {
+        g->helper |= (b->frag[q].cover == 0) << q;
+    }
+    g->quads = b->quads;
     if (shader_exec_group(b->fs->prog, g, (1u << n) - 1, b->env, &bad) != 0) {
         if (!b->st->shader_errors++) {
             HOS_LOGW(MOD, "fragment shader stopped at instruction %#018" PRIx64, bad);
@@ -846,9 +865,13 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
     fb->ns = ns;
     fb->depth_write_on = depth_write_on;
     fb->n = 0;
+    fb->quads = shader_prog_needs_quads(fs->prog);
     /* A quad is 2x2 pixels, 2gx x 2gy samples; BAND_ROWS is a multiple of 2gy, so a
-     * quad never straddles two workers' bands. */
-    int32_t qw = 2 * (int32_t)gx, qh = 2 * (int32_t)gy;
+     * quad never straddles two workers' bands. Without quads a block is one pixel
+     * and only covered pixels join the group. */
+    uint32_t lanes = fb->quads ? 4 : 1;
+    int32_t qw = (int32_t)(lanes == 4 ? 2 : 1) * (int32_t)gx;
+    int32_t qh = (int32_t)(lanes == 4 ? 2 : 1) * (int32_t)gy;
     int32_t qx0 = x0 - x0 % qw, qy0 = y0 - y0 % qh;
     for (int32_t qy = qy0; qy < y1; qy += qh) {
         if (((uint32_t)qy / BAND_ROWS) % nbands != band) {
@@ -856,7 +879,7 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
         }
         for (int32_t qx = qx0; qx < x1; qx += qw) {
             uint32_t any = 0;
-            for (uint32_t lane = 0; lane < 4; lane++) {
+            for (uint32_t lane = 0; lane < lanes; lane++) {
                 int32_t bx = qx + (int32_t)(lane & 1) * (int32_t)gx;
                 int32_t by = qy + (int32_t)(lane >> 1) * (int32_t)gy;
                 pending_frag *fr = &fb->frag[fb->n + lane];
@@ -907,7 +930,7 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
             if (!any) {
                 continue;
             }
-            fb->n += 4;
+            fb->n += lanes;
             if (fb->n == SHADER_LANES && flush_batch(fb) != 0) {
                 free(fb);
                 return;

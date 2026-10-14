@@ -307,6 +307,124 @@ TEST(shader_tessellation_attributes) {
     ASSERT_EQ(patch[0], 0);
 }
 
+/* Groups packed as 2x2 quads give TEX the coordinate derivatives across the quad:
+ * with u = a*x + b*y over the quad's pixels, dudx = a and dudy = b for every lane;
+ * a group not packed as quads has none. */
+static shader_tex_coord g_coords[SHADER_LANES];
+static uint32_t g_ncoords;
+
+static void record_tex(void *user, uint32_t index, const shader_tex_coord *c, float out[4]) {
+    (void)user;
+    (void)index;
+    if (g_ncoords < SHADER_LANES) {
+        g_coords[g_ncoords++] = *c;
+    }
+    out[0] = out[1] = out[2] = out[3] = 0.0f;
+}
+
+TEST(shader_group_quads_give_texture_derivatives) {
+    const uint64_t insns[] = {
+        /* tex r4.. = texture 0 at (r0, r1), implicit lod ([39:37] = 0), mask rgba */
+        OPC(0xc038) | PT_GUARD | D(4) | A(0) | (0xFull << 31),
+        OPC(0xe300) | PT_GUARD,
+    };
+    uint64_t code[8];
+    uint32_t n = assemble(insns, 2, code);
+    shader_prog *prog = shader_prog_get(code, n);
+    ASSERT_TRUE(prog != NULL);
+    ASSERT_EQ(shader_prog_needs_quads(prog), 1);
+    static shader_env e;
+    static shader_group g;
+    memset(&e, 0, sizeof(e));
+    memset(&g, 0, sizeof(g));
+    e.tex = record_tex;
+    const float a = 0.25f, b = -0.5f;
+    for (uint32_t l = 0; l < SHADER_LANES; l++) {
+        float x = (float)(l & 1) + (float)(l / 4) * 2.0f, y = (float)((l >> 1) & 1);
+        float u = a * x + b * y, v = 2.0f * a * x - b * y;
+        memcpy(&g.r[0][l], &u, 4);
+        memcpy(&g.r[1][l], &v, 4);
+    }
+    g.quads = 1;
+    g_ncoords = 0;
+    uint64_t bad = 0;
+    ASSERT_EQ(shader_exec_group(prog, &g, 0xFF, &e, &bad), 0);
+    ASSERT_EQ(g_ncoords, SHADER_LANES);
+    for (uint32_t l = 0; l < SHADER_LANES; l++) {
+        ASSERT_EQ(g_coords[l].has_grad, 1);
+        ASSERT_TRUE(g_coords[l].dudx == a && g_coords[l].dudy == b);
+        ASSERT_TRUE(g_coords[l].dvdx == 2.0f * a && g_coords[l].dvdy == -b);
+        ASSERT_EQ(g_coords[l].lod_mode, SHADER_LOD_IMPLICIT);
+    }
+    /* covered pixels packed one by one: no quad, no derivatives */
+    g.quads = 0;
+    g_ncoords = 0;
+    ASSERT_EQ(shader_exec_group(prog, &g, 0xFF, &e, &bad), 0);
+    for (uint32_t l = 0; l < SHADER_LANES; l++) {
+        ASSERT_EQ(g_coords[l].has_grad, 0);
+    }
+    /* a quad with a lane gone (divergence) has none either */
+    g.quads = 1;
+    g_ncoords = 0;
+    ASSERT_EQ(shader_exec_group(prog, &g, 0xF7, &e, &bad), 0);
+    ASSERT_EQ(g_coords[0].has_grad, 0); /* lanes 0-2 of the broken quad */
+    ASSERT_EQ(g_coords[3].has_grad, 1); /* the whole second quad */
+    shader_prog_release(prog);
+    /* .LZ needs no quads */
+    const uint64_t lz[] = {OPC(0xc038) | PT_GUARD | D(4) | A(0) | (0xFull << 31) | (1ull << 37),
+                           OPC(0xe300) | PT_GUARD};
+    n = assemble(lz, 2, code);
+    prog = shader_prog_get(code, n);
+    ASSERT_TRUE(prog != NULL);
+    ASSERT_EQ(shader_prog_needs_quads(prog), 0);
+    shader_prog_release(prog);
+}
+
+/* Helper lanes (uncovered pixels of a quad) run the shader but store nothing:
+ * their addresses are extrapolated. An unmapped load gives them zeros. */
+TEST(shader_helper_lanes_do_not_store) {
+    static uint32_t cb0[0x150 / 4];
+    cb0[0x140 / 4] = 0; /* the buffer at 0x2_00000000: r0 holds each lane's offset */
+    cb0[0x144 / 4] = 0x2;
+    const uint64_t insns[] = {
+        0x4c10800005070000ull,                                    /* iadd.cc r0 += c0[0x140] */
+        0x4c1008000517ff01ull,                                    /* iadd.x r1 = c0[0x144] */
+        OPC(0x0100) | PT_GUARD | D(8) | ((uint64_t)0xBEEF << 20), /* mov32i r8 */
+        0xeedc200000070008ull,                                    /* stg.e [r0] = r8 */
+        0xeed4200000070009ull,                                    /* ldg.e r9 = [r0] */
+        OPC(0xe300) | PT_GUARD,
+    };
+    uint64_t code[16];
+    uint32_t n = assemble(insns, sizeof(insns) / sizeof(insns[0]), code);
+    shader_prog *prog = shader_prog_get(code, n);
+    ASSERT_TRUE(prog != NULL);
+    static shader_env e;
+    static shader_group g;
+    memset(&e, 0, sizeof(e));
+    memset(&g, 0, sizeof(g));
+    memset(g_global, 0, sizeof(g_global));
+    e.cb[0] = (const uint8_t *)cb0;
+    e.cb_size[0] = sizeof(cb0);
+    e.mem = test_mem;
+    /* lane l stores at word l; lanes 1, 3 and 5 are helpers, and 5 points past the buffer */
+    g.helper = (1u << 1) | (1u << 3) | (1u << 5);
+    for (uint32_t l = 0; l < SHADER_LANES; l++) {
+        g.r[0][l] = l == 5 ? 0x1000 : 4 * l;
+    }
+    uint64_t bad = 0;
+    ASSERT_EQ(shader_exec_group(prog, &g, 0xFF, &e, &bad), 0);
+    for (uint32_t l = 0; l < SHADER_LANES; l++) {
+        uint32_t v;
+        memcpy(&v, g_global + 4 * l, 4);
+        ASSERT_EQ(v, (g.helper >> l) & 1 ? 0u : 0xBEEFu);
+        ASSERT_EQ(g.r[9][l], (g.helper >> l) & 1 ? 0u : 0xBEEFu); /* nothing stored, or zeros */
+    }
+    /* the same unmapped address on a covered lane stops the group */
+    g.helper = 0;
+    ASSERT_EQ(shader_exec_group(prog, &g, 0xFF, &e, &bad), -1);
+    shader_prog_release(prog);
+}
+
 TEST(shader_unknown_instruction_is_reported) {
     const uint64_t insns[] = {0xdeadbeefcaf00000ull | PT_GUARD, OPC(0xe300) | PT_GUARD};
     uint64_t code[8];
