@@ -117,6 +117,8 @@ HOS_HIDDEN int hos_perm_to_prot(uint32_t perm);
 
 /* sync.c */
 HOS_HIDDEN void hos_sync_thread_exited(hos_thread *t);
+/* After SetThreadPriority: a parked thread re-queues behind its new priority's waiters. */
+HOS_HIDDEN void hos_sync_priority_changed(hos_thread *t);
 HOS_HIDDEN void hos_event_release(hos_event *e);
 HOS_HIDDEN hos_result hos_event_create(uint32_t *out_writable, uint32_t *out_readable);
 HOS_HIDDEN void hos_event_signal(hos_event *e);

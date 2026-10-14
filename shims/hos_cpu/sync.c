@@ -4,8 +4,9 @@
  * each blocked thread sleeps on its own condition variable. The list is kept
  * in arrival order and a wake picks the highest-priority waiter (the lowest
  * number, as the kernel does), the earliest arrival among equals, reading
- * each thread's priority at that moment so SetThreadPriority on a parked
- * thread takes effect at once.
+ * each thread's priority at that moment; SetThreadPriority on a parked thread
+ * takes effect at once and moves it behind the waiters of its new priority,
+ * as the kernel re-inserts it.
  */
 
 #include <errno.h>
@@ -127,6 +128,38 @@ static int32_t count_waiters(wait_kind kind, uint64_t key) {
     return n;
 }
 
+/* Is anyone parked on `key`? */
+static int any_waiter(wait_kind kind, uint64_t key) {
+    for (waiter *w = g_list.next; w != &g_list; w = w->next) {
+        if (w->kind == kind && w->key == key) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int32_t hos_sync_waiters_on(uint64_t key) {
+    pthread_mutex_lock(&g_lock);
+    int32_t n = 0;
+    for (waiter *w = g_list.next; w != &g_list; w = w->next) {
+        n += w->kind != WAIT_SYNC && w->key == key;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return n;
+}
+
+void hos_sync_priority_changed(hos_thread *t) {
+    pthread_mutex_lock(&g_lock);
+    for (waiter *w = g_list.next; w != &g_list; w = w->next) {
+        if (w->thread == t) {
+            list_remove(w); /* to the tail: behind the waiters of its new priority */
+            list_add(w);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
 static int32_t waiter_priority(const waiter *w) {
     /* SetThreadPriority writes it from another thread without this lock. */
     return w->thread ? __atomic_load_n(&w->thread->priority, __ATOMIC_RELAXED) : 44;
@@ -155,7 +188,7 @@ static void mutex_release(uint64_t addr) {
     }
     list_remove(w);
     uint32_t v = w->thread->handle;
-    if (first_waiter(WAIT_MUTEX, addr)) {
+    if (any_waiter(WAIT_MUTEX, addr)) {
         v |= HOS_MUTEX_HAS_LISTENERS;
     }
     store32(addr, v);
@@ -248,7 +281,7 @@ void svc_signal_process_wide_key(hos_svc_regs *r) {
         condvar_wake_one(w);
         woken++;
     }
-    if (!first_waiter(WAIT_CONDVAR, cv_addr)) {
+    if (!any_waiter(WAIT_CONDVAR, cv_addr)) {
         store32(cv_addr, 0);
     }
     pthread_mutex_unlock(&g_lock);
@@ -341,14 +374,28 @@ void svc_signal_to_address(hos_svc_regs *r) {
         }
         store32(addr, (uint32_t)(value + 1));
         break;
-    case ARB_SIGNAL_AND_MODIFY_BY_WAITING_COUNT_IF_EQUAL:
+    case ARB_SIGNAL_AND_MODIFY_BY_WAITING_COUNT_IF_EQUAL: {
+        /* The kernel's decision (KAddressArbiter): with nobody waiting the value goes
+         * up by one; waking everyone takes it down by two; otherwise it counts the
+         * waiters beyond the first, up to count + 1: none means up by one, at most
+         * `count` means down by one, more leaves it alone. */
+        int32_t new_value;
+        if (count <= 0) {
+            new_value = waiting > 0 ? value - 2 : value + 1;
+        } else if (waiting == 0) {
+            new_value = value + 1;
+        } else {
+            int32_t beyond = waiting - 1 < count + 1 ? waiting - 1 : count + 1;
+            new_value = beyond == 0 ? value + 1 : beyond <= count ? value - 1 : value;
+        }
         if ((int32_t)load32(addr) != value) {
             pthread_mutex_unlock(&g_lock);
             r->x[0] = HOS_KERNEL_INVALID_STATE;
             return;
         }
-        store32(addr, (uint32_t)((waiting - to_wake > 0) ? value - 1 : value + 1));
+        store32(addr, (uint32_t)new_value);
         break;
+    }
     default:
         pthread_mutex_unlock(&g_lock);
         r->x[0] = HOS_KERNEL_INVALID_ENUM_VALUE;
