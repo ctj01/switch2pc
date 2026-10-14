@@ -3,6 +3,7 @@
 #include "gpu_texture.h"
 
 #include <math.h>
+#include <pthread.h>
 #include <string.h>
 
 #include "gpu_draw.h"
@@ -152,9 +153,20 @@ int gpu_tex_init(gpu_texture *t, const uint32_t tic[8], const uint32_t tsc[8], g
     return t->valid;
 }
 
-/* The sRGB transfer function, encoded 0..1 to linear (as gpu_engines.c's tables). */
+/* The sRGB transfer function, encoded 0..1 to linear; the 8-bit formats go through
+ * a table (powf per texel and channel was a third of an sRGB scene's time in
+ * gpu_engines.c), the block formats' interpolated values through the formula. */
 static float srgb_to_linear(float v) {
     return v <= 0.04045f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
+}
+
+static float g_srgb_dec[256];
+static pthread_once_t g_srgb_once = PTHREAD_ONCE_INIT;
+
+static void srgb_init(void) {
+    for (int k = 0; k < 256; k++) {
+        g_srgb_dec[k] = srgb_to_linear((float)k / 255.0f);
+    }
 }
 
 /* ---- block compression ------------------------------------------------------------- */
@@ -315,6 +327,7 @@ static void fetch_level(const gpu_texture *t, uint32_t level, int32_t ix, int32_
         const uint8_t *p = t->base + off;
         /* 8-bit unorm, or snorm: -128 reads as -127 */
         const float scale = t->snorm ? 1.0f / 127.0f : 1.0f / 255.0f;
+        int srgb8 = t->srgb && !t->snorm; /* RGB bytes through the table, below */
 #define BYTE(v)                                                                                    \
     (t->snorm ? ((int8_t)(v) < -127 ? -127.0f : (float)(int8_t)(v)) : (float)(v)) * scale
         switch (t->format) {
@@ -360,9 +373,14 @@ static void fetch_level(const gpu_texture *t, uint32_t level, int32_t ix, int32_
             break;
         }
 #undef BYTE
-        if (t->srgb && (t->format == 0x08 || t->format == 0x18 || t->format == 0x1D ||
-                        (t->format >= FMT_BC1 && t->format <= FMT_BC3))) {
-            for (int k = 0; k < 3; k++) { /* alpha stays linear */
+        if (srgb8 && (t->format == 0x08 || t->format == 0x18 || t->format == 0x1D)) {
+            pthread_once(&g_srgb_once, srgb_init);
+            int n = t->format == 0x08 ? 3 : t->format == 0x18 ? 2 : 1; /* alpha stays linear */
+            for (int k = 0; k < n; k++) {
+                c[k] = g_srgb_dec[p[k]];
+            }
+        } else if (t->srgb && t->format >= FMT_BC1 && t->format <= FMT_BC3) {
+            for (int k = 0; k < 3; k++) {
                 c[k] = srgb_to_linear(c[k]);
             }
         }
@@ -385,6 +403,9 @@ void gpu_tex_fetch(const gpu_texture *t, uint32_t level, int32_t x, int32_t y, f
 static void sample_level(const gpu_texture *t, uint32_t level, float u, float v, int linear,
                          float out[4]) {
     float fx = u * (float)level_dim(t->width, level), fy = v * (float)level_dim(t->height, level);
+    if (!isfinite(fx) || !isfinite(fy)) {
+        fx = fy = 0.0f; /* a helper pixel's extrapolated coordinate; floorf's cast would be UB */
+    }
     if (!linear) {
         fetch_level(t, level, (int32_t)floorf(fx), (int32_t)floorf(fy), out);
         return;
