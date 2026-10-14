@@ -669,8 +669,8 @@ static int culled(const uint32_t *r, int front) {
     return cull == 0x408 || (cull == 0x404 && front) || (cull == 0x405 && !front);
 }
 
-/* Multisampled targets hold a grid of samples per pixel; we rasterise at sample resolution
- * (one shading per sample), so window coordinates and scissors scale by this grid. */
+/* Multisampled targets hold a grid of samples per pixel: coverage and depth are per sample,
+ * the shader runs once per pixel, and window coordinates and scissors scale by this grid. */
 void gpu_ms_grid(uint32_t mode, uint32_t *gx, uint32_t *gy) {
     static const uint8_t grid[5][2] = {{1, 1}, {2, 1}, {2, 2}, {4, 2}, {4, 4}};
     mode = mode < 5 ? mode : 0;
