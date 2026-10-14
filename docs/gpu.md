@@ -279,11 +279,12 @@ Each point below cost a failed run and is now in `nvgpu.c`:
   every other shader packs covered pixels only, as before. Helper lanes never
   store (`STG` is masked, an unmapped `LDG` reads zeros) and their
   extrapolated coordinates can make the level of detail NaN, which counts as
-  0. Measured with `scripts/bench_deko.sh` under qemu on a shared x86-64 host
-  (10 s rounds, noise about 10% between rounds): the textured cube went from
-  41 to 37 frames on average over three rounds; the cube, the teapot, the
-  deferred scene and the compute lines stayed within noise, since they do not
-  sample implicitly.
+  0. Measured with `scripts/bench_deko.sh 10 3 4 7 9` under qemu on a shared
+  x86-64 host, two rounds each, main then this branch (frames in 10 s): the
+  cube 46, 45 then 45, 44; the textured cube 27, 25 then 25, 23; the teapot
+  7, 7 then 6, 6; the compute lines 98, 89 then 96, 90. The textured cube,
+  the one scene that samples implicitly, pays about 8%; the others are within
+  a frame of main.
 - The level of detail follows OpenGL 8.14.1 in one place (`gpu_tex_lambda`):
   the instruction's base (derivatives, `.LL`'s level, 0 for `.LZ`), plus the
   `.LB` bias and the sampler's and image's biases, then the sampler's clamps
