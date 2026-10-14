@@ -337,7 +337,7 @@ static shader_prog *prog_build(const uint64_t *code, uint32_t n) {
             predecode(code[pc], &p->ins[pc]);
             const pinsn *in = &p->ins[pc];
             if (in->op == OP_TEX) {
-                uint32_t mode = tex_lod_mode(bits(code[pc], 37, 3));
+                uint32_t mode = tex_lod_mode(bits(code[pc], 55, 3));
                 p->implicit_lod |= mode == SHADER_LOD_IMPLICIT || mode == SHADER_LOD_BIAS;
             } else if (in->op == OP_TEXS) {
                 p->implicit_lod |= texs_form(bits(code[pc], 53, 4)).lod == SHADER_LOD_IMPLICIT;
@@ -788,10 +788,10 @@ int shader_exec_from(const shader_prog *prog, shader_env *e, uint32_t pc, shader
         }
         case OP_TEX: { /* TEX */
             /* dst [7:0].., coordinates A [15:8] (u) and A+1 (v), lod or bias in B [27:20]
-             * for the .LL/.LB forms ([39:37]), index [48:36], write mask [34:31] filling
+             * for the .LL/.LB forms ([57:55]), index [48:36], write mask [34:31] filling
              * consecutive registers. */
             uint32_t ra = bits(i, 8, 8), rb = bits(i, 20, 8);
-            shader_tex_coord tc = {.lod_mode = (int)tex_lod_mode(bits(i, 37, 3))};
+            shader_tex_coord tc = {.lod_mode = (int)tex_lod_mode(bits(i, 55, 3))};
             tc.u = f(a);
             tc.v = f(reg(e, ra == RZ ? RZ : ra + 1));
             if (tc.lod_mode == SHADER_LOD_EXPLICIT || tc.lod_mode == SHADER_LOD_BIAS) {

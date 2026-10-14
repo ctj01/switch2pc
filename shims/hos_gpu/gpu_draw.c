@@ -176,7 +176,7 @@ static void tex_sample(void *user, uint32_t index, const shader_tex_coord *c, fl
         out[3] = 1.0f;
         return;
     }
-    if (!c->has_grad && x->t.max_level > x->t.min_level &&
+    if (!c->has_grad && x->t.max_level > x->t.min_level && x->t.mip_filter != 1 &&
         (c->lod_mode == SHADER_LOD_IMPLICIT || c->lod_mode == SHADER_LOD_BIAS)) {
         /* The lane ran alone (its quad diverged, or an instruction groups do not
          * run came first): no derivatives, so the base level. Said once. */
@@ -884,15 +884,16 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
                 int32_t by = qy + (int32_t)(lane >> 1) * (int32_t)gy;
                 pending_frag *fr = &fb->frag[fb->n + lane];
                 uint32_t cover = 0;
+                float w0 = 0.0f, w1 = 0.0f, w2 = 0.0f; /* the last sample's, reused when ns == 1 */
                 for (uint32_t k = 0; k < ns; k++) {
                     int32_t x = bx + (int32_t)(k % gx), y = by + (int32_t)(k / gx);
                     if (x < x0 || x >= x1 || y < y0 || y >= y1) {
                         continue;
                     }
                     float px = (float)x + 0.5f, py = (float)y + 0.5f;
-                    float w0 = edge(v1->win, v2->win, px, py) * inv_area;
-                    float w1 = edge(v2->win, v0->win, px, py) * inv_area;
-                    float w2 = edge(v0->win, v1->win, px, py) * inv_area;
+                    w0 = edge(v1->win, v2->win, px, py) * inv_area;
+                    w1 = edge(v2->win, v0->win, px, py) * inv_area;
+                    w2 = edge(v0->win, v1->win, px, py) * inv_area;
                     if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
                         continue;
                     }
@@ -910,6 +911,9 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
                     }
                     cover |= 1u << k;
                 }
+                if (!cover && !fb->quads) {
+                    continue; /* an uncovered pixel joins no group */
+                }
                 /* Attributes at the pixel centre, covered or not: a helper lane only
                  * feeds derivatives. gl_FragCoord is in pixels. */
                 raster_ctx *c = &fb->ctx[fb->n + lane];
@@ -917,9 +921,15 @@ static void raster_triangle(const uint32_t *r, const vertex *v0, const vertex *v
                 c->v[1] = v1;
                 c->v[2] = v2;
                 float cx = (float)bx + 0.5f * (float)gx, cy = (float)by + 0.5f * (float)gy;
-                c->l[0] = edge(v1->win, v2->win, cx, cy) * inv_area;
-                c->l[1] = edge(v2->win, v0->win, cx, cy) * inv_area;
-                c->l[2] = edge(v0->win, v1->win, cx, cy) * inv_area;
+                if (ns == 1) { /* the one sample is the pixel centre */
+                    c->l[0] = w0;
+                    c->l[1] = w1;
+                    c->l[2] = w2;
+                } else {
+                    c->l[0] = edge(v1->win, v2->win, cx, cy) * inv_area;
+                    c->l[1] = edge(v2->win, v0->win, cx, cy) * inv_area;
+                    c->l[2] = edge(v0->win, v1->win, cx, cy) * inv_area;
+                }
                 c->px = cx / (float)gx;
                 c->py = cy / (float)gy;
                 fr->bx = bx;

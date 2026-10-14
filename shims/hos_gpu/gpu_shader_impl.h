@@ -186,10 +186,10 @@ _Static_assert(OP_ISBERD == 37, "OP_* must follow classify()'s numbering");
 /*
  * Texture instruction forms. TEXS [56:53] (envydis tabd000): which registers
  * hold the coordinates and where the lod comes from; TLDS [56:53] (tabd200)
- * likewise with an integer lod; TEX [39:37] (tabdeb8): 0 implicit, 1 lz,
- * 2 lb, 3 ll, 6 lba, 7 lla, coordinates always A and A+1, lod or bias in B.
- * Array (a2d) forms sample the layer's 2D image with the layer ignored; 3D
- * and cube forms are unsupported and stop the shader.
+ * likewise with an integer lod; TEX [57:55] (tabdeb8; [39:37] is inside the index, uam-checked): 0
+ * implicit, 1 lz, 2 lb, 3 ll, 6 lba, 7 lla, coordinates always A and A+1, lod or bias in B. Array
+ * (a2d) forms sample the layer's 2D image with the layer ignored; 3D and cube forms are unsupported
+ * and stop the shader.
  */
 enum tex_coords {
     TEXC_A = 0,    /* 1D: u = A */

@@ -576,7 +576,7 @@ int shader_exec_group(const shader_prog *prog, shader_group *g, uint32_t active,
         }
         case OP_TEX: {
             uint32_t mask = bits(i, 31, 4), rb = bits(i, 20, 8), rv = ra == RZ ? RZ : ra + 1;
-            uint32_t lod_mode = tex_lod_mode(bits(i, 37, 3));
+            uint32_t lod_mode = tex_lod_mode(bits(i, 55, 3));
             shader_tex_coord tc[SHADER_LANES];
             quad_coords(g, m, ra, rv, (int)lod_mode, tc);
             FOR_LANES(m) {

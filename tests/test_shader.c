@@ -322,10 +322,41 @@ static void record_tex(void *user, uint32_t index, const shader_tex_coord *c, fl
     out[0] = out[1] = out[2] = out[3] = 0.0f;
 }
 
+/* uam's words for texture 0x1a4 (deko3d's binding 0): the LOD mode lives in
+ * [57:55], and [39:37] holds a piece of the index (2 here). */
+#define TEX_IMPLICIT 0xc0781a47a0470000ull /* textureOffset */
+#define TEX_LZ       0xc0f81a47a0870404ull /* textureLodOffset(.., 0.0, ..) */
+#define TEX_LB       0xc1781a47a0470000ull /* textureOffset with a bias */
+#define TEX_LL       0xc1f81a47a0470000ull /* textureLodOffset(.., 2.0, ..) */
+
+TEST(shader_tex_lod_mode_from_uam_words) {
+    static const uint64_t words[4] = {TEX_IMPLICIT, TEX_LZ, TEX_LB, TEX_LL};
+    static const int modes[4] = {SHADER_LOD_IMPLICIT, SHADER_LOD_ZERO, SHADER_LOD_BIAS,
+                                 SHADER_LOD_EXPLICIT};
+    static const int quads[4] = {1, 0, 1, 0};
+    for (int k = 0; k < 4; k++) {
+        const uint64_t insns[] = {words[k], OPC(0xe300) | PT_GUARD};
+        uint64_t code[8];
+        uint32_t n = assemble(insns, 2, code);
+        shader_prog *prog = shader_prog_get(code, n);
+        ASSERT_TRUE(prog != NULL);
+        ASSERT_EQ(shader_prog_needs_quads(prog), quads[k]);
+        static shader_env e;
+        memset(&e, 0, sizeof(e));
+        e.tex = record_tex;
+        g_ncoords = 0;
+        uint64_t bad = 0;
+        ASSERT_EQ(shader_exec(prog, &e, &bad), 0);
+        ASSERT_EQ(g_ncoords, 1);
+        ASSERT_EQ(g_coords[0].lod_mode, modes[k]);
+        shader_prog_release(prog);
+    }
+}
+
 TEST(shader_group_quads_give_texture_derivatives) {
     const uint64_t insns[] = {
-        /* tex r4.. = texture 0 at (r0, r1), implicit lod ([39:37] = 0), mask rgba */
-        OPC(0xc038) | PT_GUARD | D(4) | A(0) | (0xFull << 31),
+        /* tex r4.. = texture 0x1a4 at (r0, r1), implicit lod ([57:55] = 0), mask rgba */
+        OPC(0xc038) | PT_GUARD | D(4) | A(0) | (0xFull << 31) | (0x1a4ull << 36),
         OPC(0xe300) | PT_GUARD,
     };
     uint64_t code[8];
@@ -371,7 +402,8 @@ TEST(shader_group_quads_give_texture_derivatives) {
     ASSERT_EQ(g_coords[3].has_grad, 1); /* the whole second quad */
     shader_prog_release(prog);
     /* .LZ needs no quads */
-    const uint64_t lz[] = {OPC(0xc038) | PT_GUARD | D(4) | A(0) | (0xFull << 31) | (1ull << 37),
+    const uint64_t lz[] = {OPC(0xc038) | PT_GUARD | D(4) | A(0) | (0xFull << 31) |
+                               (0x1a4ull << 36) | (1ull << 55),
                            OPC(0xe300) | PT_GUARD};
     n = assemble(lz, 2, code);
     prog = shader_prog_get(code, n);
