@@ -30,6 +30,10 @@ each names one missing service, IPC command, kernel call or GPU feature, the
 apps that stop at it and where in the shims it goes. Those also labelled
 `good first issue` are single commands with an example next to them.
 
+Issues are not assigned. Open a pull request (a draft is fine, to show you are
+on it) instead of asking for one; when two cover the same issue, the first one
+ready to merge goes in.
+
 ## Adding an svc
 
 1. Declare `svc_<name>(hos_svc_regs *r)` in `shims/hos_cpu/cpu_internal.h`.

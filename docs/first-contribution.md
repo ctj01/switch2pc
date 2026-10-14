@@ -103,6 +103,11 @@ Adding a command is adding a `case`:
 Then open a pull request that says which issue it fixes and what the app does
 now. CONTRIBUTING.md has the full rules for services and kernel calls.
 
+You do not need to ask for an issue first: issues are not assigned, so pick
+one and open the pull request when it works. If two pull requests fix the same
+thing, the first one ready to merge goes in. Opening a draft pull request early
+is the way to say you are on it.
+
 ## 4. More: services, kernel calls, the GPU
 
 - A whole missing service (`[compat] service:NAME` issues): CONTRIBUTING.md,
