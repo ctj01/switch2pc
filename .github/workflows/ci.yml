@@ -62,15 +62,30 @@ jobs:
   # libFuzzer harnesses (#11) for the parsers that read untrusted bytes, a
   # minute each on a generated seed corpus; a crash fails the job and uploads
   # the input.
+  # libFuzzer harnesses (#11). Pull requests and branches get a deterministic
+  # run (fixed seed, bounded iterations), so a latent bug cannot turn an
+  # unrelated change red at random; main gets a minute per harness with the
+  # corpus kept between runs. Same-repository pull requests already ran on push.
   fuzz:
     runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - uses: actions/checkout@v4
       - name: Install clang
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang libclang-rt-18-dev cmake ninja-build
-      - name: Build and fuzz
+      - uses: actions/cache@v4
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: build/fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: Fuzz, deterministic
+        if: github.ref != 'refs/heads/main'
+        run: scripts/fuzz.sh --runs 50000
+      - name: Fuzz for a minute each, corpus kept
+        if: github.ref == 'refs/heads/main'
         run: scripts/fuzz.sh 60
       - uses: actions/upload-artifact@v4
         if: failure()

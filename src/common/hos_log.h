@@ -12,6 +12,7 @@
 #include <stddef.h>
 
 typedef enum hos_log_level {
+    HOS_LOG_OFF = -1, /* nothing at all, not even errors (the fuzz harnesses) */
     HOS_LOG_ERROR = 0,
     HOS_LOG_WARN = 1,
     HOS_LOG_INFO = 2,

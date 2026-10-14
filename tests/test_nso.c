@@ -1,6 +1,7 @@
 #include <elf.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #include "nso/mod0.h"
 #include "nso/nro.h"
@@ -319,13 +320,33 @@ static void add_dyn(uint8_t *img, int64_t tag, uint64_t value) {
 }
 
 /*
+ * A one-page image between two PROT_NONE pages: test_nso has no sanitizers, so
+ * a read or write just outside the image must fault rather than pass. An image
+ * shorter than a page sits at the end of its page, against the upper guard.
+ */
+static uint8_t *guarded_image(size_t size) {
+    uint8_t *m = mmap(NULL, 3 * 0x1000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (m == MAP_FAILED || mprotect(m, 0x1000, PROT_NONE) != 0 ||
+        mprotect(m + 2 * 0x1000, 0x1000, PROT_NONE) != 0) {
+        return NULL;
+    }
+    return m + 2 * 0x1000 - size;
+}
+
+static void guarded_free(uint8_t *img, size_t size) {
+    munmap(img + size - 2 * 0x1000, 3 * 0x1000);
+}
+
+/*
  * Offsets from a module are 64-bit words the file chooses; a value near 2^64
  * made "offset + length <= size" wrap and pass, and the loader read or wrote
  * far outside the image. Each case below did that before the bounds were
- * written as "offset <= size && length <= size - offset".
+ * written as "offset <= size && length <= size - offset"; on the guarded
+ * images, the old code faults.
  */
 TEST(mod0_relocation_target_near_top_of_address_space) {
-    uint8_t *img = malloc(0x1000);
+    uint8_t *img = guarded_image(0x1000);
+    ASSERT_TRUE(img != NULL);
     build_mod0_image(img);
     Elf64_Rela r = {0xFFFFFFFFFFFFFFF8ull, ELF64_R_INFO(0, R_AARCH64_RELATIVE), 0};
     memcpy(img + 0x300, &r, sizeof(r));
@@ -335,7 +356,7 @@ TEST(mod0_relocation_target_near_top_of_address_space) {
     ASSERT_EQ(mod0_relocate(img, 0x1000, 0x10000, &mi, &st), HOS_RESULT_SUCCESS);
     ASSERT_EQ(st.unsupported, 1); /* skipped, like any target outside the image */
     ASSERT_EQ(st.applied, 1);
-    free(img);
+    guarded_free(img, 0x1000);
 }
 
 TEST(mod0_rela_table_near_top_of_address_space) {
@@ -363,9 +384,10 @@ TEST(mod0_rel_entry_near_top_of_address_space) {
 }
 
 TEST(mod0_symtab_near_top_of_address_space) {
-    uint8_t *img = malloc(0x1000);
+    uint8_t *img = guarded_image(0x1000);
+    ASSERT_TRUE(img != NULL);
     build_mod0_image(img);
-    set_dyn(img, DT_SYMTAB, 0xFFFFFFFFFFFFFFE8ull); /* symbol 1 lands at offset 0 after wrap */
+    set_dyn(img, DT_SYMTAB, 0xFFFFFFFFFFFFFFE0ull); /* symbol 1 lands 8 bytes before the image */
     mod0_info mi;
     ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
     mod0_reloc_stats st;
@@ -374,21 +396,74 @@ TEST(mod0_symtab_near_top_of_address_space) {
     mod0_module m = {.image = img, .size = 0x1000, .base = 0x10000, .info = mi};
     uint64_t v;
     ASSERT_EQ(mod0_lookup(&m, "foo", &v), 0);
-    free(img);
+    guarded_free(img, 0x1000);
 }
 
 TEST(mod0_hash_tables_near_top_of_address_space) {
-    uint8_t *img = malloc(0x1000);
+    uint8_t *img = guarded_image(0x1000);
+    ASSERT_TRUE(img != NULL);
     build_mod0_image(img);
-    add_dyn(img, DT_HASH, 0xFFFFFFFFFFFFFFFCull);
+    add_dyn(img, DT_HASH, 0xFFFFFFFFFFFFFFF8ull); /* nchain would be read 4 bytes before */
     mod0_info mi;
     ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
     mod0_module m = {.image = img, .size = 0x1000, .base = 0x10000, .info = mi};
     uint64_t v = 0;
-    mod0_lookup(&m, "foo", &v); /* must not read outside the image */
+    /* the table is ignored and the symbols scanned instead: "foo" is still found */
+    ASSERT_EQ(mod0_lookup(&m, "foo", &v), 1);
+    ASSERT_EQ(v, 0x10700);
     set_dyn(img, DT_HASH, 0);
-    add_dyn(img, DT_GNU_HASH, 0xFFFFFFFFFFFFFFF8ull);
-    mod0_lookup(&m, "foo", &v);
+    add_dyn(img, DT_GNU_HASH, 0xFFFFFFFFFFFFFFF8ull); /* nbuckets 8 bytes before */
+    v = 0;
+    ASSERT_EQ(mod0_lookup(&m, "foo", &v), 1);
+    ASSERT_EQ(v, 0x10700);
+    guarded_free(img, 0x1000);
+}
+
+/* A GNU hash bucket table whose chains never terminate is walked once, not
+ * once per bucket: the symbol count comes from the highest chain alone. */
+TEST(mod0_gnu_hash_unterminated_chains_cost_one_walk) {
+    uint8_t *img = guarded_image(0x1000);
+    ASSERT_TRUE(img != NULL);
+    build_mod0_image(img);
+    /* header at 0x800: nbuckets 64, symoffset 1, bloom 0, shift 0; buckets all 1;
+     * chains (from 0x810 + 256) are zeros to the end of the image: no terminator */
+    put32(img + 0x800, 64);
+    put32(img + 0x804, 1);
+    put32(img + 0x808, 0);
+    put32(img + 0x80C, 0);
+    for (int b = 0; b < 64; b++) {
+        put32(img + 0x810 + 4 * b, 1);
+    }
+    memset(img + 0x910, 0, 0x1000 - 0x910);
+    add_dyn(img, DT_GNU_HASH, 0x800);
+    mod0_info mi;
+    ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
+    mod0_module m = {.image = img, .size = 0x1000, .base = 0x10000, .info = mi};
+    uint64_t v = 0;
+    mod0_lookup(&m, "foo", &v); /* one walk to the end of the image, then done */
+    guarded_free(img, 0x1000);
+}
+
+/* Entry sizes other than the ones the walkers read are refused, not misparsed. */
+TEST(mod0_rejects_wrong_entry_sizes) {
+    static const int64_t tags[3] = {DT_RELAENT, DT_RELENT, DT_SYMENT};
+    for (int i = 0; i < 3; i++) {
+        uint8_t *img = malloc(0x1000);
+        build_mod0_image(img);
+        add_dyn(img, tags[i], 12); /* 24, 16 and 24 are the sizes read */
+        mod0_info mi;
+        ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
+        mod0_reloc_stats st;
+        ASSERT_EQ(mod0_relocate(img, 0x1000, 0x10000, &mi, &st), S2PC_ERR_CORRUPT);
+        free(img);
+    }
+    uint8_t *img = malloc(0x1000);
+    build_mod0_image(img);
+    add_dyn(img, DT_RELAENT, sizeof(Elf64_Rela)); /* the right size is fine */
+    mod0_info mi;
+    ASSERT_EQ(mod0_find(img, 0x1000, &mi), HOS_RESULT_SUCCESS);
+    mod0_reloc_stats st;
+    ASSERT_EQ(mod0_relocate(img, 0x1000, 0x10000, &mi, &st), HOS_RESULT_SUCCESS);
     free(img);
 }
 
@@ -407,17 +482,22 @@ TEST(mod0_symbol_name_runs_to_the_image_end) {
 }
 
 /* Found by fuzz_mod0_relocate: an image shorter than a MOD0 header made the
- * "offset > size - 0x1C" test wrap and the magic was compared past the end. */
+ * "offset > size - 0x1C" test wrap, the magic was compared past the end and the
+ * header's fields read from there. The image ends at a guard page, and the
+ * magic is real, so the old code faults on the fields. */
 TEST(mod0_image_shorter_than_a_header) {
-    uint8_t img[23];
-    memset(img, 0, sizeof(img));
+    uint8_t *img = guarded_image(23);
+    ASSERT_TRUE(img != NULL);
+    memset(img, 0, 23);
     put32(img + 4, 8); /* points inside the image, but a header would not fit */
+    memcpy(img + 8, "MOD0", 4);
     mod0_info mi;
-    ASSERT_EQ(mod0_find(img, sizeof(img), &mi), HOS_RESULT_SUCCESS);
+    ASSERT_EQ(mod0_find(img, 23, &mi), HOS_RESULT_SUCCESS);
     ASSERT_EQ(mi.present, 0);
     put32(img + 4, 0x7FFFFFF0);
-    ASSERT_EQ(mod0_find(img, sizeof(img), &mi), HOS_RESULT_SUCCESS);
+    ASSERT_EQ(mod0_find(img, 23, &mi), HOS_RESULT_SUCCESS);
     ASSERT_EQ(mi.present, 0);
+    guarded_free(img, 23);
 }
 
 TEST(mod0_rejects_out_of_range_fields) {
