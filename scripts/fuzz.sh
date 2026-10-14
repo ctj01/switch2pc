@@ -4,11 +4,12 @@
 # parsers under test are portable C. A crash leaves its input in
 # build/fuzz/artifacts/<harness>/ and fails the script.
 #
-#   scripts/fuzz.sh [SECONDS | --runs N] [HARNESS...]   (default: 60 s each, all three)
+#   scripts/fuzz.sh [SECONDS | --runs [N]] [HARNESS...]   (default: 60 s each, all three)
 #
-# --runs N is the deterministic form (fixed seed, N iterations) CI uses for pull
-# requests and branches, so a latent bug cannot turn an unrelated change red at
-# random; the time-boxed form runs on main with its corpus kept between runs.
+# --runs N is the deterministic form (fixed seed, N iterations, a million by
+# default: about half a minute) CI uses for pull requests and branches, so a
+# latent bug cannot turn an unrelated change red at random; the time-boxed form
+# runs on main with its corpus kept between runs.
 # Each run's output goes to build/fuzz/artifacts/<harness>/log.txt.
 set -euo pipefail
 
@@ -16,8 +17,13 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 mode=(-max_total_time=60)
 if [ "${1:-}" = "--runs" ]; then
-    mode=(-seed=1 -runs="${2:-50000}")
-    shift 2
+    shift
+    runs=1000000
+    if [ $# -gt 0 ] && [ "$1" -eq "$1" ] 2> /dev/null; then
+        runs=$1
+        shift
+    fi
+    mode=(-seed=1 -runs="$runs")
 elif [ $# -gt 0 ]; then
     mode=(-max_total_time="$1")
     shift
