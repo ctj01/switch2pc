@@ -1,0 +1,126 @@
+{
+ "gpu:texture-format:0x46": {
+  "apps": [
+   "ftpd"
+  ],
+  "number": 18,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/18"
+ },
+ "ipc:applet:ICommonStateGetter:40": {
+  "apps": [
+   "switchident"
+  ],
+  "number": 19,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/19"
+ },
+ "ipc:applet:ILibraryAppletCreator:0": {
+  "apps": [
+   "account",
+   "software-keyboard"
+  ],
+  "number": 14,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/14"
+ },
+ "ipc:applet:ILibraryAppletCreator:10": {
+  "apps": [
+   "software-keyboard"
+  ],
+  "number": 20,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/20"
+ },
+ "ipc:ns:am2:7998": {
+  "apps": [
+   "switchident"
+  ],
+  "number": 21,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/21"
+ },
+ "ipc:set:sys:68": {
+  "apps": [
+   "switchident"
+  ],
+  "number": 22,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/22"
+ },
+ "ipc:sm::65100": {
+  "apps": [
+   "nx-shell"
+  ],
+  "number": 23,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/23"
+ },
+ "service:clkrst": {
+  "apps": [
+   "noods",
+   "switchident"
+  ],
+  "number": 15,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/15"
+ },
+ "service:gpio": {
+  "apps": [
+   "switchident"
+  ],
+  "number": 24,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/24"
+ },
+ "service:hid:dbg": {
+  "apps": [
+   "switchident"
+  ],
+  "number": 25,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/25"
+ },
+ "service:ts": {
+  "apps": [
+   "hbmenu",
+   "switchident"
+  ],
+  "number": 16,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/16"
+ },
+ "service:usb:hs": {
+  "apps": [
+   "nx-shell"
+  ],
+  "number": 26,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/26"
+ },
+ "service:wlan:inf": {
+  "apps": [
+   "switchident"
+  ],
+  "number": 27,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/27"
+ },
+ "sockopt:0xffff:0x400": {
+  "apps": [
+   "hb-appstore"
+  ],
+  "number": 28,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/28"
+ },
+ "sockopt:0xffff:0x800": {
+  "apps": [
+   "curl-example",
+   "hb-appstore"
+  ],
+  "number": 17,
+  "state": "open",
+  "url": "https://github.com/ctj01/switch2pc/issues/17"
+ }
+}
