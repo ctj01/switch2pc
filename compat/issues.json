@@ -1,12 +1,4 @@
 {
- "gpu:texture-format:0x46": {
-  "apps": [
-   "ftpd"
-  ],
-  "number": 18,
-  "state": "open",
-  "url": "https://github.com/ctj01/switch2pc/issues/18"
- },
  "ipc:applet:ICommonStateGetter:40": {
   "apps": [
    "switchident"
@@ -53,7 +45,7 @@
    "nx-shell"
   ],
   "number": 23,
-  "state": "open",
+  "state": "closed",
   "url": "https://github.com/ctj01/switch2pc/issues/23"
  },
  "service:clkrst": {
