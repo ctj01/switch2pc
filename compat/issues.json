@@ -10,7 +10,9 @@
  "ipc:applet:ILibraryAppletCreator:0": {
   "apps": [
    "account",
-   "software-keyboard"
+   "sdl2-simple",
+   "software-keyboard",
+   "spacenx"
   ],
   "number": 14,
   "state": "open",
