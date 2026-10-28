@@ -1,6 +1,6 @@
 {
- "generated_at": "2026-10-27T08:44:09Z",
- "switch2pc_commit": "c115c01",
+ "generated_at": "2026-10-28T09:23:14Z",
+ "switch2pc_commit": "d62087e",
  "counts": {
   "build-failed": 0,
   "crash": 1,
@@ -18,7 +18,7 @@
    "category": "demo",
    "notes": "libnx console template: prints to the console and exits on Plus.",
    "level": "runs",
-   "frames": 2611,
+   "frames": 2620,
    "seconds": 5.0,
    "exit_status": 0,
    "blockers": [],
@@ -29,15 +29,15 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/libnx-application.nro\", entries at 0x8028000",
     "[s2pc hosrun] I: 1 module, 206 patches (23 svc, 11 counter), 0 relocations (0 unresolved, 0 relr applied, 368 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.7Bxioej7Jy/input.txt: 1 steps",
-    "[s2pc input] I: script: exit at 5015 ms",
+    "[s2pc input] I: input script /tmp/tmp.n7lB8s6YL3/input.txt: 1 steps",
+    "[s2pc input] I: script: exit at 5002 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 2611"
+    "[s2pc vi   ] I: frames presented: 2620"
    ],
    "thumbnail": "docs/compat/libnx-application.png",
    "build_seconds": 1,
-   "frame": "frame_2610.ppm"
+   "frame": "frame_2620.ppm"
   },
   {
    "name": "sdl2-simple",
@@ -48,15 +48,10 @@
    "category": "demo",
    "notes": "SDL2 renderer (devkitPro's Switch SDL2, GL-backed) drawing coloured rectangles; SDL turns the applet exit request into SDL_QUIT, which this example ignores, so the input script presses Plus, its own exit button.",
    "level": "runs",
-   "frames": 144,
+   "frames": 147,
    "seconds": 6.1,
    "exit_status": 0,
-   "blockers": [
-    {
-     "key": "ipc:applet:ILibraryAppletCreator:0",
-     "line": "[s2pc ipc  ] W: applet:ILibraryAppletCreator: command 0 not implemented (in 8 bytes, 0 buffers)"
-    }
-   ],
+   "blockers": [],
    "crash": null,
    "log_tail": [
     "[s2pc hosrun] I: sdl2-simple.nro: sdl2-simple by Unspecified Author",
@@ -64,11 +59,10 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/sdl2-simple.nro\", entries at 0x867f000",
     "[s2pc hosrun] I: 1 module, 256 patches (29 svc, 17 counter), 0 relocations (0 unresolved, 0 relr applied, 17163 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.UDOOiJ5Ecc/input.txt: 3 steps",
-    "[s2pc ipc  ] W: applet:ILibraryAppletCreator: command 0 not implemented (in 8 bytes, 0 buffers)",
+    "[s2pc input] I: input script /tmp/tmp.LZ7jJonySg/input.txt: 3 steps",
     "[s2pc draw ] I: fragment stage on 4 threads",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 144"
+    "[s2pc vi   ] I: frames presented: 147"
    ],
    "thumbnail": "docs/compat/sdl2-simple.png",
    "build_seconds": 2,
@@ -83,7 +77,7 @@
    "category": "utility",
    "notes": "The homebrew menu: software-rendered framebuffer, lists sdmc:/switch, nxlink listener.",
    "level": "runs",
-   "frames": 393,
+   "frames": 396,
    "seconds": 8.0,
    "exit_status": 0,
    "blockers": [
@@ -100,13 +94,13 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/hbmenu.nro\", entries at 0x8260000",
     "[s2pc hosrun] I: 1 module, 290 patches (29 svc, 17 counter), 0 relocations (0 unresolved, 0 relr applied, 3083 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.958grF7LdS/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.zeLS0D1b8K/input.txt: 1 steps",
     "[s2pc sm   ] W: GetService(ts): not registered",
     "[s2pc pl   ] I: shared font: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (759720 bytes)",
-    "[s2pc input] I: script: exit at 8010 ms",
+    "[s2pc input] I: script: exit at 8000 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 393"
+    "[s2pc vi   ] I: frames presented: 396"
    ],
    "thumbnail": "docs/compat/hbmenu.png",
    "build_seconds": 6,
@@ -121,7 +115,7 @@
    "category": "demo",
    "notes": "OpenGL ES through Mesa (nouveau) and EGL: one shaded triangle.",
    "level": "runs",
-   "frames": 2118,
+   "frames": 2101,
    "seconds": 8.0,
    "exit_status": 0,
    "blockers": [],
@@ -132,16 +126,16 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/opengl-triangle.nro\", entries at 0x85aa000",
     "[s2pc hosrun] I: 1 module, 215 patches (24 svc, 12 counter), 0 relocations (0 unresolved, 0 relr applied, 17256 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.KOxixoNLtG/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.peP4jcAuON/input.txt: 1 steps",
     "[s2pc draw ] I: fragment stage on 4 threads",
-    "[s2pc input] I: script: exit at 8010 ms",
+    "[s2pc input] I: script: exit at 8006 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 2118"
+    "[s2pc vi   ] I: frames presented: 2101"
    ],
    "thumbnail": "docs/compat/opengl-triangle.png",
    "build_seconds": 1,
-   "frame": "frame_2110.ppm"
+   "frame": "frame_2100.ppm"
   },
   {
    "name": "playtone",
@@ -152,7 +146,7 @@
    "category": "demo",
    "notes": "audout: plays tones when buttons are pressed (console UI).",
    "level": "runs",
-   "frames": 4196,
+   "frames": 4138,
    "seconds": 8.0,
    "exit_status": 0,
    "blockers": [],
@@ -163,15 +157,15 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/playtone.nro\", entries at 0x8036000",
     "[s2pc hosrun] I: 1 module, 219 patches (24 svc, 11 counter), 0 relocations (0 unresolved, 0 relr applied, 387 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.oOlgWxgVSW/input.txt: 5 steps",
+    "[s2pc input] I: input script /tmp/tmp.anQvocso0l/input.txt: 5 steps",
     "[s2pc input] I: script: exit at 8005 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 4196"
+    "[s2pc vi   ] I: frames presented: 4138"
    ],
    "thumbnail": "docs/compat/playtone.png",
    "build_seconds": 1,
-   "frame": "frame_4190.ppm"
+   "frame": "frame_4130.ppm"
   },
   {
    "name": "deko-basic",
@@ -182,7 +176,7 @@
    "category": "demo",
    "notes": "deko3d: clears the screen with a changing colour.",
    "level": "runs",
-   "frames": 796,
+   "frames": 791,
    "seconds": 8.0,
    "exit_status": 0,
    "blockers": [],
@@ -194,12 +188,12 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/deko-basic.nro\", entries at 0x8049000",
     "[s2pc hosrun] I: 1 module, 232 patches (23 svc, 15 counter), 0 relocations (0 unresolved, 0 relr applied, 395 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.viph7YIoja/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.Q6rA5zxj9B/input.txt: 1 steps",
     "[s2pc draw ] I: fragment stage on 4 threads",
-    "[s2pc input] I: script: exit at 8009 ms",
+    "[s2pc input] I: script: exit at 8001 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 796"
+    "[s2pc vi   ] I: frames presented: 791"
    ],
    "thumbnail": "docs/compat/deko-basic.png",
    "build_seconds": 1,
@@ -214,7 +208,7 @@
    "category": "demo",
    "notes": "hid: prints the buttons and sticks to the console.",
    "level": "runs",
-   "frames": 3128,
+   "frames": 3138,
    "seconds": 6.0,
    "exit_status": 0,
    "blockers": [],
@@ -225,15 +219,15 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/read-controls.nro\", entries at 0x8034000",
     "[s2pc hosrun] I: 1 module, 206 patches (23 svc, 11 counter), 0 relocations (0 unresolved, 0 relr applied, 387 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.3fxqmVwVcx/input.txt: 5 steps",
-    "[s2pc input] I: script: exit at 6015 ms",
+    "[s2pc input] I: input script /tmp/tmp.pZcKcKMyXo/input.txt: 5 steps",
+    "[s2pc input] I: script: exit at 6010 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 3128"
+    "[s2pc vi   ] I: frames presented: 3138"
    ],
    "thumbnail": "docs/compat/read-controls.png",
    "build_seconds": 1,
-   "frame": "frame_3120.ppm"
+   "frame": "frame_3130.ppm"
   },
   {
    "name": "simplegfx",
@@ -244,7 +238,7 @@
    "category": "demo",
    "notes": "libnx framebuffer: fills the screen with a gradient.",
    "level": "runs",
-   "frames": 2183,
+   "frames": 2205,
    "seconds": 6.0,
    "exit_status": 0,
    "blockers": [],
@@ -255,15 +249,15 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/simplegfx.nro\", entries at 0x8020000",
     "[s2pc hosrun] I: 1 module, 206 patches (23 svc, 11 counter), 0 relocations (0 unresolved, 0 relr applied, 345 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.qlTTY7OZGw/input.txt: 1 steps",
-    "[s2pc input] I: script: exit at 6016 ms",
+    "[s2pc input] I: input script /tmp/tmp.DJLL3sIq5M/input.txt: 1 steps",
+    "[s2pc input] I: script: exit at 6000 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 2183"
+    "[s2pc vi   ] I: frames presented: 2205"
    ],
    "thumbnail": "docs/compat/simplegfx.png",
    "build_seconds": 1,
-   "frame": "frame_2180.ppm"
+   "frame": "frame_2200.ppm"
   },
   {
    "name": "romfs-example",
@@ -274,7 +268,7 @@
    "category": "demo",
    "notes": "fs: reads a file from its own RomFS and prints it.",
    "level": "runs",
-   "frames": 2633,
+   "frames": 2630,
    "seconds": 5.0,
    "exit_status": 0,
    "blockers": [],
@@ -286,11 +280,11 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/romfs-example.nro\", entries at 0x803c000",
     "[s2pc hosrun] I: 1 module, 210 patches (23 svc, 12 counter), 0 relocations (0 unresolved, 0 relr applied, 401 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.ebnUpP1jqx/input.txt: 1 steps",
-    "[s2pc input] I: script: exit at 5012 ms",
+    "[s2pc input] I: input script /tmp/tmp.dp1Xk7BhK1/input.txt: 1 steps",
+    "[s2pc input] I: script: exit at 5000 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 2633"
+    "[s2pc vi   ] I: frames presented: 2630"
    ],
    "thumbnail": "docs/compat/romfs-example.png",
    "build_seconds": 0,
@@ -321,9 +315,9 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/curl-example.nro\", entries at 0x80ad000",
     "[s2pc hosrun] I: 1 module, 301 patches (23 svc, 13 counter), 0 relocations (0 unresolved, 0 relr applied, 900 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.gYrve1JynT/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.oicMkf5lsK/input.txt: 1 steps",
     "[s2pc bsd  ] W: setsockopt(level 0xffff, option 0x800) unknown",
-    "[s2pc input] I: script: exit at 10014 ms",
+    "[s2pc input] I: script: exit at 10000 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest"
    ],
    "thumbnail": null,
@@ -339,7 +333,7 @@
    "category": "utility",
    "notes": "FTP server: deko3d-backed Dear ImGui UI, sockets, exits on Plus. Pinned past v3.2.1 (whose FreeBSD collate.c has old-style definitions GCC 15 rejects); its assets need zstd and ImageMagick, installed with apt in the container.",
    "level": "runs",
-   "frames": 160,
+   "frames": 156,
    "seconds": 10.1,
    "exit_status": 0,
    "blockers": [],
@@ -371,14 +365,14 @@
     "[s2pc draw ] W: texture format 0x46 layout 3 (504x504, 1 levels) not supported",
     "[s2pc draw ] W: texture format 0x46 layout 3 (504x504, 1 levels) not supported",
     "[s2pc draw ] W: texture format 0x46 layout 3 (504x504, 1 levels) not supported",
-    "[s2pc input] I: script: exit at 10008 ms",
+    "[s2pc input] I: script: exit at 10012 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 160"
+    "[s2pc vi   ] I: frames presented: 156"
    ],
    "thumbnail": "docs/compat/ftpd.png",
-   "build_seconds": 32,
-   "frame": "frame_0160.ppm"
+   "build_seconds": 37,
+   "frame": "frame_0150.ppm"
   },
   {
    "name": "hb-appstore",
@@ -409,11 +403,11 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/hb-appstore.nro\", entries at 0x8c0e000",
     "[s2pc hosrun] I: 1 module, 349 patches (30 svc, 17 counter), 0 relocations (0 unresolved, 0 relr applied, 22732 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.dEnJqpJ48V/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.SYFiy0i4bu/input.txt: 1 steps",
     "[s2pc draw ] I: fragment stage on 4 threads",
     "[s2pc bsd  ] W: setsockopt(level 0xffff, option 0x800) unknown",
     "[s2pc bsd  ] W: setsockopt(level 0xffff, option 0x400) unknown",
-    "[s2pc input] I: script: exit at 12005 ms",
+    "[s2pc input] I: script: exit at 12001 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest"
    ],
    "thumbnail": "docs/compat/hb-appstore.png",
@@ -449,18 +443,18 @@
    ],
    "crash": "fatal SIGSEGV (code 1) in game context",
    "log_tail": [
-    "[s2pc trap ] E:   x8  0x0000000000000087  x9  0x0000ffa99b832b50",
+    "[s2pc trap ] E:   x8  0x0000000000000087  x9  0x0000ff1e39419b50",
     "[s2pc trap ] E:   x10 0x0000000000000002  x11 000000000000000000",
-    "[s2pc trap ] E:   x12 0x0000ffa99b8286c0  x13 0x000000000000001e",
+    "[s2pc trap ] E:   x12 0x0000ff1e3940f6c0  x13 0x000000000000001e",
     "[s2pc trap ] E:   x14 0x000000000004f0cd  x15 0x00000030fffffe38",
-    "[s2pc trap ] E:   x16 0x00000000080a1340  x17 0x0000ffa99b45c880",
+    "[s2pc trap ] E:   x16 0x00000000080a1340  x17 0x0000ff1e3903c880",
     "[s2pc trap ] E:   x18 0x0000000000000011  x19 0x000000000000012b",
     "[s2pc trap ] E:   x20 0x00000000ffffffff  x21 0xffffffffffffffff",
-    "[s2pc trap ] E:   x22 0x0000003086aead80  x23 000000000000000000",
+    "[s2pc trap ] E:   x22 0x00000030f30ffd80  x23 000000000000000000",
     "[s2pc trap ] E:   x24 000000000000000000  x25 0xffffffffffffffff",
-    "[s2pc trap ] E:   x26 0x0000003086aeaf80  x27 0x0000003086aeade0",
-    "[s2pc trap ] E:   x28 0x0000000000000002  x29 0x0000003086aeadf0",
-    "[s2pc trap ] E:   thread handle 0x12b tid 4336",
+    "[s2pc trap ] E:   x26 0x00000030f30fff80  x27 0x00000030f30ffde0",
+    "[s2pc trap ] E:   x28 0x0000000000000002  x29 0x00000030f30ffdf0",
+    "[s2pc trap ] E:   thread handle 0x12b tid 4249",
     "[s2pc mem  ] I: memory map (17 regions):",
     "[s2pc mem  ] I:   0x000008000000 - 0x00000863a000  Code       r-x attr 0",
     "[s2pc mem  ] I:   0x00000863a000 - 0x000008826000  Code       r-- attr 0",
@@ -468,17 +462,17 @@
     "[s2pc mem  ] I:   0x00000886b000 - 0x000008897000  CodeData   rw- attr 0",
     "[s2pc mem  ] I:   0x000008897000 - 0x000008898000  Code       r-x attr 0",
     "[s2pc mem  ] I:   0x000008898000 - 0x000008899000  CodeData   rw- attr 0",
-    "[s2pc mem  ] I:   0x00051bd9c000 - 0x00051bddc000  Shared     r-- attr 0",
-    "[s2pc mem  ] I:   0x000a3d84f000 - 0x000a3e94f000  Shared     r-- attr 0",
     "[s2pc mem  ] I:   0x001000000000 - 0x001000025000  Normal     rw- attr 0",
     "[s2pc mem  ] I:   0x001000025000 - 0x001000259000  Normal     rw- attr 0x1",
     "[s2pc mem  ] I:   0x001000259000 - 0x00100025a000  Normal     rw- attr 0",
     "[s2pc mem  ] I:   0x00100025a000 - 0x00100026b000  Normal     --- attr 0x1",
     "[s2pc mem  ] I:   0x00100026b000 - 0x0010cc200000  Normal     rw- attr 0",
-    "[s2pc mem  ] I:   0x003086adb000 - 0x003086aec000  Stack      rw- attr 0",
+    "[s2pc mem  ] I:   0x0030f30f0000 - 0x0030f3101000  Stack      rw- attr 0",
     "[s2pc mem  ] I:   0x0030ff800000 - 0x003100000000  Stack      rw- attr 0",
-    "[s2pc mem  ] I:   0x003665d37000 - 0x003665d38000  Shared     r-- attr 0",
-    "[s2pc mem  ] I:   0x003800000000 - 0x003804000000  ThreadLoc  rw- attr 0"
+    "[s2pc mem  ] I:   0x003800000000 - 0x003804000000  ThreadLoc  rw- attr 0",
+    "[s2pc mem  ] I:   0x0048c139c000 - 0x0048c13dc000  Shared     r-- attr 0",
+    "[s2pc mem  ] I:   0x006236b8c000 - 0x006237c8c000  Shared     r-- attr 0",
+    "[s2pc mem  ] I:   0x007149f2f000 - 0x007149f30000  Shared     r-- attr 0"
    ],
    "thumbnail": null,
    "build_seconds": 16
@@ -492,7 +486,7 @@
    "category": "utility",
    "notes": "System information viewer: SDL2 renderer, SDL_ttf, set:sys, nifm, psm, ts.",
    "level": "runs",
-   "frames": 309,
+   "frames": 304,
    "seconds": 8.1,
    "exit_status": 0,
    "blockers": [
@@ -542,7 +536,7 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/switchident.nro\", entries at 0x88b9000",
     "[s2pc hosrun] I: 1 module, 324 patches (29 svc, 17 counter), 0 relocations (0 unresolved, 0 relr applied, 19201 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.vk2VosaZAW/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.SlXScuBJY5/input.txt: 1 steps",
     "[s2pc sm   ] W: GetService(set:cal): not registered",
     "[s2pc sm   ] W: GetService(spl:): not registered",
     "[s2pc sm   ] W: GetService(clkrst): not registered",
@@ -568,7 +562,7 @@
     "[s2pc input] I: script: exit at 8016 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 309"
+    "[s2pc vi   ] I: frames presented: 304"
    ],
    "thumbnail": "docs/compat/switchident.png",
    "build_seconds": 3,
@@ -583,7 +577,7 @@
    "category": "emulator",
    "notes": "DS emulator: libnx + EGL/Mesa UI, reaches its file browser without a ROM. Only a rolling 'release' tag upstream, so pinned by sha.",
    "level": "renders",
-   "frames": 8800,
+   "frames": 8700,
    "seconds": 70.0,
    "exit_status": 124,
    "blockers": [
@@ -599,15 +593,15 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/noods.nro\", entries at 0x8aa0000",
     "[s2pc hosrun] I: 1 module, 250 patches (30 svc, 15 counter), 0 relocations (0 unresolved, 0 relr applied, 22785 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.EhvkUP1jS8/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.8leCO5mGhL/input.txt: 1 steps",
     "[s2pc sm   ] W: GetService(clkrst): not registered",
     "[s2pc draw ] I: fragment stage on 4 threads",
-    "[s2pc input] I: script: exit at 10008 ms",
+    "[s2pc input] I: script: exit at 10007 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest"
    ],
    "thumbnail": "docs/compat/noods.png",
    "build_seconds": 36,
-   "frame": "frame_8810.ppm",
+   "frame": "frame_8740.ppm",
    "note": "did not exit on the exit request"
   },
   {
@@ -619,7 +613,7 @@
    "category": "emulator",
    "notes": "GBA emulator: libnx + EGL/Mesa GUI, file browser without a ROM.",
    "level": "runs",
-   "frames": 1818,
+   "frames": 1823,
    "seconds": 15.0,
    "exit_status": 0,
    "blockers": [],
@@ -631,16 +625,16 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/mgba.nro\", entries at 0x8704000",
     "[s2pc hosrun] I: 1 module, 274 patches (29 svc, 15 counter), 0 relocations (0 unresolved, 0 relr applied, 28038 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.yedOh5ftkD/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.CdOaCNp9iu/input.txt: 1 steps",
     "[s2pc draw ] I: fragment stage on 4 threads",
-    "[s2pc input] I: script: exit at 15003 ms",
+    "[s2pc input] I: script: exit at 15002 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 1818"
+    "[s2pc vi   ] I: frames presented: 1823"
    ],
    "thumbnail": "docs/compat/mgba.png",
    "build_seconds": 31,
-   "frame": "frame_1810.ppm"
+   "frame": "frame_1820.ppm"
   },
   {
    "name": "spacenx",
@@ -662,7 +656,7 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/spacenx.nro\", entries at 0x868a000",
     "[s2pc hosrun] I: 1 module, 256 patches (29 svc, 17 counter), 0 relocations (0 unresolved, 0 relr applied, 17163 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.L8WA23zrRK/input.txt: 5 steps",
+    "[s2pc input] I: input script /tmp/tmp.aW5vSRN9XP/input.txt: 5 steps",
     "[s2pc draw ] I: fragment stage on 4 threads",
     "[s2pc svc  ] I: svcExitProcess",
     "[s2pc vi   ] I: frames presented: 82"
@@ -691,9 +685,9 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/vgedit.nro\", entries at 0x9632000",
     "[s2pc hosrun] I: 1 module, 257 patches (30 svc, 17 counter), 0 relocations (0 unresolved, 0 relr applied, 22191 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.o6idIjXzDh/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.U8Dqok6BUu/input.txt: 1 steps",
     "[s2pc draw ] I: fragment stage on 4 threads",
-    "[s2pc input] I: script: exit at 10011 ms",
+    "[s2pc input] I: script: exit at 10007 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
     "[s2pc vi   ] I: frames presented: 1"
@@ -710,7 +704,7 @@
    "category": "demo",
    "notes": "OpenGL ES 2 gears through Mesa: more draw calls and depth than the triangle.",
    "level": "runs",
-   "frames": 650,
+   "frames": 632,
    "seconds": 8.1,
    "exit_status": 0,
    "blockers": [],
@@ -721,16 +715,16 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/es2gears.nro\", entries at 0x859a000",
     "[s2pc hosrun] I: 1 module, 216 patches (24 svc, 14 counter), 0 relocations (0 unresolved, 0 relr applied, 16506 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.ZlPEK4MAs3/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.uTuvr2JGcZ/input.txt: 1 steps",
     "[s2pc draw ] I: fragment stage on 4 threads",
     "[s2pc input] I: script: exit at 8014 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 650"
+    "[s2pc vi   ] I: frames presented: 632"
    ],
    "thumbnail": "docs/compat/es2gears.png",
    "build_seconds": 2,
-   "frame": "frame_0650.ppm"
+   "frame": "frame_0630.ppm"
   },
   {
    "name": "textured-cube",
@@ -741,8 +735,8 @@
    "category": "demo",
    "notes": "OpenGL ES textured cube through Mesa: texture upload and sampling.",
    "level": "runs",
-   "frames": 295,
-   "seconds": 8.0,
+   "frames": 297,
+   "seconds": 8.1,
    "exit_status": 0,
    "blockers": [],
    "crash": null,
@@ -752,12 +746,12 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/textured-cube.nro\", entries at 0x85b5000",
     "[s2pc hosrun] I: 1 module, 218 patches (24 svc, 15 counter), 0 relocations (0 unresolved, 0 relr applied, 17257 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.wWhdkVqmbx/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.YeBh2OftZY/input.txt: 1 steps",
     "[s2pc draw ] I: fragment stage on 4 threads",
-    "[s2pc input] I: script: exit at 8010 ms",
+    "[s2pc input] I: script: exit at 8012 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 295"
+    "[s2pc vi   ] I: frames presented: 297"
    ],
    "thumbnail": "docs/compat/textured-cube.png",
    "build_seconds": 3,
@@ -772,7 +766,7 @@
    "category": "demo",
    "notes": "audren:u, the audio renderer (not audout): a blocker for most games with music.",
    "level": "runs",
-   "frames": 3126,
+   "frames": 3098,
    "seconds": 6.0,
    "exit_status": 0,
    "blockers": [],
@@ -783,15 +777,15 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/audren-simple.nro\", entries at 0x8056000",
     "[s2pc hosrun] I: 1 module, 214 patches (23 svc, 11 counter), 0 relocations (0 unresolved, 0 relr applied, 389 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.i7p16rMtvU/input.txt: 1 steps",
-    "[s2pc input] I: script: exit at 6006 ms",
+    "[s2pc input] I: input script /tmp/tmp.9wt5wld4ZU/input.txt: 1 steps",
+    "[s2pc input] I: script: exit at 6000 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 3126"
+    "[s2pc vi   ] I: frames presented: 3098"
    ],
    "thumbnail": "docs/compat/audren-simple.png",
    "build_seconds": 1,
-   "frame": "frame_3120.ppm"
+   "frame": "frame_3090.ppm"
   },
   {
    "name": "shared-font",
@@ -802,7 +796,7 @@
    "category": "demo",
    "notes": "pl:u: draws text with the system's shared font.",
    "level": "runs",
-   "frames": 2374,
+   "frames": 2341,
    "seconds": 6.0,
    "exit_status": 0,
    "blockers": [],
@@ -813,16 +807,16 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/shared-font.nro\", entries at 0x81b2000",
     "[s2pc hosrun] I: 1 module, 212 patches (23 svc, 11 counter), 0 relocations (0 unresolved, 0 relr applied, 1882 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.zQJXBzDz4l/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.psuogMXsOf/input.txt: 1 steps",
     "[s2pc pl   ] I: shared font: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (759720 bytes)",
-    "[s2pc input] I: script: exit at 6000 ms",
+    "[s2pc input] I: script: exit at 6012 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 2374"
+    "[s2pc vi   ] I: frames presented: 2341"
    ],
    "thumbnail": "docs/compat/shared-font.png",
    "build_seconds": 1,
-   "frame": "frame_2370.ppm"
+   "frame": "frame_2340.ppm"
   },
   {
    "name": "account",
@@ -833,7 +827,7 @@
    "category": "demo",
    "notes": "acc:u1: lists the users and their profile images.",
    "level": "runs",
-   "frames": 2608,
+   "frames": 2619,
    "seconds": 5.0,
    "exit_status": 0,
    "blockers": [
@@ -849,16 +843,16 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/account.nro\", entries at 0x8035000",
     "[s2pc hosrun] I: 1 module, 227 patches (23 svc, 12 counter), 0 relocations (0 unresolved, 0 relr applied, 387 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.f9qCZl9U93/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.EorABle6B1/input.txt: 1 steps",
     "[s2pc ipc  ] W: applet:ILibraryAppletCreator: command 0 not implemented (in 8 bytes, 0 buffers)",
     "[s2pc input] I: script: exit at 5013 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 2608"
+    "[s2pc vi   ] I: frames presented: 2619"
    ],
    "thumbnail": "docs/compat/account.png",
    "build_seconds": 1,
-   "frame": "frame_2600.ppm"
+   "frame": "frame_2610.ppm"
   },
   {
    "name": "save-example",
@@ -869,7 +863,7 @@
    "category": "demo",
    "notes": "fs: mounts save data for the current title and reads it.",
    "level": "runs",
-   "frames": 2607,
+   "frames": 2600,
    "seconds": 5.0,
    "exit_status": 0,
    "blockers": [],
@@ -880,11 +874,11 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/save-example.nro\", entries at 0x8035000",
     "[s2pc hosrun] I: 1 module, 222 patches (23 svc, 11 counter), 0 relocations (0 unresolved, 0 relr applied, 387 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.w7a3MSqN78/input.txt: 1 steps",
-    "[s2pc input] I: script: exit at 5014 ms",
+    "[s2pc input] I: input script /tmp/tmp.D6XMyFG6dd/input.txt: 1 steps",
+    "[s2pc input] I: script: exit at 5001 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 2607"
+    "[s2pc vi   ] I: frames presented: 2600"
    ],
    "thumbnail": "docs/compat/save-example.png",
    "build_seconds": 1,
@@ -899,7 +893,7 @@
    "category": "demo",
    "notes": "library applets: opens the software keyboard (swkbd) and prints what it returns.",
    "level": "runs",
-   "frames": 3147,
+   "frames": 3130,
    "seconds": 6.0,
    "exit_status": 0,
    "blockers": [
@@ -919,19 +913,19 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/software-keyboard.nro\", entries at 0x8037000",
     "[s2pc hosrun] I: 1 module, 220 patches (23 svc, 12 counter), 0 relocations (0 unresolved, 0 relr applied, 387 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.gbnGS704cr/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.iq4aCTHzX6/input.txt: 1 steps",
     "[s2pc ipc  ] W: applet:ILibraryAppletCreator: command 0 not implemented (in 8 bytes, 0 buffers)",
     "[s2pc ipc  ] W: applet:ILibraryAppletCreator: command 0 not implemented (in 8 bytes, 0 buffers)",
     "[s2pc ipc  ] W: applet:ILibraryAppletCreator: command 10 not implemented (in 8 bytes, 0 buffers)",
     "[s2pc ipc  ] W: applet:ILibraryAppletCreator: command 10 not implemented (in 8 bytes, 0 buffers)",
-    "[s2pc input] I: script: exit at 6013 ms",
+    "[s2pc input] I: script: exit at 6002 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 3147"
+    "[s2pc vi   ] I: frames presented: 3130"
    ],
    "thumbnail": "docs/compat/software-keyboard.png",
    "build_seconds": 1,
-   "frame": "frame_3140.ppm"
+   "frame": "frame_3130.ppm"
   },
   {
    "name": "sdl2-demo",
@@ -942,7 +936,7 @@
    "category": "demo",
    "notes": "SDL2 with SDL_image, SDL_ttf and SDL_mixer: images, text and music through the stock Switch SDL2.",
    "level": "runs",
-   "frames": 346,
+   "frames": 347,
    "seconds": 10.3,
    "exit_status": 0,
    "blockers": [],
@@ -954,12 +948,12 @@
     "[s2pc hosrun] I: homebrew ABI: argv \"sdmc:/switch/sdl2-demo.nro\", entries at 0x8a39000",
     "[s2pc hosrun] I: 1 module, 260 patches (30 svc, 17 counter), 0 relocations (0 unresolved, 0 relr applied, 20052 relr left to the module)",
     "[s2pc thread] I: main thread 0x100: entry 0x8000000 stack [0x30ff800000, 0x3100000000) tls 0x3800000000",
-    "[s2pc input] I: input script /tmp/tmp.bF3x4geY4D/input.txt: 1 steps",
+    "[s2pc input] I: input script /tmp/tmp.kybCVMm0Lr/input.txt: 1 steps",
     "[s2pc draw ] I: fragment stage on 4 threads",
-    "[s2pc input] I: script: exit at 10005 ms",
+    "[s2pc input] I: script: exit at 10011 ms",
     "[s2pc applet] I: exit requested; delivering AppletMessage_ExitRequest",
     "[s2pc svc  ] I: svcExitProcess",
-    "[s2pc vi   ] I: frames presented: 346"
+    "[s2pc vi   ] I: frames presented: 347"
    ],
    "thumbnail": "docs/compat/sdl2-demo.png",
    "build_seconds": 2,
