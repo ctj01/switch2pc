@@ -388,5 +388,18 @@
    "runs": 22
   },
   "total": 26
+ },
+ {
+  "date": "2026-11-12",
+  "generated_at": "2026-11-12T10:44:31Z",
+  "switch2pc_commit": "dacc853",
+  "counts": {
+   "build-failed": 0,
+   "crash": 1,
+   "boots": 0,
+   "renders": 3,
+   "runs": 22
+  },
+  "total": 26
  }
 ]
