@@ -401,5 +401,18 @@
    "runs": 22
   },
   "total": 26
+ },
+ {
+  "date": "2026-11-13",
+  "generated_at": "2026-11-13T10:35:58Z",
+  "switch2pc_commit": "2d8f11c",
+  "counts": {
+   "build-failed": 0,
+   "crash": 1,
+   "boots": 0,
+   "renders": 3,
+   "runs": 22
+  },
+  "total": 26
  }
 ]
