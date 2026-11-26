@@ -10,6 +10,7 @@
  "ipc:applet:ILibraryAppletCreator:0": {
   "apps": [
    "account",
+   "sdl2-simple",
    "software-keyboard"
   ],
   "number": 14,
